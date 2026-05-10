@@ -2,7 +2,7 @@
 
 This API provides an OpenAI-compatible interface to the Agentic FinSearch agent. Internal testers and automated workflows can interact with the agent using standard OpenAI client libraries.
 
-**Version:** 0.15.0
+**Version:** 0.16.0
 
 ## Base Configuration
 
@@ -391,7 +391,7 @@ Returns service status and version. No authentication required.
 ```json
 {
   "status": "healthy",
-  "version": "0.15.0"
+  "version": "0.16.0"
 }
 ```
 

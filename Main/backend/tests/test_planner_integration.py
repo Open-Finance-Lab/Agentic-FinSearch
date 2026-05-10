@@ -63,5 +63,5 @@ class TestPlannerIntegration:
         )
 
         assert plan.skill_name == "stock_fundamentals"
-        assert set(plan.tools_allowed) == {"get_stock_info", "get_stock_history", "get_earnings_info", "calculate"}
+        assert set(plan.tools_allowed) == {"get_stock_info", "get_stock_financials", "get_stock_history", "get_earnings_info", "calculate"}
         assert plan.max_turns == 5

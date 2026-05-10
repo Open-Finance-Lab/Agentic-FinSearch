@@ -65,7 +65,8 @@ async def create_fin_agent(model: str = "gpt-4o-mini",
                           user_timezone: Optional[str] = None,
                           user_time: Optional[str] = None,
                           allowed_tools: Optional[List[str]] = None,
-                          instructions_override: Optional[str] = None):
+                          instructions_override: Optional[str] = None,
+                          session_id: Optional[str] = None):
     """
     Create a financial agent with tools (URL scraping, SEC-EDGAR, filesystem).
 
@@ -84,15 +85,11 @@ async def create_fin_agent(model: str = "gpt-4o-mini",
     Yields:
         Agent instance configured with tools
     """
-    if instructions_override is not None:
-        instructions = instructions_override
-    else:
-        instructions = _prompt_builder.build(
-            current_url=current_url,
-            system_prompt=system_prompt,
-            user_timezone=user_timezone,
-            user_time=user_time,
-        )
+    # `instructions` is finalised after tool collection so PromptBuilder can
+    # filter the AVAILABLE TOOLS catalog against the actual tool registry for
+    # this request. instructions_override bypasses PromptBuilder entirely.
+    instructions: Optional[str] = instructions_override
+    tools_attached = allowed_tools is None or len(allowed_tools) > 0
 
     model_config = get_model_config(model)
     if not model_config:
@@ -128,9 +125,9 @@ async def create_fin_agent(model: str = "gpt-4o-mini",
 
     tools: List = []
 
-    # Skip tool collection entirely when plan specifies zero tools
-    if allowed_tools is not None and len(allowed_tools) == 0:
-        logging.info("[AGENT] Skill specifies zero tools — skipping tool collection")
+    # Skip tool collection entirely when plan specifies zero tools.
+    if not tools_attached:
+        logging.info("[AGENT] Skill specifies zero tools, skipping tool collection")
     else:
         url_tools = get_url_tools()
         tools.extend(url_tools)
@@ -217,14 +214,36 @@ async def create_fin_agent(model: str = "gpt-4o-mini",
                 f"[AGENT] Tool filter applied: {pre_filter_count} -> {len(tools)} "
                 f"(allowed: {allowed_tools})"
             )
-            # Override prompt tool list so the model only sees allowed tools
-            if allowed_tools:
-                tool_names = ", ".join(allowed_tools)
-                instructions += (
-                    f"\n\nCRITICAL TOOL RESTRICTION: For this request you may ONLY call "
-                    f"these tools: {tool_names}. All other tools listed above are "
-                    f"UNAVAILABLE. Calling any other tool will cause a fatal error."
-                )
+
+    # Build the system prompt now that the tool registry for this request is
+    # final, so PromptBuilder can render the AVAILABLE TOOLS catalog from the
+    # actual data-tool list (axiom output-protocol tools are added below and
+    # are intentionally excluded from the catalog).
+    if instructions is None:
+        instructions = _prompt_builder.build(
+            current_url=current_url,
+            system_prompt=system_prompt,
+            user_timezone=user_timezone,
+            user_time=user_time,
+            actual_tool_names=[t.name for t in tools],
+        )
+
+    # Output-protocol tools (e.g. report_claim) live in a separate prompt
+    # section and are deliberately not in scope here.
+    if tools_attached and allowed_tools is not None:
+        tool_names = ", ".join(allowed_tools)
+        instructions += (
+            f"\n\nTOOL SCOPE: For this request, the only data-gathering "
+            f"tools available to you are: {tool_names}. Other tools listed "
+            f"in the AVAILABLE TOOLS catalog are not attached to this run."
+        )
+
+    # Axiom claim-reporting tool is a session-bound logging hook, not a
+    # capability the planner chooses; add after the allow-list filter so the
+    # per-skill restriction can't strip it.
+    if session_id and tools_attached:
+        from axioms.tool import get_axiom_tools
+        tools.extend(get_axiom_tools(session_id))
 
     try:
         # Handle foundation models that don't support "system" roles

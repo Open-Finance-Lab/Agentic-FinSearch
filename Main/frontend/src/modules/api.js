@@ -450,6 +450,35 @@ function triggerAutoScrape(currentUrl) {
         });
 }
 
+// Layer 1 Validate: POST the current session to /api/axioms/validate/ and
+// return the per-claim verdicts for inline rendering.
+function validateClaims() {
+    return fetch(buildBackendUrl('/api/axioms/validate/'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ session_id: currentSessionId }),
+    })
+        .then((response) => {
+            if (!response.ok) {
+                throw new Error(`validate_claims HTTP ${response.status}`);
+            }
+            return response.json();
+        });
+}
+
+// Lightweight check: did the just-completed response record any ratio claims?
+// Used to decide whether to show the Validate button on a response bubble.
+function hasAxiomClaims() {
+    const params = currentSessionId ? `?session_id=${encodeURIComponent(currentSessionId)}` : '';
+    return fetch(buildBackendUrl(`/api/axioms/has_claims/${params}`), {
+        method: 'GET',
+        credentials: 'include',
+    })
+        .then((response) => (response.ok ? response.json() : { has_claims: false }))
+        .catch(() => ({ has_claims: false }));
+}
+
 export {
     postWebTextToServer,
     getChatResponse,
@@ -462,5 +491,7 @@ export {
     triggerAutoScrape,
     setAutoScrapePromise,
     waitForAutoScrape,
-    isAutoScrapeInProgress
+    isAutoScrapeInProgress,
+    validateClaims,
+    hasAxiomClaims
 };

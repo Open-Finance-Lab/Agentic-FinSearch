@@ -1,5 +1,7 @@
 // handlers.js
-import { appendChatElement, scrollChatToBottom } from './helpers.js';
+import { appendChatElement, scrollChatToBottom, validate_response } from './helpers.js';
+import { hasAxiomClaims } from './api.js';
+import { looksLikeValidationRequest } from './intent.js';
 import { getChatResponse, getChatResponseStream, waitForAutoScrape, isAutoScrapeInProgress } from './api.js';
 import { getSelectedModel, selectedModel } from './config.js';
 import { setCachedSources } from './sourcesCache.js';
@@ -330,6 +332,48 @@ function createActionButtons(
   return buttonContainer;
 }
 
+// Create a per-response Validate button. Shown only when the backend
+// reports that this response recorded one or more ratio claims (i.e.,
+// the response is about XBRL-validatable numbers).
+function _createValidateButton() {
+  const btn = document.createElement('button');
+  btn.className = 'action-button validate-button';
+  btn.title = 'Validate against SEC XBRL filing';
+  btn.textContent = 'Validate';
+  btn.onclick = () => {
+    btn.classList.add('action-button-clicked');
+    setTimeout(() => btn.classList.remove('action-button-clicked'), 200);
+    validate_response();
+  };
+  return btn;
+}
+
+function _attachAndMaybeAutoFire(container, autoFire) {
+  container.appendChild(_createValidateButton());
+  if (autoFire) validate_response();
+}
+
+function attachValidateButtonIfClaims(actionButtonsContainer, { knownFlag, autoFire = false } = {}) {
+  // Fast path: if the response payload already told us whether claims
+  // exist (has_axiom_claims from chat_response), skip the network call.
+  if (knownFlag === true) {
+    _attachAndMaybeAutoFire(actionButtonsContainer, autoFire);
+    return;
+  }
+  if (knownFlag === false) return;
+
+  // Streaming responses don't carry the flag yet — fall back to a quick GET.
+  hasAxiomClaims()
+    .then((data) => {
+      if (data && data.has_claims) {
+        _attachAndMaybeAutoFire(actionButtonsContainer, autoFire);
+      }
+    })
+    .catch((err) => {
+      console.debug('hasAxiomClaims check failed:', err);
+    });
+}
+
 // Function to create rating element
 function createRatingElement() {
   const ratingContainer = document.createElement('div');
@@ -487,7 +531,14 @@ async function handleChatResponse(question, promptMode = false, useStreaming = t
           if (responseElement.style.display === 'none') {
             responseElement.style.display = 'block';
           }
-          renderMarkdownContent(responseElement, fullResponse);
+          // Prefer server-wrapped content (contains data-claim-id spans
+          // for in-text Validate markings); fall back to the locally
+          // accumulated prose for backwards compatibility with older
+          // servers that don't yet emit `wrapped_content`.
+          renderMarkdownContent(
+            responseElement,
+            data?.wrapped_content ?? fullResponse
+          );
 
           // Create action row containing both action buttons and rating
           const actionRow = document.createElement('div');
@@ -501,6 +552,9 @@ async function handleChatResponse(question, promptMode = false, useStreaming = t
             useMCP,
             selectedModel
           );
+          attachValidateButtonIfClaims(actionButtons, {
+            autoFire: looksLikeValidationRequest(question),
+          });
           const ratingElement = createRatingElement();
 
           actionRow.appendChild(actionButtons);
@@ -620,6 +674,10 @@ async function handleChatResponse(question, promptMode = false, useStreaming = t
           useMCP,
           selectedModel
         );
+        attachValidateButtonIfClaims(actionButtons, {
+          knownFlag: data.has_axiom_claims,
+          autoFire: looksLikeValidationRequest(question),
+        });
         const ratingElement = createRatingElement();
 
         actionRow.appendChild(actionButtons);

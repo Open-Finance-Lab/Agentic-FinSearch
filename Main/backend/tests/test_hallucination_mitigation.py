@@ -5,10 +5,6 @@ verifies that prompt changes are in place.
 """
 import json
 from unittest.mock import MagicMock
-from pathlib import Path
-
-
-BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 
 # ── Calculator: EPS surprise scenario ───────────────────────────────
@@ -49,9 +45,7 @@ def test_synthesis_prompt_contains_anti_aggregation():
     assert "partial data" in _SYNTHESIS_SYSTEM
 
 
-def test_core_prompt_contains_calculation_rules():
+def test_core_prompt_contains_calculation_rules(core_prompt):
     """Verify core.md has CALCULATION RULES and references calculate()."""
-    core_path = BACKEND_DIR / "prompts" / "core.md"
-    content = core_path.read_text()
-    assert "CALCULATION RULES" in content
-    assert "calculate()" in content
+    assert "CALCULATION RULES" in core_prompt
+    assert "calculate()" in core_prompt

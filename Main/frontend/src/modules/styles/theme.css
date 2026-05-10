@@ -192,6 +192,29 @@
     background: rgba(34, 87, 102, 0.22);
 }
 
+.light-mode .source-card--xbrl {
+    background-color: #fef3c7;
+    border-color: rgba(217, 119, 6, 0.4);
+}
+
+.light-mode .source-card--xbrl:hover {
+    background-color: #fde68a;
+}
+
+.light-mode .source-card-thumbnail--xbrl {
+    background-color: #f59e0b;
+    color: #78350f;
+    border-color: rgba(217, 119, 6, 0.5);
+}
+
+.light-mode .source-card-xbrl-filename {
+    color: #92400e;
+}
+
+.light-mode .source-card--xbrl .source-card-title {
+    color: #78350f;
+}
+
 /* Source sections in light mode */
 .light-mode .source-section-header {
     color: #1a1a1a;

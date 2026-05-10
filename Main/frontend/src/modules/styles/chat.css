@@ -519,3 +519,45 @@
   text-align: center;
   width: 100%;
 }
+
+/* ── Layer 1 Validate (axiom engine) ─────────────────────────────── */
+
+.validate-button {
+  width: auto;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4ea1ff;
+  border: 1px solid rgba(78, 161, 255, 0.45);
+  letter-spacing: 0.2px;
+}
+
+.validate-button:hover {
+  background-color: rgba(78, 161, 255, 0.12);
+}
+
+/* Layer 1 Validate in-text markings. Each status underlines in its own
+ * color; FAILED additionally gets a wavy stroke and an ✗ suffix so the
+ * signal survives color-blindness and greyscale. */
+.claim-mark-failed {
+  color: #f85149;
+  text-decoration: underline wavy rgba(248, 81, 73, 0.9);
+  text-underline-offset: 3px;
+}
+
+.claim-mark-failed::after {
+  content: " \2717";  /* heavy ballot X */
+  font-weight: 600;
+}
+
+.claim-mark-verified {
+  color: #3fb950;
+  text-decoration: underline solid rgba(63, 185, 80, 0.9);
+  text-underline-offset: 3px;
+}
+
+.claim-mark-na {
+  color: #8b949e;
+  text-decoration: underline solid rgba(139, 148, 158, 0.9);
+  text-underline-offset: 3px;
+}
