@@ -26,6 +26,16 @@ def _cached_find_filing(ticker: str) -> Optional[Path]:
     + xbrl_source_url per claim, three lookups) does at most one glob."""
     return find_filing(ticker, FILINGS_DIR)
 
+
+@lru_cache(maxsize=16)
+def _cached_parse_filing(filepath: Path) -> List[dict]:
+    """parse_filing() walks the entire XBRL XML on every call. validate_session
+    invokes the resolver once per claim; for a 5-claim Validate over the same
+    filing that is 5 full re-parses without this cache. The returned list is
+    treated as read-only by all resolver code paths.
+    """
+    return parse_filing(filepath)
+
 # ---------------------------------------------------------------------------
 # USER CONTRIBUTION POINT — domain-knowledge tag preferences.
 #
@@ -172,7 +182,7 @@ def check_applicability(ratio: str, ticker: str) -> Optional[Dict[str, str]]:
     filing = _cached_find_filing(ticker)
     if filing is None:
         return None  # handled downstream as missing filing
-    facts = parse_filing(filing)
+    facts = _cached_parse_filing(filing)
     if not _filing_has_tag(facts, "AssetsCurrent"):
         return {
             "ratio": ratio,
@@ -204,7 +214,7 @@ def fetch_ground_truth(
         logger.warning("No local XBRL filing for ticker=%s", ticker)
         return {name: None for name in RATIO_TAG_MAP[ratio]}
 
-    facts = parse_filing(filing)
+    facts = _cached_parse_filing(filing)
 
     out: Dict[str, Optional[float]] = {}
     for input_name, tag_options in RATIO_TAG_MAP[ratio].items():

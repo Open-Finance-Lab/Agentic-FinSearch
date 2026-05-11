@@ -31,7 +31,7 @@ RUN uv venv --python 3.12 && \
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    DJANGO_SETTINGS_MODULE=django_config.settings \
+    DJANGO_SETTINGS_MODULE=django_config.settings_prod \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
     PIP_NO_CACHE_DIR=1 \
