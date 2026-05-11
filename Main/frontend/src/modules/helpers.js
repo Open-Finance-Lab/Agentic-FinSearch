@@ -1,6 +1,8 @@
 // helpers.js
-import { clearMessages, getSourceUrls, logQuestion } from './api.js';
+import { clearMessages, getSourceUrls, logQuestion, validateClaims } from './api.js';
+import { decorateClaimMarks } from './claimMarks.js';
 import { handleChatResponse, handleImageResponse } from './handlers.js';
+import { renderMarkdownContent } from './markdownRenderer.js';
 import {
     clearCachedSources,
     getCurrentPageUrl,
@@ -310,10 +312,56 @@ async function get_sources() {
         wrapper.textContent = fallbackInitial || '?';
     };
 
+    const buildXbrlCard = (safeMeta) => {
+        const filename = safeMeta.display_url || formatDisplayUrl(safeMeta.url) || 'xbrl-filing';
+        const titleText = safeMeta.title && safeMeta.title !== filename
+            ? safeMeta.title
+            : 'SEC XBRL Filing';
+
+        const cardLink = document.createElement('a');
+        cardLink.className = 'source-card source-card--xbrl';
+        cardLink.href = safeMeta.url;
+        cardLink.target = '_blank';
+        cardLink.rel = 'noopener noreferrer';
+        cardLink.setAttribute('download', filename);
+
+        const headerWrapper = document.createElement('div');
+        headerWrapper.className = 'source-card-header';
+
+        const thumbnailWrapper = document.createElement('div');
+        thumbnailWrapper.className = 'source-card-thumbnail source-card-thumbnail--xbrl';
+        thumbnailWrapper.textContent = 'X';
+
+        const filenameLabel = document.createElement('span');
+        filenameLabel.className = 'source-card-xbrl-filename';
+        filenameLabel.textContent = filename;
+        filenameLabel.title = filename;
+
+        headerWrapper.appendChild(thumbnailWrapper);
+        headerWrapper.appendChild(filenameLabel);
+
+        const contentWrapper = document.createElement('div');
+        contentWrapper.className = 'source-card-content';
+
+        const titleLine = document.createElement('span');
+        titleLine.className = 'source-card-title';
+        titleLine.textContent = titleText;
+        contentWrapper.appendChild(titleLine);
+
+        cardLink.appendChild(headerWrapper);
+        cardLink.appendChild(contentWrapper);
+        cardLink.setAttribute('aria-label', `Download XBRL filing ${filename}`);
+        return cardLink;
+    };
+
     const buildSourceCard = (metadata) => {
         const safeMeta = metadata || {};
         if (!safeMeta.url) {
             return null;
+        }
+
+        if (safeMeta.source_type === 'xbrl') {
+            return buildXbrlCard(safeMeta);
         }
 
         const cardLink = document.createElement('a');
@@ -643,6 +691,127 @@ function makeDraggableAndResizable(element, sourceWindowOffsetX = 10, onLayoutCh
     }
 }
 
+// ── Layer 1 Validate ────────────────────────────────────────────────
+// Click handler for the Validate button. POSTs session_id to the backend,
+// renders the XBRL validation report as a fresh conversation turn (user
+// request + agent reply), and best-effort highlights claimed numbers that
+// failed verification in the preceding agent response.
+
+function _statusGlyph(status) {
+    if (status === 'VERIFIED')       return 'VERIFIED';
+    if (status === 'FAILED')         return 'FAILED';
+    if (status === 'NOT_APPLICABLE') return 'N/A';
+    return 'SKIPPED';
+}
+
+function _formatNumber(n) {
+    if (n === null || n === undefined) return '—';
+    if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(3) + 'B';
+    if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(3) + 'M';
+    return Number.isInteger(n) ? n.toString() : n.toFixed(4);
+}
+
+function _buildValidateMarkdown(data) {
+    const claims = data.claims || [];
+    const summary = data.summary || {};
+    const total = summary.total || claims.length;
+    const verified = summary.VERIFIED || 0;
+    const failed = summary.FAILED || 0;
+    const na = summary.NOT_APPLICABLE || 0;
+
+    if (total === 0) {
+        return '**Validation Report**\n\nNo ratio claims were recorded for the previous response, so there is nothing to validate.';
+    }
+
+    const headline = failed > 0
+        ? `**${failed} of ${total} claim${total === 1 ? '' : 's'} failed verification** against SEC XBRL filings.`
+        : na === total
+            ? `All ${total} claim${total === 1 ? '' : 's'} marked not applicable for this filer's reporting structure.`
+            : `**All ${verified} of ${total} claim${total === 1 ? '' : 's'} verified** against SEC XBRL filings.`;
+
+    const lines = [
+        '**Validation Report**',
+        '',
+        headline,
+        '',
+        '| Ratio | Ticker | Period | Your Claim | XBRL Ground Truth | Variance | Status |',
+        '|---|---|---|---:|---:|---:|:---:|',
+    ];
+
+    for (const c of claims) {
+        const ratio = c.ratio ? c.ratio.replace(/_/g, ' ') : '—';
+        const claimStr = c.actual !== undefined && c.actual !== null
+            ? _formatNumber(c.actual)
+            : (c.claimed_value !== undefined ? _formatNumber(c.claimed_value) : '—');
+        const expectedStr = c.expected !== undefined && c.expected !== null
+            ? _formatNumber(c.expected)
+            : '—';
+        const varStr = c.variance_pct !== undefined && c.variance_pct !== null
+            ? `${c.variance_pct.toFixed(3)}%`
+            : '—';
+        lines.push(
+            `| ${ratio} | ${c.ticker || '—'} | ${c.period || '—'} | ${claimStr} | ${expectedStr} | ${varStr} | ${_statusGlyph(c.status)} |`
+        );
+    }
+
+    const notes = claims.filter(c => c.message).map(c =>
+        `- **${c.ticker} · ${c.ratio ? c.ratio.replace(/_/g, ' ') : ''}**: ${c.message}`
+    );
+    if (notes.length) {
+        lines.push('', ...notes);
+    }
+
+    const sources = Array.from(new Set(claims.map(c => c.xbrl_source).filter(Boolean)));
+    if (sources.length) {
+        lines.push('', `*Ground truth: ${sources.map(s => `\`${s}\``).join(', ')}*`);
+    }
+
+    return lines.join('\n');
+}
+
+function _renderValidateResults(data) {
+    const responseContainer = document.getElementById('respons');
+    if (!responseContainer) return;
+
+    // Capture the preceding agent response bubble BEFORE appending new
+    // content — that's the bubble whose numbers should be highlighted if any
+    // claim failed.
+    const priorBubbles = responseContainer.querySelectorAll('.agent_response');
+    const priorAgentBubble = priorBubbles.length ? priorBubbles[priorBubbles.length - 1] : null;
+
+    // Append user-side prompt + agent-side reply to mimic a conversation turn.
+    appendChatElement(responseContainer, 'your_question', 'Validate the numerical claims in your last response against SEC XBRL filings.');
+
+    const replyElement = appendChatElement(responseContainer, 'agent_response', '');
+    renderMarkdownContent(replyElement, _buildValidateMarkdown(data));
+
+    scrollChatToBottom();
+
+    // Decorate each pre-wrapped number in the prior agent bubble with
+    // its Validate status (VERIFIED / FAILED / NOT_APPLICABLE). The
+    // spans were wrapped server-side during post-processing; this just
+    // joins status by claim_id.
+    if (priorAgentBubble) {
+        decorateClaimMarks(priorAgentBubble, data.claims || []);
+    }
+}
+
+async function validate_response() {
+    const responseContainer = document.getElementById('respons');
+    try {
+        const data = await validateClaims();
+        _renderValidateResults(data);
+    } catch (err) {
+        console.error('Validate failed:', err);
+        if (responseContainer) {
+            appendChatElement(responseContainer, 'your_question', 'Validate the numerical claims in your last response against SEC XBRL filings.');
+            const replyElement = appendChatElement(responseContainer, 'agent_response', '');
+            renderMarkdownContent(replyElement, '**Validation request failed.** Unable to reach the validation service. Check the backend logs and try again.');
+            scrollChatToBottom();
+        }
+    }
+}
+
 export {
     appendChatElement,
     clear,
@@ -650,6 +819,7 @@ export {
     get_adv_chat_response,
     submit_question,
     get_sources,
+    validate_response,
     makeDraggableAndResizable,
     scrollChatToBottom,
 };

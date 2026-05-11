@@ -388,6 +388,45 @@
     text-decoration: underline;
 }
 
+/* Click downloads the filing; Content-Disposition: attachment is set by
+   /api/axioms/xbrl/<file>/. */
+.source-card--xbrl {
+    background-color: #3a2f12;
+    border-color: rgba(251, 191, 36, 0.45);
+}
+
+.source-card--xbrl:hover {
+    background-color: #4a3c18;
+}
+
+.source-card-thumbnail--xbrl {
+    background-color: #fbbf24;
+    color: #78350f;
+    font-size: 20px;
+    font-weight: 800;
+    border-color: rgba(251, 191, 36, 0.7);
+}
+
+.source-card-xbrl-filename {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fcd34d;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+
+.source-card--xbrl .source-card-title {
+    color: #fde68a;
+}
+
+.source-card--xbrl:hover .source-card-title {
+    text-decoration: underline;
+}
+
 /* new link ui css */
 
 .link-list {

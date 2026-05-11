@@ -1,5 +1,9 @@
-// markdownRenderer.js
-// Clean markdown + math rendering using markdown-it with texmath plugin
+// Markdown + math renderer.
+//
+// Single `$...$` is intentionally NOT a math delimiter: financial prose
+// contains currency ("$1.00", "$13.63 billion") that would otherwise pair
+// across sentences and turn text into math. Recognized math forms are
+// `\(...\)`, `\[...\]`, and `$$...$$`.
 
 import markdownIt from 'markdown-it';
 import texmath from 'markdown-it-texmath';
@@ -14,11 +18,9 @@ function normalizeMathInput(mathText) {
     .replace(/\u2011/g, '-'); // non-breaking hyphen → regular hyphen
 }
 
-// KaTeX render options for the final math rendering
 const KATEX_RENDER_OPTIONS = {
   delimiters: [
     { left: '$$', right: '$$', display: true },
-    { left: '$', right: '$', display: false },
     { left: '\\[', right: '\\]', display: true },
     { left: '\\(', right: '\\)', display: false },
   ],
@@ -37,35 +39,92 @@ const KATEX_RENDER_OPTIONS = {
   preProcess: normalizeMathInput,
 };
 
+// Custom delimiter preset for `$$...$$` only. Used together with the
+// upstream `brackets` preset (which provides `\(...\)` and `\[...\]`).
+// We deliberately omit any single-`$` inline rule — see file header.
+function ensureFinsearchDelimiters() {
+  if (texmath.rules.finsearch) return;
+  texmath.rules.finsearch = {
+    inline: [
+      {
+        name: 'fs_math_inline_double',
+        rex: /\${2}([^$]*?[^\\])\${2}/gy,
+        tmpl: '<eqn>$1</eqn>',
+        tag: '$$',
+        displayMode: true,
+        pre: texmath.$_pre,
+        post: texmath.$_post,
+      },
+    ],
+    block: [
+      {
+        name: 'fs_math_block_dollars_eqno',
+        rex: /\${2}([^$]*?[^\\])\${2}\s*?\(([^)\s]+?)\)/gmy,
+        tmpl: '<section class="eqno"><eqn>$1</eqn><span>($2)</span></section>',
+        tag: '$$',
+      },
+      {
+        name: 'fs_math_block_dollars',
+        rex: /\${2}([^$]*?[^\\])\${2}/gmy,
+        tmpl: '<section><eqn>$1</eqn></section>',
+        tag: '$$',
+      },
+    ],
+  };
+}
+
+// Defense in depth against LLMs that disregard the "no single-$" prompt.
+// One alternation pass classifies each match as code (passthrough), math
+// region (escape internal `$` so KaTeX sees `\$` not bare `$`), or bare
+// currency `$<digit>` (escape so markdown emits literal text).
+const CURRENCY_ESCAPE_RE = /```[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]*?\$\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]|(?<![\\$])\$(?=\d)/g;
+const UNESCAPED_DOLLAR_RE = /(?<!\\)\$/g;
+
+function escapeDollarsInsideMath(mathRegion) {
+  // `$$...$$`: keep boundary `$$` intact, escape only internal bare `$`
+  // (otherwise KaTeX errors when math content mentions currency like
+  // `\(Assets ($106.62B) = ...\)`).
+  if (mathRegion.startsWith('$$')) {
+    return '$$' + mathRegion.slice(2, -2).replace(UNESCAPED_DOLLAR_RE, '\\$') + '$$';
+  }
+  // `\(...\)` and `\[...\]` have backslash-bracket boundaries, no `$` to preserve.
+  return mathRegion.replace(UNESCAPED_DOLLAR_RE, '\\$');
+}
+
+export function escapeCurrencyDollars(text) {
+  if (!text) return text;
+  return text.replace(CURRENCY_ESCAPE_RE, (m) => {
+    if (m === '$') return '\\$';        // bare currency outside any region
+    if (m[0] === '`') return m;         // fenced or inline code: passthrough
+    return escapeDollarsInsideMath(m);  // math region: escape internal `$`
+  });
+}
+
 // Create and configure the markdown-it instance
 function createMarkdownRenderer() {
+  ensureFinsearchDelimiters();
+
   const md = markdownIt({
-    html: true,        // Enable HTML tags in source
-    linkify: true,     // Autoconvert URL-like text to links
-    typographer: false, // Disable typographic replacements to avoid conflicts
-    breaks: false,     // Don't convert single '\n' to <br> (use double \n for paragraphs)
+    html: true,
+    linkify: true,
+    typographer: false,
+    breaks: false,
   });
 
-  // Add the texmath plugin - this handles math at tokenization level
-  // BEFORE any emphasis parsing, solving our asterisk problem
+  // texmath claims math regions before markdown emphasis parsing, so `*`
+  // and `_` inside formulas survive. We hand off the raw TeX wrapped in
+  // bracket delimiters for KaTeX auto-render to pick up downstream.
   md.use(texmath, {
     engine: {
-      // We don't render here - just preserve the math for KaTeX
-      renderToString: (tex, options) => {
-        // Return the raw TeX wrapped in a span for KaTeX to find
-        if (options.displayMode) {
-          return `$$${tex}$$`;
-        }
-        return `$${tex}$`;
-      },
+      renderToString: (tex, options) =>
+        options.displayMode ? `\\[${tex}\\]` : `\\(${tex}\\)`,
     },
-    delimiters: 'dollars', // Handles $...$ and $$...$$
+    delimiters: ['brackets', 'finsearch'],
   });
 
   return md;
 }
 
-// Singleton instance
 let markdownRenderer = null;
 
 function getMarkdownRenderer() {
@@ -75,16 +134,13 @@ function getMarkdownRenderer() {
   return markdownRenderer;
 }
 
-// Sanitize HTML to prevent XSS
 function sanitizeHtml(html) {
   const template = document.createElement('template');
   template.innerHTML = html;
 
-  // Remove dangerous elements
   const forbiddenSelectors = 'script,style,iframe,object,embed,link,meta';
   template.content.querySelectorAll(forbiddenSelectors).forEach((node) => node.remove());
 
-  // Remove event handlers
   const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_ELEMENT, null, false);
   while (walker.nextNode()) {
     const element = walker.currentNode;
@@ -95,7 +151,6 @@ function sanitizeHtml(html) {
     });
   }
 
-  // Remove HTML comments
   const commentWalker = document.createTreeWalker(template.content, NodeFilter.SHOW_COMMENT, null, false);
   const comments = [];
   while (commentWalker.nextNode()) {
@@ -106,7 +161,6 @@ function sanitizeHtml(html) {
   return template.innerHTML;
 }
 
-// Apply target="_blank" to links for security
 function applyLinkAttributes(element) {
   const links = element.querySelectorAll('a');
   links.forEach((link) => {
@@ -115,7 +169,6 @@ function applyLinkAttributes(element) {
   });
 }
 
-// Use KaTeX auto-render for final math rendering
 function renderMath(element) {
   if (typeof globalThis.renderMathInElement !== 'function') {
     console.warn('KaTeX auto-render is not available.');
@@ -125,7 +178,6 @@ function renderMath(element) {
   globalThis.renderMathInElement(element, KATEX_RENDER_OPTIONS);
 }
 
-// Apply optional prefix label
 function applyPrefix(html, prefixLabel) {
   if (!prefixLabel) {
     return html;
@@ -133,19 +185,29 @@ function applyPrefix(html, prefixLabel) {
   return `<strong>${prefixLabel}:</strong> ${html}`;
 }
 
-// Core render function - MUCH simpler now!
 function render(markdown, options = {}) {
   const { stabilizeStreaming = false } = options;
 
-  // For streaming, append closing delimiters if needed
-  let processedMarkdown = markdown || '';
+  let processedMarkdown = escapeCurrencyDollars(markdown || '');
 
   if (stabilizeStreaming) {
-    // Simple checks for unclosed delimiters
-    // markdown-it handles most cases well, but we help with streaming
-    const dollarCount = (processedMarkdown.match(/\$/g) || []).length;
-    if (dollarCount % 2 !== 0) {
-      processedMarkdown += '$';
+    // Close unmatched math delimiters mid-stream so a half-streamed formula
+    // doesn't leak its `*` and `_` into emphasis parsing while the user waits.
+    const openParen = (processedMarkdown.match(/\\\(/g) || []).length;
+    const closeParen = (processedMarkdown.match(/\\\)/g) || []).length;
+    if (openParen > closeParen) {
+      processedMarkdown += '\\)'.repeat(openParen - closeParen);
+    }
+
+    const openBrack = (processedMarkdown.match(/\\\[/g) || []).length;
+    const closeBrack = (processedMarkdown.match(/\\\]/g) || []).length;
+    if (openBrack > closeBrack) {
+      processedMarkdown += '\\]'.repeat(openBrack - closeBrack);
+    }
+
+    const doubleDollarCount = (processedMarkdown.match(/\$\$/g) || []).length;
+    if (doubleDollarCount % 2 !== 0) {
+      processedMarkdown += '$$';
     }
 
     const fenceCount = (processedMarkdown.match(/```/g) || []).length;
@@ -154,20 +216,16 @@ function render(markdown, options = {}) {
     }
   }
 
-  // Let markdown-it with texmath do ALL the work
   const md = getMarkdownRenderer();
-  const html = md.render(processedMarkdown);
-
-  return sanitizeHtml(html);
+  return sanitizeHtml(md.render(processedMarkdown));
 }
 
-// Main export - renders final markdown content
 export function renderMarkdownContent(targetElement, rawText, options = {}) {
   if (!targetElement) {
     return;
   }
 
-  const { prefixLabel = 'FinSearch', wrapMath = true } = options;
+  const { prefixLabel = 'FinSearch' } = options;
 
   try {
     const html = render(rawText);
@@ -178,18 +236,16 @@ export function renderMarkdownContent(targetElement, rawText, options = {}) {
     renderMath(targetElement);
   } catch (error) {
     console.error('Error rendering markdown:', error);
-    // Fallback to plain text
     targetElement.textContent = `${prefixLabel ? `${prefixLabel}: ` : ''}${rawText || ''}`;
   }
 }
 
-// Export for streaming preview - uses same renderer with stabilization
 export function renderStreamingPreview(targetElement, rawText, options = {}) {
   if (!targetElement) {
     return;
   }
 
-  const { prefixLabel = 'FinSearch', wrapMath = true } = options;
+  const { prefixLabel = 'FinSearch' } = options;
 
   try {
     const html = render(rawText, { stabilizeStreaming: true });
@@ -200,7 +256,6 @@ export function renderStreamingPreview(targetElement, rawText, options = {}) {
     renderMath(targetElement);
   } catch (error) {
     console.error('Error rendering streaming markdown:', error);
-    // Fallback to plain text
     targetElement.textContent = `${prefixLabel ? `${prefixLabel}: ` : ''}${rawText || ''}`;
   }
 }

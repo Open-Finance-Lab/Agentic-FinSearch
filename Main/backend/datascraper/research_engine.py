@@ -344,7 +344,7 @@ Rules:
 - Integrate information from all research results.
 - Preserve all citations and source attributions.
 - For numerical data, use exact values from the research results. Never re-derive or approximate.
-- Use LaTeX: $ for inline math, $$ for display equations.
+- Use LaTeX: \\(...\\) for inline math, $$...$$ for display equations. NEVER use single $...$ for math (it collides with currency mentions like $1.00 or $13B). Math delimiters are for typeset symbolic expressions only; prose statements that mention currency values (e.g., "Assets totaled $106.62B") should stay as plain text, NOT wrapped in \\(...\\).
 - Remove redundancies but keep all distinct data points.
 - If some data points could not be found, acknowledge this rather than guessing.
 

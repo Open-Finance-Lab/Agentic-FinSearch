@@ -32,7 +32,7 @@ class StockFundamentalsSkill(BaseSkill):
 
     @property
     def tools_allowed(self) -> Optional[List[str]]:
-        return ["get_stock_info", "get_stock_history", "get_earnings_info", "calculate"]
+        return ["get_stock_info", "get_stock_financials", "get_stock_history", "get_earnings_info", "calculate"]
 
     @property
     def max_turns(self) -> int:

@@ -143,18 +143,11 @@ def build_market_time_context(
         today_str = et_now.strftime("%Y-%m-%d")
         if market_open:
             info_parts.append(
-                f"IMPORTANT: Markets are currently open ({today_str}). "
-                f"'Today's data' means live/intraday data for {today_str}. "
-                f"The most recent closing data is from {last_trading_day}. "
-                f"Always verify the date on any data you retrieve matches {today_str}."
+                f"'Today's data' = live intraday {today_str} (last close: {last_trading_day}); verify retrieved dates."
             )
         else:
             info_parts.append(
-                f"IMPORTANT: Markets are currently closed. "
-                f"The last completed trading day is {last_trading_day}. "
-                f"'Today's data' means data from {last_trading_day}. "
-                f"Do NOT use data from dates other than {last_trading_day} unless explicitly asked. "
-                f"Always verify the date on retrieved data matches what was requested."
+                f"'Today's data' = data from {last_trading_day} (last completed session); do not substitute other dates and verify retrieved dates match."
             )
     except Exception as e:
         logger.warning(f"Error building market context: {e}")
