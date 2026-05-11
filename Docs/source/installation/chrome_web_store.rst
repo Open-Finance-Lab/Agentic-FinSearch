@@ -34,9 +34,11 @@ Steps
    floating window over the page.
 
 3. **Start chatting.** Type a question into the chat box — for example,
-   *"What is Apple's gross margin for FY2023?"* — and the agent will
-   respond with sourced answers. See :doc:`../usage/basic_usage` for a
-   tour of modes, settings, and the Validate button.
+   *"Which two days in September 2025 had the highest and lowest
+   closing prices for Nvidia?"* — and the agent will respond with
+   sourced answers drawn from the Yahoo Finance page you are on. See
+   :doc:`../usage/basic_usage` for a tour of modes, settings, and the
+   Validate button.
 
 Troubleshooting
 ---------------
