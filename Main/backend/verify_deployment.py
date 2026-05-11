@@ -27,21 +27,32 @@ def check_memory_baseline():
 
 
 def check_gunicorn_config():
-    """Verify Gunicorn has proper worker recycling configured"""
+    """
+    Verify Gunicorn has worker recycling configured.
+
+    Settings may live in either Procfile/Dockerfile CMD as CLI flags
+    (--max-requests, --max-requests-jitter) OR in gunicorn.conf.py as
+    Python assignments (max_requests = ..., max_requests_jitter = ...).
+    Both are equivalent — accept either.
+    """
     procfile_path = backend_dir / 'Procfile'
-    if not procfile_path.exists():
-        print("WARNING: Procfile not found")
-        return False
+    config_path = backend_dir / 'gunicorn.conf.py'
 
-    with open(procfile_path) as f:
-        content = f.read()
+    procfile_text = procfile_path.read_text() if procfile_path.exists() else ''
+    config_text = config_path.read_text() if config_path.exists() else ''
 
-    has_max_requests = '--max-requests' in content
-    has_jitter = '--max-requests-jitter' in content
+    has_max_requests = (
+        '--max-requests' in procfile_text
+        or 'max_requests' in config_text
+    )
+    has_jitter = (
+        '--max-requests-jitter' in procfile_text
+        or 'max_requests_jitter' in config_text
+    )
 
     print("\nGunicorn Configuration:")
-    print(f"  Worker recycling (--max-requests): {'OK' if has_max_requests else 'MISSING'}")
-    print(f"  Jitter (--max-requests-jitter): {'OK' if has_jitter else 'MISSING'}")
+    print(f"  Worker recycling (max_requests): {'OK' if has_max_requests else 'MISSING'}")
+    print(f"  Jitter (max_requests_jitter): {'OK' if has_jitter else 'MISSING'}")
 
     return has_max_requests and has_jitter
 
