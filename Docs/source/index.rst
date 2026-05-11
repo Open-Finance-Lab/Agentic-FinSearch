@@ -25,7 +25,7 @@ Agentic FinSearch
 
    - **XBRL Validation Pipeline**: A three-stage *tagging → retrieval → matching* pipeline that checks numerical claims in agent responses against SEC XBRL filings and surfaces per-claim verdicts (Verified, Mismatch, Skipped, Not Applicable). See :doc:`xbrl_validation`.
    - **Validate button**: Lazy, user-triggered certification. The button appears whenever the most recent response emitted a ratio claim; clicking it runs a deterministic check and inserts inline mismatch marks plus a Ground Truth section in the Sources popup.
-   - **Three Layer 1 axioms**: Balance-sheet equality (``A = L + E``), gross margin, and current ratio — resolved against locally cached XBRL filings.
+   - **Three Layer 1 axioms**: Balance-sheet equality (``A = L + E``), gross margin, and current ratio — resolved against three pre-loaded SEC filings (AAPL, MSFT, TSLA FY2023). A cloud-hosted **SEC XBRL Filing Tree** is in development to extend coverage to the full registrant universe.
 
    **New in 0.13.3:**
 

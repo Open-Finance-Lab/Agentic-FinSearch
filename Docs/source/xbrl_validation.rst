@@ -87,10 +87,19 @@ Stage 2: Retrieve the Reference Value
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Given a tagged record, Stage 2 looks up the reference value from an
-authoritative SEC source. Today's implementation reads from a local index of
-XBRL filings (``Main/backend/mcp_server/xbrl/filings/``) for the ten companies
-covered by the MVP. A planned Phase 2 wires the same boundary to the SEC EDGAR
-``companyconcept`` API so coverage extends to any registrant on demand.
+authoritative SEC source. Today's implementation reads from a small local
+index of XBRL filings shipped inside the repository at
+``Main/backend/mcp_server/xbrl/filings/``.
+
+.. admonition:: Coverage today
+   :class: important
+
+   Validation currently resolves against **three pre-loaded SEC filings**:
+   Apple (FY2023, ``aapl-20230930.xml``), Microsoft (FY2023,
+   ``msft-20230630.xml``), and Tesla (FY2023, ``tsla-20231231.xml``). Claims
+   about any other ticker or period return ``Skipped`` with a "filing not
+   found" reason. Expanding this set is the focus of the upcoming
+   :ref:`SEC XBRL Filing Tree <xbrl-filing-tree>` work.
 
 The return value is a tuple of *(value, filing accession, filing date)*.
 
@@ -201,9 +210,17 @@ Roadmap
 
 The module boundary is stable; the surface widens on a defined schedule.
 
-* **Phase 2 — Live SEC EDGAR retrieval.** Replace local-file lookup with calls
-  to the SEC ``companyconcept`` API. Extends coverage from ten companies to
-  every public registrant, at the cost of one network hop per claim.
+.. _xbrl-filing-tree:
+
+* **SEC XBRL Filing Tree (cloud).** The most visible limitation today is that
+  only three filings are bundled with the backend. The next major workstream
+  is a **cloud-hosted SEC XBRL Filing Tree** — a structured, query-friendly
+  index of XBRL filings keyed by ``(ticker, period, statement)`` — that any
+  agent can hit over the network without bundling raw filings into the
+  repository. Once it ships, the resolver swaps its filesystem lookup for a
+  tree query, and validation extends from three tickers to the full universe
+  of SEC registrants. The local-filings path remains as the offline
+  fallback for development and air-gapped demos.
 * **Additional ratios.** Income statement identity, cash flow reconciliation,
   debt-to-equity, return on equity. Each ratio is one tag map and one pure
   function — the engine and resolver do not change.
@@ -211,7 +228,8 @@ The module boundary is stable; the surface widens on a defined schedule.
   per-claim verdicts as the response streams.
 * **Coverage benchmark.** Target ≥80% verification coverage on the 24-question
   FinSearch benchmark, where a claim counts as covered if all three stages
-  produce any verdict.
+  produce any verdict — measured *after* the Filing Tree lifts the
+  three-filing coverage ceiling.
 
 Further Reading
 ---------------
