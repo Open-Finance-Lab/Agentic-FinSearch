@@ -44,6 +44,7 @@ services:
       - ./Main/backend/mcp_client:/app/mcp_client
       - ./Main/backend/mcp_server:/app/mcp_server
       - ./Main/backend/django_config:/app/django_config
+      - ./Main/backend/prompts:/app/prompts
       - session_cache:/tmp/fingpt_cache
 
     networks:

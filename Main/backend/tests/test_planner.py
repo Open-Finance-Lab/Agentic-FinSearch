@@ -79,7 +79,9 @@ class TestPlanner:
             system_prompt=None,
             domain=None,
         )
-        assert plan.skill_name == "financial_statements"
+        # stock_fundamentals now includes get_earnings_info and matches EPS,
+        # so it may win over financial_statements for simple EPS queries
+        assert plan.skill_name in {"stock_fundamentals", "financial_statements"}
         assert "get_earnings_info" in plan.tools_allowed
 
     def test_technical_analysis_plan(self):
@@ -116,9 +118,9 @@ class TestPlannerEdgeCases:
             system_prompt=None,
             domain=None,
         )
-        # Both technical_analysis and financial_statements match.
-        # Either is acceptable, but it should not be web_research.
-        assert plan.skill_name in {"technical_analysis", "financial_statements"}
+        # technical_analysis, financial_statements, and stock_fundamentals all match.
+        # Any is acceptable, but it should not be web_research.
+        assert plan.skill_name in {"technical_analysis", "financial_statements", "stock_fundamentals"}
 
     def test_none_system_prompt(self):
         plan = self.planner.plan(user_query="hello", system_prompt=None, domain=None)

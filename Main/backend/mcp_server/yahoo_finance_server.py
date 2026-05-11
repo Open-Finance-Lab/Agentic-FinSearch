@@ -98,7 +98,7 @@ async def handle_list_tools() -> List[types.Tool]:
         ),
         types.Tool(
             name="get_stock_history",
-            description="Get historical price data for a stock or market index. Returns columns: Open, High, Low, Close (actual trading price), Adj Close (adjusted for splits/dividends), Volume. Use 'start' and 'end' for a specific date range, or 'period' for a relative window. When 'start' is provided, 'period' is ignored.",
+            description="Get historical price data for a stock or market index. Returns columns: Open, High, Low, Close (actual unadjusted trading price), Adj Close (adjusted for splits/dividends), Volume. Use 'start' and 'end' for a specific date range, or 'period' for a relative window. When 'start' is provided, 'period' is ignored. USE THIS TOOL for: monthly closing prices (interval='1mo'), daily prices over date ranges, computing price trends, correlations, comparisons between tickers. Call once per ticker. For comparing two stocks, call this tool twice (once per ticker) with the same date range.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -108,7 +108,7 @@ async def handle_list_tools() -> List[types.Tool]:
                     },
                     "start": {
                         "type": "string",
-                        "description": "Start date in YYYY-MM-DD format (e.g., '2025-09-01'). When provided, fetches data from this date instead of using 'period'."
+                        "description": "Start date in YYYY-MM-DD format (e.g., '2025-09-01'). When provided, fetches data from this date instead of using 'period'. Always prefer explicit start/end dates over 'period' for precision."
                     },
                     "end": {
                         "type": "string",
@@ -121,7 +121,7 @@ async def handle_list_tools() -> List[types.Tool]:
                     },
                     "interval": {
                         "type": "string",
-                        "description": "The data interval (e.g., '1d', '1wk', '1mo').",
+                        "description": "The data interval: '1d' for daily prices, '1wk' for weekly, '1mo' for monthly closing prices. Use '1mo' when asked about monthly data.",
                         "default": "1d"
                     }
                 },

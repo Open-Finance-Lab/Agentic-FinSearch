@@ -17,3 +17,8 @@ disable = false
 [run]
 # Prefer bun runtime over node
 bun = true
+
+[test]
+# Register a happy-dom DOM before any test module loads, so components
+# that touch document / window / CSS can be exercised headlessly.
+preload = ["./test-preload.js"]

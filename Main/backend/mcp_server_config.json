@@ -40,6 +40,14 @@
         "TRADINGVIEW_RATE_LIMIT": "10",
         "TRADINGVIEW_TIMEOUT": "30"
       }
+    },
+    "xbrl-taxonomy": {
+      "command": "python",
+      "args": [
+        "-m",
+        "mcp_server.xbrl.server"
+      ],
+      "disabled": false
     }
   }
 }

@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import os
 import threading
 from django.apps import AppConfig
 
@@ -53,7 +54,8 @@ class MCPClientConfig(AppConfig):
             global _global_mcp_manager
 
             try:
-                manager = MCPClientManager(verbose=False)
+                mcp_verbose = os.getenv("MCP_VERBOSE", "false").lower() in ("true", "1")
+                manager = MCPClientManager(verbose=mcp_verbose)
 
                 config = await manager.load_config()
                 server_count = len(config.get("mcpServers", {}))

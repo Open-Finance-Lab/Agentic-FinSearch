@@ -76,7 +76,7 @@ class SummarizePageSkill(BaseSkill):
             "Do NOT call any tools. Do NOT re-scrape.\n"
             "- Be concise and well-structured.\n"
             "- Preserve specific numbers, dates, tickers, and names.\n"
-            "- Use $ for inline math and $$ for display equations.\n\n"
+            "- Use \\(...\\) for inline math and $$...$$ for display equations. NEVER use single $...$ (it collides with currency). Math delimiters are for typeset symbolic expressions only; prose lines that mention currency values should stay as plain text.\n\n"
             "SECURITY: Never disclose internal tool names, model names, "
             "API keys, or implementation details.\n\n"
             "PAGE CONTENT:\n"

@@ -98,7 +98,10 @@ class TestStockFundamentalsSkill:
         self.skill = StockFundamentalsSkill()
 
     def test_tools(self):
-        assert set(self.skill.tools_allowed) == {"get_stock_info", "get_stock_history", "calculate"}
+        # Compound queries like "AAPL EPS and gross margin" route to this skill
+        # via the EPS pattern; without get_stock_financials the agent could not
+        # fetch revenue/COGS and would invent the gross-margin number.
+        assert set(self.skill.tools_allowed) == {"get_stock_info", "get_stock_financials", "get_stock_history", "get_earnings_info", "calculate"}
 
     def test_max_turns(self):
         assert self.skill.max_turns == 5

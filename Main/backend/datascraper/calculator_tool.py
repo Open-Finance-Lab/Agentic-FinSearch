@@ -32,9 +32,11 @@ _WHITELISTED_FUNCTIONS = {
     "min": min,
     "max": max,
     "sum": sum,
+    "len": len,
     "sqrt": math.sqrt,
     "log": math.log,
     "log10": math.log10,
+    "pow": pow,
 }
 
 
@@ -64,9 +66,12 @@ def _compute_node(node: ast.AST) -> float:
             raise ValueError(f"Unary operator {op_type.__name__} not allowed")
         return float(_UNARY_OPS[op_type](_compute_node(node.operand)))
 
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return [_compute_node(elt) for elt in node.elts]
+
     if isinstance(node, ast.Call):
         if not isinstance(node.func, ast.Name):
-            raise ValueError("Only named function calls not allowed (no methods)")
+            raise ValueError("Only named function calls allowed (no methods)")
         func_name = node.func.id
         if func_name not in _WHITELISTED_FUNCTIONS:
             raise ValueError(f"Function '{func_name}' not allowed")
@@ -74,7 +79,8 @@ def _compute_node(node: ast.AST) -> float:
         # round() requires an int for ndigits
         if func_name == "round" and len(args) > 1:
             args[1] = int(args[1])
-        return float(_WHITELISTED_FUNCTIONS[func_name](*args))
+        result = _WHITELISTED_FUNCTIONS[func_name](*args)
+        return float(result) if isinstance(result, (int, float)) else result
 
     raise ValueError(f"AST node type {type(node).__name__} not allowed")
 
@@ -110,10 +116,12 @@ def safe_compute(expression: str) -> float:
 @function_tool
 def calculate(expression: str) -> str:
     """Calculate a mathematical expression safely. Use this for ANY arithmetic:
-    percentages, ratios, differences, sums, averages. Examples:
+    percentages, ratios, differences, sums, averages. Supports list literals for batch operations. Examples:
     - "(0.50 - 0.45) / 0.45 * 100" for percentage change
     - "1234.56 * 0.15" for a 15% calculation
     - "sqrt(144)" for square root
+    - "sum([1.5, 2.3, 3.7])" for sum of a list
+    - "sum([1.5, 2.3, 3.7]) / len([1.5, 2.3, 3.7])" for mean
     """
     result = safe_compute(expression)
     return str(result)

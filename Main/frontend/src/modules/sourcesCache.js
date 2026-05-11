@@ -86,6 +86,7 @@ function normalizeMetadata(url, raw = {}) {
         icon: null,
         provisional: raw.provisional ?? fallback.provisional,
         snippet: normalizedSnippet,
+        source_type: raw.source_type ?? null,
     };
 
     return normalized;

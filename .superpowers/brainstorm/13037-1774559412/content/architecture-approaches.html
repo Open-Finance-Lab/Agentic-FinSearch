@@ -1,0 +1,60 @@
+<h2>Architectural Approaches</h2>
+<p class="subtitle">How to evolve Agentic FinSearch from search agent → financial output validator</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Validation Layer on Top (Recommended)</h3>
+      <p><strong>Keep existing search agent intact.</strong> Add a new validation pipeline alongside it.</p>
+      <ul style="margin:8px 0;padding-left:20px;font-size:14px;color:#aaa;">
+        <li>Browser extension gains a <strong>"Validate" button</strong> that works on chatgpt.com, claude.ai, gemini.google.com</li>
+        <li>New backend endpoint: <code>/validate/</code> — receives raw model output text, returns claim-level verification</li>
+        <li>Reuses existing MCP tools (Yahoo Finance, TradingView, SEC EDGAR) as ground truth oracles</li>
+        <li>New <strong>Claim Decomposer</strong> module (LLM-powered) breaks response into atomic claims</li>
+        <li>New <strong>Claim Verifier</strong> module checks each claim against structured data</li>
+        <li>Existing search agent becomes "demo mode" — shows what a validated search experience looks like</li>
+      </ul>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Preserves everything you have</li><li>Fastest path to demo</li><li>Clear separation of concerns</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Two systems to maintain</li><li>Validation pipeline is new code</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Validation-First Rebuild</h3>
+      <p><strong>Rebuild around validation as the core.</strong> Search agent becomes one consumer of the validation engine.</p>
+      <ul style="margin:8px 0;padding-left:20px;font-size:14px;color:#aaa;">
+        <li>Validation pipeline is the primary backend service</li>
+        <li>Search agent is refactored to pipe its own responses through the validator</li>
+        <li>Single unified architecture — no "old system + new system"</li>
+        <li>Frontend is validation-first: extension always shows accuracy indicators</li>
+      </ul>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Cleaner long-term architecture</li><li>One system, one mental model</li><li>Stronger narrative for paper</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Significant rewrite — weeks of work</li><li>Risk of breaking working features</li><li>Delays the demo</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Standalone Validator (New Project)</h3>
+      <p><strong>Build the validator as a separate service.</strong> Agentic FinSearch is just the proof-of-concept context.</p>
+      <ul style="margin:8px 0;padding-left:20px;font-size:14px;color:#aaa;">
+        <li>New standalone backend service focused purely on validation</li>
+        <li>New lightweight browser extension (or separate mode in existing one)</li>
+        <li>Agentic FinSearch stays untouched as the "before" in the narrative</li>
+        <li>Validator service can be independently deployed, scaled, pitched</li>
+      </ul>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Zero risk to existing system</li><li>Clean codebase for the new vision</li><li>Easiest to pitch independently</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Doesn't reuse your MCP infrastructure</li><li>More total code to write</li><li>Loses the "evolution" narrative</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>

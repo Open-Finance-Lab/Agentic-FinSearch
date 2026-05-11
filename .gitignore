@@ -64,6 +64,7 @@ Main/backend/datascraper/faiss_index.idx
 
 # webpack build
 /Main/frontend/dist
+/Main/frontend/dist.zip
 
 # question logging
 Main/backend/api/questionLog.csv
@@ -84,6 +85,9 @@ AGENTS.md
 
 # serena (the claude code plugin)
 /.serena
+
+# superpowers (claude code plugin)
+.superpower/
 
 # git worktrees
 .worktrees/

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Agentic FinSearch",
-  "version": "0.13.1",
+  "version": "0.15.2",
   "description": "Agentic FinSearch companion extension. Defaults to the hosted backend at agenticfinsearch.org, with optional local backend support.",
   "icons": {
     "16": "assets/16x16_icon.png",

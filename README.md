@@ -14,9 +14,11 @@ Accurate retrieval of real-time financial data is a core infrastructure for buil
 ### Screenshots
 
 1. The search agent overlay: drag, resize, and minimize. Provides context-aware information on the user's current page.
+
    ![image](Docs/source/_static/images/new_gui_1.png)
 
-2. Source verification — check exactly where each piece of information came from.
+3. Source verification — check exactly where each piece of information came from.
+
    ![image](Docs/source/_static/images/new_gui_2.png)
 
 

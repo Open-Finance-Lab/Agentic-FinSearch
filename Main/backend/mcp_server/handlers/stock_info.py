@@ -50,6 +50,11 @@ class GetStockInfoHandler(ToolHandler):
         'regularMarketDayHigh', 'regularMarketDayLow', 'regularMarketOpen',
         'regularMarketVolume', 'regularMarketPreviousClose',
         'regularMarketChangePercent', 'sharesOutstanding',
+        # Key statistics (beta, EPS, earnings date, dividend details)
+        'beta', 'trailingEps', 'forwardEps',
+        'earningsDate', 'mostRecentQuarter',
+        'forwardAnnualDividendRate', 'forwardAnnualDividendYield',
+        'exDividendDate', 'payoutRatio',
     ]
 
     # Keys relevant for indices (^GSPC, ^DJI, etc.) and broader instruments

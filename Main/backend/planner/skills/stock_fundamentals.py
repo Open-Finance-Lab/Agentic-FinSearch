@@ -14,6 +14,8 @@ _PATTERNS = [
     r"\bquote (for|of)\b",
     r"^(?!.*options?)\b.*\bvolume\b",
     r"\bbeta\b",
+    r"\bEPS\b",
+    r"\bearnings (date|estimate|surprise)\b",
     r"\bshares outstanding\b",
     r"\bfloat\b.*\bshares\b",
     r"\b(day|intraday) (range|high|low)\b",
@@ -30,7 +32,7 @@ class StockFundamentalsSkill(BaseSkill):
 
     @property
     def tools_allowed(self) -> Optional[List[str]]:
-        return ["get_stock_info", "get_stock_history", "calculate"]
+        return ["get_stock_info", "get_stock_financials", "get_stock_history", "get_earnings_info", "calculate"]
 
     @property
     def max_turns(self) -> int:

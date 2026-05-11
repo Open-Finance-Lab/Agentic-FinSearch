@@ -154,6 +154,16 @@ jobs:
             export XDG_RUNTIME_DIR=/run/user/$(id -u)
             podman login ${{ env.REGISTRY }} -u "$GHCR_USERNAME" -p "$GHCR_TOKEN"
             podman pull "$REMOTE_IMAGE"
+
+            # Update systemd override to run the image we just pulled
+            OVERRIDE_DIR="$HOME/.config/systemd/user/${SYSTEMD_UNIT}.service.d"
+            mkdir -p "$OVERRIDE_DIR"
+            cat > "$OVERRIDE_DIR/override.conf" <<EOF
+            [Service]
+            ExecStart=
+            ExecStart=/usr/bin/podman run --name ${SYSTEMD_UNIT} --replace --rm --cgroups=split --sdnotify=conmon -d --memory=1.7g --memory-swap=2g -v /home/deploy/fingpt/runtime:/app/runtime --publish 127.0.0.1:8000:8000 --env-file /home/deploy/fingpt/envs/.env.production ${REMOTE_IMAGE}
+            EOF
+
             systemctl --user daemon-reload
             systemctl --user restart "$SYSTEMD_UNIT"
             podman image prune -f

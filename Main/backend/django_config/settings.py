@@ -23,9 +23,9 @@ load_dotenv(env_path)
 
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-8ok2ltjd3k&+mfz0s78m&^ei26)my3&m(5#5ko9+i=kyz_l2j@')
 
-DEBUG = os.getenv('DJANGO_DEBUG', 'True').strip().lower() in ('true', '1', 't')
+DEBUG = os.getenv('DJANGO_DEBUG', 'False').strip().lower() in ('true', '1', 't')
 
-ALLOWED_HOSTS = os.getenv('DJANGO_ALLOWED_HOSTS', '*').split(',')
+ALLOWED_HOSTS = os.getenv('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 
 
@@ -132,7 +132,7 @@ SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'False').strip().lowe
 SESSION_COOKIE_HTTPONLY = True
 
 CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', 'False').strip().lower() in ('true', '1', 't')
-CSRF_COOKIE_HTTPONLY = False
+CSRF_COOKIE_HTTPONLY = True
 csrf_origins_env = os.getenv('CORS_ALLOWED_ORIGINS', '')
 if csrf_origins_env:
     CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in csrf_origins_env.split(',') if origin.strip()]

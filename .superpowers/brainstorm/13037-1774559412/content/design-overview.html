@@ -1,0 +1,100 @@
+<h2>Design Overview — Agentic FinSearch Validation Platform</h2>
+<p class="subtitle">Architecture: Validation Layer on Top of existing search agent</p>
+
+<div class="section">
+  <h3>System Architecture</h3>
+  <div class="mockup">
+    <div class="mockup-header">End-to-End Data Flow</div>
+    <div class="mockup-body" style="padding:24px;font-family:monospace;font-size:13px;line-height:2;">
+      <div style="display:flex;gap:40px;align-items:flex-start;">
+
+        <!-- Left: User Side -->
+        <div style="flex:1;">
+          <div style="color:#4fc3f7;font-weight:bold;margin-bottom:8px;">USER SIDE</div>
+
+          <div style="background:#1a2332;padding:12px;border-radius:8px;border:1px solid #333;margin-bottom:8px;">
+            <div style="color:#ff9800;">chatgpt.com / claude.ai / gemini.google.com</div>
+            <div style="color:#888;font-size:11px;">User asks financial question → model responds</div>
+          </div>
+
+          <div style="text-align:center;color:#666;">↓ User clicks "Validate"</div>
+
+          <div style="background:#1a2332;padding:12px;border-radius:8px;border:1px solid #4fc3f7;margin-top:8px;">
+            <div style="color:#4fc3f7;">Browser Extension</div>
+            <div style="color:#888;font-size:11px;">
+              <strong>Mode Toggle:</strong> [Chat] [Validate]<br/>
+              • <strong>Validate mode:</strong> DOM parser extracts model output → sends to /validate/<br/>
+              • <strong>Chat mode:</strong> existing Agentic FinSearch chatbot (unchanged)<br/>
+              • Validation results feed into chat context for follow-ups
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Backend -->
+        <div style="flex:1;">
+          <div style="color:#66bb6a;font-weight:bold;margin-bottom:8px;">BACKEND</div>
+
+          <div style="background:#1a2332;padding:12px;border-radius:8px;border:1px solid #66bb6a;margin-bottom:8px;">
+            <div style="color:#66bb6a;">NEW: /validate/ endpoint</div>
+            <div style="color:#888;font-size:11px;">
+              1. Receive raw model output text<br/>
+              2. <strong>Claim Decomposer</strong> → atomic claims<br/>
+              3. <strong>Claim Router</strong> → match claims to data sources<br/>
+              4. <strong>Claim Verifier</strong> → check against ground truth<br/>
+              5. Return structured validation report
+            </div>
+          </div>
+
+          <div style="display:flex;gap:8px;">
+            <div style="flex:1;background:#1a2332;padding:8px;border-radius:6px;border:1px solid #555;">
+              <div style="color:#ff9800;font-size:11px;">REUSED</div>
+              <div style="color:#aaa;font-size:11px;">MCP Tools<br/>Yahoo Finance<br/>TradingView<br/>SEC EDGAR</div>
+            </div>
+            <div style="flex:1;background:#1a2332;padding:8px;border-radius:6px;border:1px solid #555;">
+              <div style="color:#ff9800;font-size:11px;">REUSED</div>
+              <div style="color:#aaa;font-size:11px;">Existing<br/>Search Agent<br/>Chat API<br/>Sessions</div>
+            </div>
+          </div>
+
+          <div style="background:#1a2332;padding:8px;border-radius:6px;border:1px solid #333;margin-top:8px;">
+            <div style="color:#ce93d8;font-size:11px;">NEW: Validation Engine</div>
+            <div style="color:#aaa;font-size:11px;">
+              Claim Decomposer (LLM) → Claim Router (heuristic) → Claim Verifier (MCP tools + comparison)
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:24px;">
+  <h3>What's New vs. What's Reused</h3>
+  <div style="display:flex;gap:16px;">
+    <div style="flex:1;background:#1a2332;padding:16px;border-radius:8px;border:1px solid #66bb6a;">
+      <div style="color:#66bb6a;font-weight:bold;margin-bottom:8px;">✦ NEW COMPONENTS</div>
+      <ul style="color:#ccc;font-size:13px;padding-left:18px;margin:0;line-height:1.8;">
+        <li><strong>DOM Parser</strong> — site-specific extractors for ChatGPT, Claude, Gemini</li>
+        <li><strong>Claim Decomposer</strong> — LLM prompt to extract atomic claims</li>
+        <li><strong>Claim Router</strong> — maps claim types to data sources</li>
+        <li><strong>Claim Verifier</strong> — compares claims to ground truth</li>
+        <li><strong>Validation UI</strong> — results panel with claim-level indicators</li>
+        <li><strong>/validate/ endpoint</strong> — orchestrates the pipeline</li>
+        <li><strong>Mode toggle</strong> — Chat ↔ Validate in extension</li>
+      </ul>
+    </div>
+    <div style="flex:1;background:#1a2332;padding:16px;border-radius:8px;border:1px solid #ff9800;">
+      <div style="color:#ff9800;font-weight:bold;margin-bottom:8px;">♻ REUSED AS-IS</div>
+      <ul style="color:#ccc;font-size:13px;padding-left:18px;margin:0;line-height:1.8;">
+        <li><strong>MCP infrastructure</strong> — Yahoo Finance, TradingView, SEC EDGAR</li>
+        <li><strong>Chat API</strong> — /get_chat_response/, /get_adv_response/</li>
+        <li><strong>Session management</strong> — UnifiedContextManager</li>
+        <li><strong>Planner/Skills</strong> — route follow-up questions</li>
+        <li><strong>numerical_validator.py</strong> — upgraded into Claim Verifier</li>
+        <li><strong>quality_logger.py</strong> — extended for validation metrics</li>
+        <li><strong>Frontend chat UI</strong> — existing chat components</li>
+        <li><strong>Django backend</strong> — settings, auth, middleware</li>
+      </ul>
+    </div>
+  </div>
+</div>
