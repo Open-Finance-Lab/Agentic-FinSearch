@@ -34,6 +34,8 @@ __pycache__/
 
 # Python distribution / packaging
 build/
+# Sphinx HTML build output
+_build/
 develop-eggs/
 dist/
 downloads/
