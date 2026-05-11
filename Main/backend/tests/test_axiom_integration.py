@@ -129,3 +129,42 @@ def test_claim_id_is_charset_sanitized():
     # Safe charset only.
     import re
     assert re.fullmatch(r"[A-Za-z0-9_\-.]+", cid), cid
+
+
+def test_per_claim_exception_does_not_500_whole_report():
+    """One claim raising in validate_claim must surface as an ERROR row,
+    not abort the entire report. Without this guard, a single malformed
+    cached claim sinks every other verdict in the same Validate click."""
+    stub_cache = _DictCache()
+    with patch("axioms.registry.cache", stub_cache):
+        from axioms.registry import add_claim
+
+        sid = "test_sess_partial_fail"
+        # First claim: valid → should VERIFY.
+        add_claim(sid, {
+            "ratio": "gross_margin",
+            "ticker": "AAPL",
+            "period": "2023-09-30",
+            "claimed_value": 44.13,
+            "formula_inputs": {"revenue": 383285e6, "cogs": 214137e6},
+        })
+        # Second claim: corrupt — claimed_value is a non-numeric string the
+        # engine path can't coerce; validate_claim's float() call raises.
+        add_claim(sid, {
+            "ratio": "gross_margin",
+            "ticker": "AAPL",
+            "period": "2023-09-30",
+            "claimed_value": "not-a-number",
+        })
+
+        response = validate_session(sid)
+
+    assert len(response["claims"]) == 2
+    statuses = [r["status"] for r in response["claims"]]
+    assert "VERIFIED" in statuses
+    assert "ERROR" in statuses
+    err_row = next(r for r in response["claims"] if r["status"] == "ERROR")
+    assert "Internal error" in err_row["message"]
+    assert response["summary"]["ERROR"] == 1
+    assert response["summary"]["VERIFIED"] == 1
+    assert response["summary"]["total"] == 2

@@ -68,13 +68,31 @@ def validate_claim(claim: dict) -> dict:
 
 
 def validate_session(session_id: str) -> dict:
-    """Return the full validate-endpoint response payload for a session."""
+    """Return the full validate-endpoint response payload for a session.
+
+    A single bad claim must not 500 the whole report, so each claim is
+    isolated in its own try/except. Failures become an ERROR-status row
+    with a sanitized message; the user still sees verdicts for every
+    other claim and the engine stays useful when a new ratio family or
+    a malformed cached entry slips through.
+    """
+    import logging
+
     from axioms.registry import get_claims
 
-    counts = {"VERIFIED": 0, "FAILED": 0, "SKIPPED": 0, "NOT_APPLICABLE": 0}
+    log = logging.getLogger(__name__)
+    counts = {"VERIFIED": 0, "FAILED": 0, "SKIPPED": 0, "NOT_APPLICABLE": 0, "ERROR": 0}
     results = []
     for claim in get_claims(session_id):
-        r = validate_claim(claim)
+        try:
+            r = validate_claim(claim)
+        except Exception as exc:
+            log.exception("validate_claim raised for claim=%s", claim)
+            r = {
+                **claim,
+                "status": "ERROR",
+                "message": f"Internal error during validation: {type(exc).__name__}",
+            }
         results.append(r)
         counts[r["status"]] = counts.get(r["status"], 0) + 1
     return {

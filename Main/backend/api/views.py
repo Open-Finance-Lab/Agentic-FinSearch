@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.cache import cache_page
+from django.views.decorators.http import require_http_methods
 from django.http import (
     FileResponse,
     HttpRequest,
@@ -185,6 +186,7 @@ def xbrl_filing_download(request: HttpRequest, filename: str) -> FileResponse:
 
 
 @csrf_exempt
+@require_http_methods(['POST'])
 @ratelimit(key='ip', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
 def validate_claims(request: HttpRequest) -> JsonResponse:
     """Layer 1 Validate: run deterministic proof over claims recorded for a session.
@@ -193,12 +195,9 @@ def validate_claims(request: HttpRequest) -> JsonResponse:
     Response: {"claims": [per-claim result], "summary": {...}}
 
     Each claim result contains:
-      ratio, ticker, period, claimed_value, status (VERIFIED|FAILED|SKIPPED|NOT_APPLICABLE),
+      ratio, ticker, period, claimed_value, status (VERIFIED|FAILED|SKIPPED|NOT_APPLICABLE|ERROR),
       expected, actual, variance_pct, formula, xbrl_source, message
     """
-    if request.method != 'POST':
-        return JsonResponse({'error': 'POST required'}, status=405)
-
     try:
         body = json.loads(request.body) if request.body else {}
     except (json.JSONDecodeError, ValueError):
