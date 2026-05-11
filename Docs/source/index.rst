@@ -9,11 +9,9 @@ Agentic FinSearch
 
    introduction
    updates
-   install_agent_with_installer
-   manual_install
-   start_agent_mac
-   start_agent_win
+   installation/index
    usage/index
+   xbrl_validation
    api_reference
    mcp_tools
    project_structure
@@ -21,7 +19,13 @@ Agentic FinSearch
    code_of_conduct
 
 .. note::
-   This documentation covers version 0.13.3 of Agentic FinSearch.
+   This documentation covers version 0.16.0 of Agentic FinSearch.
+
+   **New in 0.16.0:**
+
+   - **XBRL Validation Pipeline**: A three-stage *tagging → retrieval → matching* pipeline that checks numerical claims in agent responses against SEC XBRL filings and surfaces per-claim verdicts (Verified, Mismatch, Skipped, Not Applicable). See :doc:`xbrl_validation`.
+   - **Validate button**: Lazy, user-triggered certification. The button appears whenever the most recent response emitted a ratio claim; clicking it runs a deterministic check and inserts inline mismatch marks plus a Ground Truth section in the Sources popup.
+   - **Three Layer 1 axioms**: Balance-sheet equality (``A = L + E``), gross margin, and current ratio — resolved against locally cached XBRL filings.
 
    **New in 0.13.3:**
 
@@ -68,5 +72,5 @@ Manual Installation
 
 For developers who wish to run or modify the agent outside of Docker, please refer to:
 
-* :doc:`manual_install`: Detailed steps for manual backend setup using ``uv``.
+* :doc:`installation/manual_install`: Detailed steps for manual backend setup using ``uv``.
 * :doc:`project_structure`: Overview of the codebase and frontend build process.
