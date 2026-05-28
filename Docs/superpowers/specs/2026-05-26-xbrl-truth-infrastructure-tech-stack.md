@@ -19,7 +19,7 @@ This document is the technology stack and the load-bearing architectural decisio
 | **0. Data sources** | SEC EDGAR `companyfacts` / `companyconcept` / `frames` APIs; bulk `companyfacts.zip` + Financial Statement Data Sets; raw iXBRL; FASB US-GAAP taxonomy | (same; mirrored into S3) | reused (`sec-edgar-mcp`, `requests`) + new bulk ingest |
 | **1. Ingestion & normalization** | Python 3.12; `requests`/throttle; existing iXBRL parser (`xml.etree` / `beautifulsoup4`+`lxml`); config-driven concept-normalization | AWS Lambda (event-driven on new filings) + Glue (bulk transform) + Step Functions | reused parser + new ingest/normalize |
 | **2. Canonical Truth Layer (storage)** | **DuckDB** (columnar fact store) + Parquet cold storage; relationships + tree as SQL views | Amazon **Aurora** (tabular facts), **Neptune** (graph), **OpenSearch** (hybrid text/table retrieval), **S3** (raw + parsed artifacts) | **new** |
-| **3. PVC service layer** | **MCP-native** via `mcp[cli]` + **FastMCP**; Django REST endpoints (`/api/...`); native `openai-agents` `function_tool`s | Amazon **API Gateway** + **Lambda/ECS**; **DynamoDB** cache for hot queries | reused MCP pattern + new services |
+| **3. PV service layer** | **MCP-native** via `mcp[cli]` + **FastMCP**; Django REST endpoints (`/api/...`); native `openai-agents` `function_tool`s | Amazon **API Gateway** + **Lambda/ECS**; **DynamoDB** cache for hot queries | reused MCP pattern + new services |
 | **4. Agent integration** | **OpenAI Agents SDK** (`openai-agents`); planner + skills; multi-model (OpenAI / Anthropic / Gemini); `tool_wrapper` interception | Amazon **Bedrock** (orchestration), **Step Functions** (multi-agent) | reused |
 | **5. Benchmark (construct + grade)** | Python templating; structured trace capture; deterministic graders; `networkx` (DAG/path equivalence); QuantEval-style backtest harness (stretch) | SageMaker (eval at scale); public leaderboard + submission service | **new** |
 | **6. Observability & governance** | Python logging; provenance + audit fields in the fact store | **CloudWatch** (monitoring), **CloudTrail** (audit trail) | reused + cloud |
@@ -49,15 +49,15 @@ This document is the technology stack and the load-bearing architectural decisio
 - **Storage primitive:** a **context-keyed fact table** (`cik, concept, period, unit, dimensions → value + provenance`), with relationships (temporal, peer, calc-arc) and the filing/period tree as **views** (see ADR-01, ADR-02).
 - **Cloud target:** **Aurora** (tabular facts/derived metrics), **Neptune** (graph: entities, metrics, periods, filings, evidence paths), **OpenSearch** (hybrid retrieval over sections/tables/text), **S3** (raw filings + parsed artifacts).
 
-### 3. PVC service layer (Provenance–Validation–Compliance)
+### 3. PV service layer (Provenance–Validation)
 - **MCP-native** (`mcp[cli]`, **FastMCP**) — connectivity is commoditized (MCP → Linux-Foundation Agentic AI Foundation, Dec 2025); we ride the standard and differentiate on verified grounding.
-- Services: **`RetrieveEvidence`** (facts/tables/text + provenance, with `as_of`), **`TraceClaim`** (claim → source fact + filing section), **`ValidateMetric`** (value/computation check; generalizes the Axiom Engine). `CheckPolicy` (compliance) is a future Layer-3 service.
+- Services: **`RetrieveEvidence`** (facts/tables/text + provenance, with `as_of`), **`TraceClaim`** (claim → source fact + filing section), **`ValidateMetric`** (value/computation check; generalizes the Axiom Engine).
 - **Local:** FastMCP servers + native `function_tool`s + Django REST (`/api/axioms/validate/` pattern). **Cloud:** API Gateway + Lambda/ECS, DynamoDB caching. Ingestion-time compute is separated from cheap runtime validation ("ingest once, validate millions").
 
 ### 4. Agent integration
 - **OpenAI Agents SDK** (`openai-agents`) with the existing planner + skills + `tool_wrapper` interception (code-enforced guardrails, no LLM in the validation path).
 - **Multi-model:** OpenAI, Anthropic, Gemini.
-- The agent-under-test consumes the PVC services as its grounded-retrieval path; the **generate → validate → refine** loop turns validation from post-hoc audit into part of reasoning.
+- The agent-under-test consumes the PV services as its grounded-retrieval path; the **generate → validate → refine** loop turns validation from post-hoc audit into part of reasoning.
 - **Cloud:** Amazon Bedrock + Step Functions for orchestration and multi-agent coordination.
 
 ### 5. Benchmark (construction + grading)
@@ -95,7 +95,7 @@ This document is the technology stack and the load-bearing architectural decisio
 *Why:* prove the benchmark's value before paying cloud complexity; DuckDB handles millions of facts with zero infra.
 *Consequence:* Phase 5 cloud migration is a clean hand-off to the advisor's vision/grant track, not a prerequisite.
 
-**ADR-06 — MCP-native PVC services.**
+**ADR-06 — MCP-native PV services.**
 *Why:* MCP is the de-facto standard (now Linux-Foundation governed); connectivity is commoditized, verified grounding is not.
 *Consequence:* services plug into any MCP agent; reuses the repo's FastMCP pattern. We compete on verification + benchmark, never on data access.
 

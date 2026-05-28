@@ -20,7 +20,7 @@ It deliberately stays inward-facing. The grand vision and large strategy belong 
 
 The draft frames the XBRL Truth Infrastructure as a *verification* layer (catch wrong numbers). The key reframing that organizes this whole design:
 
-> The same canonical-truth-layer + PVC services that **verify** agent outputs at runtime are also (a) the grounded substrate agents **retrieve** from, and (b) the ground-truth oracle + grader needed to **benchmark** agents.
+> The same canonical-truth-layer + PV services that **verify** agent outputs at runtime are also (a) the grounded substrate agents **retrieve** from, and (b) the ground-truth oracle + grader needed to **benchmark** agents.
 
 One substrate, three jobs: **retrieve · verify · benchmark.** Expressed as a slogan: **"ingest once → validate millions → benchmark rigorously."**
 
@@ -39,7 +39,7 @@ The draft's abstract "tagging → retrieval → matching" is, concretely, this s
 | **Axiom Engine** | Deterministic `A = L + E` check, code-enforced in the tool wrapper | `axioms/engine.py` |
 | **Numbers + Ratios (Layer 1)** | User-triggered "Validate" button; 3 ratios (accounting identity, gross margin, current ratio) checked against local XBRL; inline mismatch marks | `axioms/{engine,resolver,registry}.py`, `report_claim` tool, `/api/axioms/validate/`, Chrome extension |
 
-These sit inside the lab's **FinSearch four-layer architecture**: **L1** numbers+ratios (shipped, 91.7% vs Perplexity 41.7% on the 24-Q benchmark) · **L2** streaming per-claim validation + long-form report tagging · **L3** compliance-as-contract · **L4** cross-source / canonical truth.
+These sit inside the lab's **FinSearch four-layer architecture**: **L1** numbers+ratios (shipped, 91.7% vs Perplexity 41.7% on the 24-Q benchmark) · **L2** streaming per-claim validation + long-form report tagging · **L3** compliance-as-contract (deferred) · **L4** cross-source / canonical truth.
 
 **The gap to a benchmark:** 3–5 local filings can verify a demo, but cannot *generate or grade* a benchmark across companies and periods. Closing that gap is what pulls the truth layer into existence.
 
@@ -103,7 +103,7 @@ flowchart TB
         TREE["filing-tree view\n(presentation linkbase)"]
     end
 
-    subgraph PVC["PVC Services (Track B, MCP-native)"]
+    subgraph PV["PV Services (Track B, MCP-native)"]
         RE["RetrieveEvidence"]
         TC["TraceClaim"]
         VM["ValidateMetric"]
@@ -197,7 +197,7 @@ Companies tag the same economic concept differently (`Revenues` vs `RevenueFromC
 
 ---
 
-## 6. PVC services (MCP-native, Track B)
+## 6. PV services (MCP-native, Track B)
 
 Expose the truth layer as callable tools — for both the agent-under-test and the grader. MCP-native because connectivity is now commoditized (MCP donated to the Linux-Foundation Agentic AI Foundation, Dec 2025); the open problem is *verified grounding*, so we ride the standard.
 
