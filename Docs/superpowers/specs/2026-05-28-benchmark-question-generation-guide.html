@@ -585,7 +585,7 @@
     </div>
     <div class="meta-item">
       <span class="label">Repo</span>
-      <code style="font-size: 0.82em;">Main/backend/benchmark/</code>
+      <code style="font-size: 0.82em;">Benchmarks/xbrl-benchmark/</code>
     </div>
     <div class="meta-item">
       <span class="label">Dependencies</span>
@@ -594,9 +594,9 @@
   </div>
 </header>
 
-<!-- ════════════════════════════════════════════ WHAT YOU'RE BUILDING -->
+<!-- ════════════════════════════════════════════ WHAT WE'RE BUILDING -->
 <section>
-  <h2>What You're Building</h2>
+  <h2>What We're Building</h2>
   <p>
     A Python pipeline that <strong>automatically generates financial benchmark questions from real SEC data</strong>,
     with gold answers attached by construction &mdash; no manual labeling needed.
@@ -608,8 +608,8 @@
       <div class="label">Questions to generate</div>
     </div>
     <div class="metric-tile">
-      <div class="number">S&amp;P 500</div>
-      <div class="label">Company universe</div>
+      <div class="number">~300</div>
+      <div class="label">Filings to ingest</div>
     </div>
     <div class="metric-tile">
       <div class="number">7</div>
@@ -657,14 +657,14 @@
 <section>
   <h2>Step 0 &mdash; Project Structure</h2>
 
-  <p>Create this inside <code>Main/backend/</code>:</p>
+  <p>Work inside <code>Benchmarks/xbrl-benchmark/</code>:</p>
 
   <div class="file-tree">
-    <span class="dir">benchmark/</span><br>
+    <span class="dir">xbrl-benchmark/</span><br>
     &nbsp;&nbsp;<span class="dir">ingest/</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">__init__.py</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">companyfacts.py</span> &nbsp;<span class="desc">&larr; Fetch + parse SEC companyfacts JSON</span><br>
-    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">sp500.py</span> &nbsp;<span class="desc">&larr; S&amp;P 500 CIK list</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">universe.py</span> &nbsp;<span class="desc">&larr; Company CIK list (~300 large-cap S&amp;P 500)</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">normalize.py</span> &nbsp;<span class="desc">&larr; Concept normalization (tag aliases)</span><br>
     &nbsp;&nbsp;<span class="dir">store/</span><br>
     &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">__init__.py</span><br>
@@ -686,11 +686,12 @@
   <h2>Step 1 &mdash; Ingest SEC Data into DuckDB</h2>
 
   <div class="callout warning">
-    <div class="callout-title">&#9888; Why you can't skip this</div>
+    <div class="callout-title">&#9888; Why we can't skip this</div>
     <p>
       The existing <code>axioms/benchmark.py</code> resolves values from <strong>3 local iXBRL files</strong>
-      (AAPL, MSFT, TSLA). You can't generate 300 diverse questions from 3 companies.
-      The SEC publishes pre-extracted XBRL &mdash; one API call gives you every fact a company ever reported.
+      (AAPL, MSFT, TSLA). We can't generate 300 diverse questions from 3 companies.
+      Start with ~300 filings from large-cap S&amp;P 500 companies.
+      The SEC publishes pre-extracted XBRL &mdash; one API call gives us every fact a company ever reported.
     </p>
   </div>
 
@@ -721,7 +722,7 @@
 </pre>
 
   <h3>1b. The ingestion script</h3>
-  <p>For each S&amp;P 500 company, the script does three things:</p>
+  <p>For each company in our ~300-filing universe, the script does three things:</p>
   <table>
     <thead>
       <tr><th>#</th><th>Action</th><th>Details</th></tr>
@@ -748,10 +749,10 @@
   <div class="callout decision">
     <div class="callout-title">&#9670; Rules for SEC API access</div>
     <ul style="margin: 0;">
-      <li><strong>User-Agent header required:</strong> <code>"FinSearch Lab felixflyingt@gmail.com"</code> (SEC blocks without it)</li>
+      <li><strong>User-Agent header required:</strong> <code>"Agentic-FinSearch felixflyingt@gmail.com"</code> (SEC blocks without it)</li>
       <li><strong>Rate limit:</strong> &le;10 req/s &mdash; use <code>time.sleep(0.1)</code> between calls</li>
       <li><strong>Idempotent:</strong> <code>INSERT OR IGNORE</code> keyed on <code>fact_id</code> so re-runs don't duplicate</li>
-      <li><strong>Bulk alternative:</strong> Download <code>companyfacts.zip</code> once instead of making 500 API calls</li>
+      <li><strong>Bulk alternative:</strong> Download <code>companyfacts.zip</code> once instead of making 300 individual API calls</li>
     </ul>
   </div>
 
@@ -844,7 +845,7 @@ CANONICAL_METRICS = {
   <div class="gate">
     <div class="gate-title">Acceptance Gate &mdash; Step 1</div>
     <ul class="checklist">
-      <li>&ge;400 S&amp;P 500 companies ingested</li>
+      <li>&ge;300 companies ingested (large-cap S&amp;P 500 subset)</li>
       <li>Print stats: total facts, unique companies, date range, top-10 tags by frequency</li>
       <li>Regression: the 3 existing <code>axioms/benchmark.py</code> cases still resolve correctly from the DuckDB store</li>
     </ul>
@@ -889,7 +890,7 @@ CANONICAL_METRICS = {
   <h3>The 7 templates</h3>
   <p>
     Ordered from <strong>easiest to hardest to build</strong>.
-    Start with Templates 1&ndash;2 &mdash; they validate your pipeline end-to-end before you invest in harder ones.
+    Start with Templates 1&ndash;2 &mdash; they validate our pipeline end-to-end before we invest in harder ones.
   </p>
 
   <!-- ── Template 1 ──────────────────────────── -->
@@ -1185,8 +1186,8 @@ CANONICAL_METRICS = {
   <div class="out-of-scope">
     <ul>
       <li><strong>Grading harness</strong> &mdash; how to score an agent's answers against the gold labels</li>
-      <li><strong>PVC services</strong> &mdash; <code>RetrieveEvidence</code>, <code>TraceClaim</code>, <code>ValidateMetric</code> as MCP tools</li>
-      <li><strong>Agent wiring</strong> &mdash; routing FinSearch retrieval through the truth layer</li>
+      <li><strong>PV services</strong> &mdash; <code>RetrieveEvidence</code>, <code>TraceClaim</code>, <code>ValidateMetric</code> as MCP tools</li>
+      <li><strong>Agent wiring</strong> &mdash; routing Agentic FinSearch retrieval through the truth layer</li>
       <li><strong>Cloud deployment</strong> &mdash; Aurora / Neptune / leaderboard</li>
       <li><strong>Strategy-coding execution</strong> &mdash; backtest harness for Track C stretch goals</li>
     </ul>
@@ -1200,14 +1201,14 @@ CANONICAL_METRICS = {
   <div class="callout warning">
     <div class="callout-title">&#9888; Fair access rules</div>
     <p>
-      All requests must include a <code>User-Agent</code> header with your name and email.
+      All requests must include a <code>User-Agent</code> header with our name and email (Agentic-FinSearch felixflyingt@gmail.com).
       Max ~10 requests/second. Prefer bulk <code>companyfacts.zip</code> for the initial backfill.
     </p>
   </div>
 
 <pre>
 <span class="comment"># All facts for a company (primary ingest path)</span>
-curl -H <span class="string">"User-Agent: FinSearch Lab felixflyingt@gmail.com"</span> \
+curl -H <span class="string">"User-Agent: Agentic-FinSearch felixflyingt@gmail.com"</span> \
   <span class="string">"https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json"</span>
 
 <span class="comment"># Bulk download — all companies, no rate limits</span>
@@ -1242,7 +1243,7 @@ curl <span class="string">"https://www.sec.gov/files/company_tickers.json"</span
       <tr>
         <td>S&amp;P 500 CIK mapping</td>
         <td>SEC: <code>company_tickers.json</code></td>
-        <td>Use as the company universe for ingestion</td>
+        <td>Pick ~300 large-cap companies as the starting universe</td>
       </tr>
       <tr>
         <td>Existing 3-case benchmark</td>
