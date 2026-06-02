@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>XBRL Truth Infrastructure → Verifiable FinSearch Benchmark: The Engineering Bridge</title>
+<title>A Verifiable XBRL Benchmark</title>
 <style>
   :root {
     --bg: #fafaf9;
@@ -695,8 +695,8 @@
 
 <!-- ═══════════════ HEADER ═══════════════ -->
 <header class="doc-header">
-  <h1>XBRL Truth Infrastructure &rarr; Verifiable FinSearch Benchmark</h1>
-  <div class="subtitle">The Engineering Bridge &mdash; from vision to buildable tasks</div>
+  <h1>XBRL Truth Infrastructure &rarr; Verifiable XBRL Benchmark</h1>
+  <div class="subtitle">The benchmark for the XBRL Truth Infrastructure</div>
   <div class="meta-grid">
     <div class="meta-item">
       <span class="label">Date</span>
@@ -747,12 +747,12 @@
 <!-- ═══════════════ §0 FRAMING ═══════════════ -->
 <section id="framing">
   <h2>0. Purpose &amp; Framing</h2>
-  <p>This document answers two questions posed by the advisor:</p>
+  <p>This document addresses two core engineering questions:</p>
   <ol>
     <li><strong>Construct:</strong> Agentic FinSearch + XBRL &mdash; how do we build a <strong>Benchmark</strong> for (a) <em>长程取数 / long-range multi-hop data fetching</em> and (b) <em>复杂金融计算 / complex financial computation</em>?</li>
     <li><strong>Verify:</strong> For those tasks, how do we <strong>ensure verifiability</strong>?</li>
   </ol>
-  <p>It deliberately stays inward-facing. The grand vision and large strategy belong upstream (advisor + the <em>Financial Truth Infrastructure for AI Agents</em> drafts). Our job is the bridge: <strong>vision &rarr; buildable engineering tasks</strong>, each with a measurable acceptance gate.</p>
+  <p>This document is scoped to inward-facing engineering design. Higher-level product strategy is covered in the companion <em>Financial Truth Infrastructure for AI Agents</em> specification. The purpose here is to bridge <strong>vision &rarr; buildable engineering tasks</strong>, each with a measurable acceptance gate.</p>
 
   <div class="callout thesis">
     <div class="callout-title">Core Thesis &mdash; Dual-Use Substrate</div>
@@ -1206,7 +1206,7 @@ filings(
     <div class="phase-label">Phase 5 &mdash; Hand-off</div>
     <h3>Cloud Scale + Leaderboard</h3>
     <p><strong>Build:</strong> Migrate store to Neptune/Aurora/OpenSearch; public leaderboard + submission service.</p>
-    <p style="font-size:0.85rem;color:var(--text-secondary)"><em>Hand-off to advisor&rsquo;s vision/grant track.</em></p>
+    <p style="font-size:0.85rem;color:var(--text-secondary)"><em>Hand-off to product vision / grant track.</em></p>
   </div>
 
   <div class="callout thesis">
@@ -1386,7 +1386,7 @@ filings(
       <summary><span class="adr-tag">ADR-05</span> Local-first (DuckDB) &rarr; cloud-later</summary>
       <div class="adr-body">
         <p><strong>Why:</strong> Prove the benchmark&rsquo;s value before paying cloud complexity; DuckDB handles millions of facts with zero infra.</p>
-        <p><strong>Consequence:</strong> Phase 5 cloud migration is a clean hand-off to the advisor&rsquo;s vision/grant track, not a prerequisite.</p>
+        <p><strong>Consequence:</strong> Phase 5 cloud migration is a clean hand-off, not a prerequisite for benchmark value.</p>
       </div>
     </details>
 
@@ -1580,9 +1580,9 @@ filings(
 
 <!-- ═══════════════ FOOTER ═══════════════ -->
 <footer class="doc-footer">
-  <p><strong>SecureFinAI Lab</strong> &middot; XBRL Truth Infrastructure &rarr; Verifiable FinSearch Benchmark &middot; Engineering Bridge Design</p>
+  <p><strong>SecureFinAI Lab</strong> &middot; XBRL Truth Infrastructure &rarr; Verifiable XBRL Benchmark &middot; Engineering Bridge Design</p>
   <p style="margin-top:0.25rem">Companion: <em>Technology Stack &amp; Architecture Decisions</em> &middot; PRD: <em>XBRL Truth Benchmark &mdash; Product Requirements Document</em></p>
-  <p style="margin-top:0.5rem;font-size:0.8rem;color:#a8a29e">Generated 2026-05-28. Inward-facing engineering design &mdash; vision and strategy belong upstream.</p>
+  <p style="margin-top:0.5rem;font-size:0.8rem;color:#a8a29e">2026-05-28 &middot; Inward-facing engineering design document.</p>
 </footer>
 
 </div>
