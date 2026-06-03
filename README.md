@@ -120,7 +120,6 @@ The backend is deployed at [agenticfinsearch.org](https://agenticfinsearch.org).
 
 ### Citing
 
-This project was originally published as *FinGPT Search Agents* and has since been renamed to **Agentic FinSearch**.
 
 ```
 @inproceedings{tian2024customized,
