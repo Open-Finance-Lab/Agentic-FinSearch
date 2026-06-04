@@ -1,13 +1,21 @@
+<div align="center">
+
 # Agentic FinSearch
+
+[![Add to Chrome](https://img.shields.io/badge/Add%20to%20Chrome-Free-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white)](https://chromewebstore.google.com/detail/agentic-finsearch/aehnlpneoncdfioafiigiljmbghccami)
+
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/YudStzJYnc)
+[![Docs](https://img.shields.io/badge/Docs-Read%20the%20Docs-8CA1AF?logo=readthedocs&logoColor=white)](https://fingpt-search-agent-docs.readthedocs.io/en/latest/introduction.html)
+[![Open Financial LLM Leaderboard](https://img.shields.io/badge/FinLLM-Leaderboard-blue)](https://finosfoundation-open-financial-llm-leaderboard.hf.space/#/?columns=isPinned%2Crank%2Cmodel_type%2Cid%2Cmodel.average_score%2Cevaluations.vision_average%2Cevaluations.audio_average%2Cevaluations.english_average%2Cevaluations.chinese_average%2Cevaluations.japanese_average%2Cevaluations.spanish_average%2Cevaluations.greek_average%2Cevaluations.bilingual_average%2Cevaluations.multilingual_average)
+
+</div>
 
 Accurate retrieval of real-time financial data is a core infrastructure for building FinAgents. Our Agentic FinSearch is considered as a cornerstone towards democratizing financial intelligence to the general public. Also, it serves as a reference architecture for safe AI adoption in the financial services industry.
 
-[![Open Financial LLM Leaderboard](https://img.shields.io/badge/FinLLM-Leaderboard-blue)](https://finosfoundation-open-financial-llm-leaderboard.hf.space/#/?columns=isPinned%2Crank%2Cmodel_type%2Cid%2Cmodel.average_score%2Cevaluations.vision_average%2Cevaluations.audio_average%2Cevaluations.english_average%2Cevaluations.chinese_average%2Cevaluations.japanese_average%2Cevaluations.spanish_average%2Cevaluations.greek_average%2Cevaluations.bilingual_average%2Cevaluations.multilingual_average)
-
-- **Air-gapped deployment** - By design, our Agentic FinSearch emphasizes  in the production environment, in order to protect user privacy. 
-- **Numerical accuracy** - This is a critical issue, since one cannot directly apply general-purpose LLMs and agents to business and finance.
-- **No hallucination & misinformation** - For safe AI adoption in high-stake domains like finance, no hallucination & misinformation is a must.  
-- **Source transparency** — every response includes verifiable sources, ensuring reliability and reducing misinformation.
+- **Air-gapped deployment** — runs fully on-premise in production, so user data never leaves your environment.
+- **Numerical accuracy** — purpose-built for finance, where general-purpose LLMs routinely get the numbers wrong.
+- **No hallucination or misinformation** — a hard requirement for safe AI adoption in high-stakes domains like finance.
+- **Source transparency** — every response cites verifiable sources, so you can check exactly where each fact came from.
 
 **No trading suggestions. For research and informational purposes only.**
 
@@ -17,7 +25,7 @@ Accurate retrieval of real-time financial data is a core infrastructure for buil
 
    ![image](Docs/source/_static/images/new_gui_1.png)
 
-3. Source verification — check exactly where each piece of information came from.
+2. Source verification — check exactly where each piece of information came from.
 
    ![image](Docs/source/_static/images/new_gui_2.png)
 
@@ -111,7 +119,7 @@ bun run build:full
 
 ## Usage and Documentation
 
-For detailed usage instructions and more information, see: https://agentic-finsearch.readthedocs.io/
+For detailed usage instructions and more information, see: https://fingpt-search-agent-docs.readthedocs.io/en/latest/introduction.html
 
 
 ### Live Demo
@@ -119,6 +127,8 @@ For detailed usage instructions and more information, see: https://agentic-finse
 The backend is deployed at [agenticfinsearch.org](https://agenticfinsearch.org).
 
 ### Citing
+
+This project was originally published as *FinGPT Search Agents* and has since been renamed to **Agentic FinSearch**.
 
 
 ```
