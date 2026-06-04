@@ -32,6 +32,10 @@ Accurate retrieval of real-time financial data is a core infrastructure for buil
 
 ## Installation
 
+If you just want to test it out, it is recommended to use the link above to install the official Agentic FinSearch's Chrome Extension.
+
+For local installment, see below.
+
 ### Prerequisites
 
 - **Python 3.12.x** (uv will download it automatically)
@@ -120,11 +124,6 @@ bun run build:full
 ## Usage and Documentation
 
 For detailed usage instructions and more information, see: https://fingpt-search-agent-docs.readthedocs.io/en/latest/introduction.html
-
-
-### Live Demo
-
-The backend is deployed at [agenticfinsearch.org](https://agenticfinsearch.org).
 
 ### Citing
 
