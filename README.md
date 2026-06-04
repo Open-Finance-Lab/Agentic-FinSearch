@@ -34,7 +34,7 @@ Accurate retrieval of real-time financial data is a core infrastructure for buil
 
 If you just want to test it out, it is recommended to use the link above to install the official Agentic FinSearch's Chrome Extension.
 
-For local installment, see below.
+For local installation, see below.
 
 ### Prerequisites
 
