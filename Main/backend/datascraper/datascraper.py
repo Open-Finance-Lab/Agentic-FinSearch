@@ -803,16 +803,19 @@ def create_advanced_response(
             return response_text, source_entries
 
     except Exception as e:
-        logging.error(f"OpenAI Responses API failed: {e}")
+        logging.error(f"OpenAI Responses API failed: {e}", exc_info=True)
         qt.flag("error", message=str(e))
         qt.complete()
+        # Return a generic message to the client; the exception detail is logged
+        # server-side above. Never surface str(e) — it can leak stack traces,
+        # file paths, or other internal details (information disclosure).
+        client_message = "I encountered an error while searching for information. Please try again."
         if stream:
-            error_message = str(e)
             async def error_gen():
-                yield f"I encountered an error while searching for information: {error_message}. Please try again.", []
+                yield client_message, []
             return error_gen()
         else:
-            return f"I encountered an error while searching for information: {str(e)}. Please try again.", []
+            return client_message, []
 
 
 async def _create_advanced_response_stream_async(
@@ -846,8 +849,10 @@ async def _create_advanced_response_stream_async(
             yield text_chunk, source_entries
 
     except Exception as e:
-        logging.error(f"Error in advanced streaming: {e}")
-        yield f"Error: {str(e)}", []
+        logging.error(f"Error in advanced streaming: {e}", exc_info=True)
+        # Generic client-facing message; detail is logged above, never surfaced
+        # to the user (information-disclosure hardening).
+        yield "I encountered an error while searching for information. Please try again.", []
 
 
 def create_advanced_response_streaming(
