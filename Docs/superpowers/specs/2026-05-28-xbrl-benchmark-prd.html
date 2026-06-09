@@ -456,7 +456,7 @@
     </div>
     <div class="meta-item">
       <span class="label">Status</span>
-      Ready for implementation
+      Construction shipped (v0) &middot; now QA + grading
     </div>
     <div class="meta-item">
       <span class="label">Project</span>
@@ -477,6 +477,24 @@
     </div>
   </div>
 </header>
+
+<!-- ════════════════════════════════════════════ STATUS UPDATE -->
+<div class="callout decision" style="margin-bottom: 2.5rem;">
+  <div class="callout-title">&#9670; Status update &mdash; 2026-06-09</div>
+  <p>
+    Since this PRD was written, the <strong>300-case pilot has been generated</strong>: the canonical fact store was built
+    (~246 large-cap companies, ~488K facts) and the construction engine produced <strong>v0</strong> of the benchmark
+    (<code>cases.json</code> &mdash; 300 cases, both tracks). Phases 0&ndash;1 below are <strong>built to v0</strong>; the project has
+    moved to <strong>QA-hardening and grading</strong>.
+  </p>
+  <p>
+    The detailed QA and grading plans now live in two companion guides that supersede the Phase&nbsp;1&ndash;2 sketches here:
+    <strong>Benchmark QA &amp; Expansion Playbook</strong> (<code>2026-06-09-benchmark-qa-expansion-playbook.html</code>, contributor)
+    and the <strong>Owner&rsquo;s Guide &mdash; Acceptance Gates &amp; Grading</strong>
+    (<code>2026-06-09-benchmark-owner-gates-grading.html</code>, Felix). This PRD remains the canonical reference for the
+    data layer, tracks, and architecture.
+  </p>
+</div>
 
 <!-- ════════════════════════════════════════════ TL;DR -->
 <section>
@@ -538,7 +556,7 @@
       </tr>
       <tr>
         <td><strong>FinTagging</strong></td>
-        <td>72% locating facts, 17% semantic tagging, <strong>0% full-taxonomy</strong></td>
+        <td>Extracts numbers reasonably, but fine-grained concept tagging peaks <strong>&lt;19%</strong> &mdash; <strong>~0% full-taxonomy</strong> as single-step classification</td>
         <td>Agents cannot self-ground in XBRL &mdash; they need external truth</td>
       </tr>
       <tr>
@@ -858,7 +876,7 @@
   <p>
     Companies tag the same economic concept differently (<code>Revenues</code> vs
     <code>RevenueFromContractWithCustomerExcludingAssessedTax</code> vs extensions).
-    FinTagging measured: LLMs hit <strong>17% semantic-tag accuracy, 0% full-taxonomy</strong>.
+    FinTagging measured: fine-grained concept linking peaks <strong>below 19% accuracy</strong>, and <strong>~0% F1</strong> when posed as single-step full-taxonomy tagging.
   </p>
   <p>
     Solution: generalize the shipped <code>RATIO_TAG_MAP</code> into a config-driven
@@ -986,7 +1004,7 @@
   </p>
 
   <div class="phase-card p0">
-    <div class="phase-label">Phase 0 &mdash; Start Here</div>
+    <div class="phase-label">Phase 0 &mdash; Start Here <span class="badge shipped">v0 shipped</span></div>
     <h3>Ingest S&amp;P 500 into the Canonical Truth Store</h3>
     <p>
       Build the DuckDB fact store and populate it with S&amp;P 500 company data from SEC's
@@ -1006,7 +1024,7 @@
   </div>
 
   <div class="phase-card p1">
-    <div class="phase-label">Phase 1</div>
+    <div class="phase-label">Phase 1 <span class="badge shipped">v0 shipped</span></div>
     <h3>Benchmark Construction Engine</h3>
     <p>
       Build the template engine that walks the fact store and generates benchmark cases.
@@ -1046,7 +1064,7 @@
 
   <div class="phase-card p3">
     <div class="phase-label">Phase 3 &mdash; Stretch</div>
-    <h3>PVC Services &amp; Agent Wiring</h3>
+    <h3>PV Services &amp; Agent Wiring</h3>
     <p>
       Expose the truth layer as MCP-native services (<code>RetrieveEvidence</code>,
       <code>TraceClaim</code>, <code>ValidateMetric</code>) and wire them into the FinSearch agent.
@@ -1058,7 +1076,7 @@
         <li><code>RetrieveEvidence</code>: <code>(entity, concept, period) &rarr; facts[] + provenance</code></li>
         <li><code>TraceClaim</code>: <code>(claim) &rarr; source facts + filing accession</code></li>
         <li><code>ValidateMetric</code>: <code>(metric, inputs, claimed_value) &rarr; VERIFIED/FAILED/SKIPPED</code></li>
-        <li>Single-hop slice benchmark using PVC services</li>
+        <li>Single-hop slice benchmark using PV services</li>
       </ul>
     </div>
     <div class="gate">Gate: single-hop Track R accuracy + provenance coverage on FinSearch data</div>
@@ -1284,7 +1302,7 @@ GET https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip
       <tr><td>FinSearchComp (arXiv:2509.13160)</td><td>Multi-task financial agent benchmark; T1&rarr;T3 decline data</td></tr>
       <tr><td>FinAgentBench (arXiv:2508.14052)</td><td>Agent degradation at fine-grained fact-pinpointing</td></tr>
       <tr><td>QuantEval (arXiv:2601.08689v2)</td><td>Execution-based quant reasoning; GPT-5 ~55% vs human 89%</td></tr>
-      <tr><td>FinTagging (XBRL.org)</td><td>17% semantic / 0% full-taxonomy accuracy</td></tr>
+      <tr><td>FinTagging (arXiv:2505.20650)</td><td>&lt;19% fine-grained concept-linking; ~0% full-taxonomy single-step</td></tr>
       <tr><td>&#21516;&#33457;&#39034; evaluation</td><td>Multi-hop cliff: single&lt;80%, two-hop&lt;50%</td></tr>
       <tr><td>&tau;&sup2;-bench (Sierra Research)</td><td>SOTA tool-use agents &lt;50%</td></tr>
       <tr><td>EU AI Act Annex III</td><td>High-risk finance obligations, Aug 2 2026 deadline</td></tr>

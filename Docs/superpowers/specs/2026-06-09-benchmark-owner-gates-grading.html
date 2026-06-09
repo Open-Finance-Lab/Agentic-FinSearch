@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Benchmark Owner&rsquo;s Guide &mdash; Acceptance Gates &amp; Grading</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e5e5e4;
+    --text: #1c1917;
+    --text-secondary: #57534e;
+    --accent: #c2410c;
+    --accent-bg: #fff7ed;
+    --accent-border: #fed7aa;
+    --green: #15803d;
+    --green-bg: #f0fdf4;
+    --green-border: #bbf7d0;
+    --blue: #1d4ed8;
+    --blue-bg: #eff6ff;
+    --blue-border: #bfdbfe;
+    --purple: #7c3aed;
+    --purple-bg: #f5f3ff;
+    --purple-border: #ddd6fe;
+    --yellow-bg: #fefce8;
+    --yellow-border: #fef08a;
+    --slate: #475569;
+    --slate-bg: #f8fafc;
+    --slate-border: #cbd5e1;
+    --mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: var(--sans); background: var(--bg); color: var(--text); line-height: 1.7; font-size: 15px; }
+  .page { max-width: 900px; margin: 0 auto; padding: 3rem 2rem 6rem; }
+
+  .doc-header { border-bottom: 2px solid var(--text); padding-bottom: 2rem; margin-bottom: 3rem; }
+  .doc-header h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1.2; margin-bottom: 0.5rem; }
+  .doc-header .subtitle { font-size: 1.1rem; color: var(--text-secondary); font-weight: 400; }
+  .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin-top: 1.5rem; font-size: 0.85rem; }
+  .meta-item { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; }
+  .meta-item .label { font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; color: var(--text-secondary); display: block; margin-bottom: 0.15rem; }
+
+  section { margin-bottom: 3rem; }
+  h2 { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 1rem; padding-top: 0.5rem; border-top: 1px solid var(--border); }
+  h2 .num { color: var(--accent); font-family: var(--mono); font-size: 1rem; margin-right: 0.5rem; }
+  h3 { font-size: 1.05rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+  p, li { color: var(--text); }
+  p + p { margin-top: 0.75rem; }
+  ul, ol { margin: 0.75rem 0; padding-left: 1.5rem; }
+  li { margin-bottom: 0.35rem; }
+  strong { font-weight: 600; }
+  em.term { font-style: normal; font-weight: 600; color: var(--accent); }
+  code { font-family: var(--mono); font-size: 0.88em; background: #f5f5f4; border: 1px solid var(--border); border-radius: 4px; padding: 0.1em 0.35em; }
+
+  .callout { border-radius: 10px; padding: 1.25rem 1.5rem; margin: 1.25rem 0; border: 1px solid; }
+  .callout-title { font-weight: 700; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem; }
+  .callout.thesis { background: var(--accent-bg); border-color: var(--accent-border); }
+  .callout.thesis .callout-title { color: var(--accent); }
+  .callout.decision { background: var(--blue-bg); border-color: var(--blue-border); }
+  .callout.decision .callout-title { color: var(--blue); }
+  .callout.warning { background: var(--yellow-bg); border-color: var(--yellow-border); }
+  .callout.warning .callout-title { color: #a16207; }
+  .callout.note { background: var(--purple-bg); border-color: var(--purple-border); }
+  .callout.note .callout-title { color: var(--purple); }
+  .callout.methods { background: var(--slate-bg); border-color: var(--slate-border); }
+  .callout.methods .callout-title { color: var(--slate); }
+  .callout p + p { margin-top: 0.6rem; }
+
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.9rem; }
+  th { text-align: left; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); padding: 0.65rem 0.75rem; border-bottom: 2px solid var(--text); }
+  td { padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+
+  .paper { display: inline-block; font-size: 0.68rem; font-weight: 700; font-family: var(--mono); letter-spacing: 0.02em; padding: 0.1rem 0.4rem; border-radius: 4px; background: var(--slate-bg); color: var(--slate); border: 1px solid var(--slate-border); vertical-align: middle; }
+
+  /* lifecycle strip */
+  .lifecycle { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin: 1.25rem 0; font-size: 0.85rem; }
+  .lifecycle .stage { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.9rem; font-weight: 600; }
+  .lifecycle .stage.here { background: var(--accent-bg); border-color: var(--accent-border); color: var(--accent); }
+  .lifecycle .arrow { color: var(--text-secondary); font-family: var(--mono); }
+
+  /* gate / checklist */
+  .gate { background: var(--accent-bg); border: 1px solid var(--accent-border); border-radius: 10px; padding: 1.1rem 1.4rem; margin: 1.25rem 0; }
+  .gate .gate-title { font-weight: 700; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem; }
+  .gate ul { list-style: none; padding-left: 0; margin: 0; }
+  .gate li { padding-left: 1.6rem; position: relative; margin-bottom: 0.45rem; }
+  .gate li::before { content: '\2610'; position: absolute; left: 0; font-family: var(--mono); color: var(--accent); }
+
+  /* grader cards */
+  .grade { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.1rem 1.25rem; margin: 0.85rem 0; position: relative; overflow: hidden; }
+  .grade::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: var(--blue); }
+  .grade.c::before { background: var(--purple); }
+  .grade.stretch::before { background: var(--text-secondary); }
+  .grade .gl { font-family: var(--mono); font-size: 0.75rem; font-weight: 700; color: var(--text-secondary); }
+  .grade h4 { font-size: 1.02rem; font-weight: 600; margin: 0.15rem 0 0.4rem; }
+
+  /* milestones */
+  .ms { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem 1.4rem; margin: 1rem 0; position: relative; overflow: hidden; }
+  .ms::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; }
+  .ms.m0::before { background: var(--text-secondary); }
+  .ms.m1::before { background: var(--accent); }
+  .ms.m2::before { background: var(--blue); }
+  .ms.m3::before { background: var(--green); }
+  .ms .ms-label { font-family: var(--mono); font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+  .ms.m0 .ms-label { color: var(--text-secondary); }
+  .ms.m1 .ms-label { color: var(--accent); }
+  .ms.m2 .ms-label { color: var(--blue); }
+  .ms.m3 .ms-label { color: var(--green); }
+  .ms h3 { margin-top: 0.15rem; }
+  .ms .report { background: #f5f5f4; border-radius: 8px; padding: 0.6rem 0.9rem; margin-top: 0.6rem; font-size: 0.86rem; }
+  .ms .report b { color: var(--text-secondary); text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.04em; }
+
+  .metric-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.75rem; margin: 1rem 0; }
+  .metric-tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.25rem; text-align: center; }
+  .metric-tile .number { font-size: 1.6rem; font-weight: 700; font-family: var(--mono); letter-spacing: -0.03em; }
+  .metric-tile .label { font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.2rem; }
+
+  .doc-footer { border-top: 1px solid var(--border); padding-top: 1.5rem; margin-top: 3rem; font-size: 0.85rem; color: var(--text-secondary); }
+
+  @media print { body { background: white; font-size: 11pt; } .page { max-width: 100%; padding: 0; } .grade, .ms, .gate { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ════════════════════════════════════════════ HEADER -->
+<header class="doc-header">
+  <h1>Benchmark Owner&rsquo;s Guide</h1>
+  <div class="subtitle">Acceptance gates &amp; grading &mdash; what you decide, sign off, and build next</div>
+  <div class="meta-grid">
+    <div class="meta-item"><span class="label">Date</span>2026-06-09</div>
+    <div class="meta-item"><span class="label">For</span>Felix &mdash; benchmark owner</div>
+    <div class="meta-item"><span class="label">Your role</span>Set the bar &middot; bless versions &middot; build grading</div>
+    <div class="meta-item"><span class="label">Sequence</span>QA-harden first, grade next</div>
+    <div class="meta-item"><span class="label">Companion doc</span>QA &amp; Expansion Playbook (contributor)</div>
+    <div class="meta-item"><span class="label">Project</span>XBRL Truth Benchmark &middot; SecureFinAI Lab</div>
+  </div>
+</header>
+
+<!-- ════════════════════════════════════════════ WHAT THIS IS -->
+<section>
+  <h2><span class="num">00</span>What this guide is for</h2>
+  <p>
+    Your teammate owns the hands-on QA and the growth of the question set (their playbook is the companion doc).
+    <strong>You own three things they can&rsquo;t:</strong> the <em class="term">bar</em> &mdash; what &ldquo;good enough to ship&rdquo; means;
+    the <em class="term">sign-off</em> &mdash; declaring a version blessed; and the <em class="term">grading track</em> &mdash; the
+    machinery that turns the set into actual scores for an AI agent. This guide is written for someone running a benchmark
+    for the first time, so it explains the <em>why</em> as much as the <em>what</em>, and it stays out of tools and code on purpose.
+  </p>
+  <div class="callout warning">
+    <div class="callout-title">&#9888; Out of scope here, by design</div>
+    <p>This is not an implementation spec. It tells you <em>what the grader must measure</em> and <em>what a version must clear</em> &mdash; not
+      which database, library, or code to use. Those decisions belong in a focused build spec written <em>from</em> this guide, once the set is blessed.</p>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ WHAT RUNNING A BENCHMARK IS -->
+<section>
+  <h2><span class="num">01</span>What &ldquo;running a benchmark&rdquo; actually is</h2>
+  <p>The mental shift, if this is new: a benchmark is <strong>a released product with versions</strong>, not a file you make once.
+    It moves through a repeating lifecycle, and your teammate&rsquo;s QA is the loop that keeps it honest:</p>
+
+  <div class="lifecycle">
+    <span class="stage">Construct</span><span class="arrow">&rarr;</span>
+    <span class="stage here">QA-harden</span><span class="arrow">&rarr;</span>
+    <span class="stage">Freeze &amp; version</span><span class="arrow">&rarr;</span>
+    <span class="stage">Grade agents</span><span class="arrow">&rarr;</span>
+    <span class="stage">Expand</span><span class="arrow">&#8630;</span>
+    <span style="color:var(--text-secondary);font-size:0.8rem;">(back through QA)</span>
+  </div>
+
+  <p>The set is built (done &mdash; v0). It now gets hardened and frozen into a trustworthy <strong>v1</strong>. Only then do you grade agents
+    against it. When you grow it, the new cases loop back through the same QA before the next version. You are at the
+    <strong>QA-harden</strong> step.</p>
+
+  <div class="callout thesis">
+    <div class="callout-title">&#9670; The one sentence for your professor</div>
+    <p>&ldquo;<strong>Continuous QA</strong> means we built a checklist we can re-run on the whole set on command, and the set is only ever
+      allowed to grow while that checklist stays green. Each blessed version ships with its own report and changelog.&rdquo;
+      That single discipline is what makes a benchmark expandable instead of fragile &mdash; it is exactly the concern your professor raised.</p>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ THE GATE -->
+<section>
+  <h2><span class="num">02</span>The acceptance gate &mdash; what makes a version &ldquo;blessed&rdquo;</h2>
+  <p>This is the most important thing you own. The <strong>gate</strong> is the bar a set must clear to become a blessed, citable version
+    (the first one being <em class="term">v1</em>). You don&rsquo;t re-run the checks yourself &mdash; you confirm they were run, read the
+    evidence, and sign off. Tick every box before blessing:</p>
+
+  <div class="gate">
+    <div class="gate-title">v1 acceptance gate</div>
+    <ul>
+      <li><strong>Integrity is green</strong> &mdash; evidence exists, no future-data leakage, the math re-derives (checklist C1&ndash;C5 in the playbook, zero failures).</li>
+      <li><strong>Correctness is green</strong> &mdash; subtotals reconcile to their parts and accounting identities hold (C6&ndash;C7, zero failures).</li>
+      <li><strong>Quality flags resolved</strong> &mdash; near-duplicates removed, no single template above 25% of the set, era policy applied (C8&ndash;C10).</li>
+      <li><strong>Human spot-check passed</strong> &mdash; the two-reviewer read met the agreement bar (kappa &ge; 0.8) and cleared the rubric, with <strong>zero &ldquo;ambiguous answer&rdquo; cases</strong> in the sample.</li>
+      <li><strong>It&rsquo;s documented</strong> &mdash; a dataset card and version tag exist, with counts and a changelog.</li>
+    </ul>
+  </div>
+
+  <p>If any box is empty, the set is not v1 &mdash; it goes back to your teammate with the specific gap named. A gate that bends
+    is not a gate.</p>
+</section>
+
+<!-- ════════════════════════════════════════════ REVIEWING -->
+<section>
+  <h2><span class="num">03</span>How to review your teammate&rsquo;s QA</h2>
+  <p>You don&rsquo;t need to read the tooling. You need to read <strong>five pieces of evidence</strong> and do one small check of your own:</p>
+  <table>
+    <thead><tr><th style="width:34%">Look at</th><th>You&rsquo;re confirming</th></tr></thead>
+    <tbody>
+      <tr><td><strong>The QA report</strong></td><td>Every integrity and correctness check came back green, on the current version, dated.</td></tr>
+      <tr><td><strong>The spot-check log</strong></td><td>The agreement score met the bar, and there are no unresolved &ldquo;ambiguous answer&rdquo; cases.</td></tr>
+      <tr><td><strong>The distribution table</strong></td><td>No template exceeds 25%; difficulty and era look reasonable.</td></tr>
+      <tr><td><strong>The changelog / dataset card</strong></td><td>What changed since the last version is written down, with counts.</td></tr>
+      <tr><td><strong>Five cases, read cold (your own check)</strong></td><td>Pick five yourself and try to find a <em>second</em> defensible answer to each. If you can&rsquo;t, that&rsquo;s a good sign; if you can, send it back.</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Sign-off</strong> = tagging that version as blessed. From that moment it&rsquo;s frozen: future changes create a new version, never an edit in place.</p>
+</section>
+
+<!-- ════════════════════════════════════════════ GRADING -->
+<section>
+  <h2><span class="num">04</span>The grading track &mdash; what the grader will measure</h2>
+  <p>Once v1 is blessed, you build the <strong>grader</strong>: the machinery that runs an AI agent against the questions and scores it.
+    This section is the <em>specification of what to measure</em> &mdash; the build itself is a later spec. A grader asks two things of any answer:
+    <strong>did the agent get the right answer, and did it get there honestly</strong> &mdash; using the real facts, not a lucky guess?</p>
+
+  <div class="grade">
+    <div class="gl">TRACK R &middot; retrieval questions</div>
+    <h4>Score on which of the needed facts the agent actually reached.</h4>
+    <p>Each question has a known set of facts its answer depends on. Measure two things: <strong>did the agent reach all of them</strong>
+      (the all-or-nothing view), and <strong>what fraction did it reach</strong> (the partial-credit view). Crucially, <strong>don&rsquo;t require the
+      same route</strong> &mdash; a question can often be solved more than one way, so credit the facts reached, not the order or the exact path taken.
+      <span class="paper">FINAUDITING</span></p>
+  </div>
+
+  <div class="grade c">
+    <div class="gl">TRACK C &middot; computation questions</div>
+    <h4>Recompute from the agent&rsquo;s inputs, and report three things separately.</h4>
+    <p>Don&rsquo;t collapse computation into one right/wrong bit. Report, as three separate results:
+      <strong>(1) did the agent produce a well-formed answer at all</strong>; <strong>(2) did it pull the right numbers</strong>;
+      <strong>(3) did it do the math correctly</strong>. Keeping these apart means a formatting slip is never mistaken for a reasoning
+      failure &mdash; you can see exactly where it broke. <span class="paper">FINAUDITING</span></p>
+    <p style="font-size:0.88rem;color:var(--text-secondary);"><strong>Tolerance:</strong> exact match for numbers copied straight from a filing and for
+      identities that must hold precisely; a small, stated wiggle only where you divide (ratios, returns). This finally settles the
+      &ldquo;tolerance decided later&rdquo; note left open in the set&rsquo;s own documentation.</p>
+  </div>
+
+  <div class="grade stretch">
+    <div class="gl">TRACK C &middot; strategy-coding (later stretch)</div>
+    <h4>Two separate scores: does it run, and how close is it?</h4>
+    <p>If you later add questions where the agent writes a small strategy, score <strong>whether the code actually runs</strong> under fixed,
+      no-peeking-at-the-future rules, <em>and</em> <strong>how close its results are to the reference</strong> &mdash; as two separate numbers.
+      A run that doesn&rsquo;t execute is &ldquo;undefined,&rdquo; not zero: you can&rsquo;t be accurate if you didn&rsquo;t run. <span class="paper">QuantEval</span></p>
+  </div>
+
+  <div class="callout decision">
+    <div class="callout-title">&#9670; The headline result: the baseline comparison</div>
+    <p>Run the <strong>same agent twice &mdash; once with our truth layer, once without</strong> &mdash; and show the difference. This both
+      <strong>quantifies the lift our work provides</strong> and <strong>reproduces, on our own data, the well-known finding that agent accuracy
+      falls off a cliff</strong> once a question needs more than one step. That contrast is the single most compelling number to put in front
+      of your professor and, later, a paper.</p>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ AUDITING TIER -->
+<section>
+  <h2><span class="num">05</span>The auditing tier &mdash; a QA gate now, a question family later</h2>
+  <p>The subtotal-reconciliation and identity checks (C6&ndash;C7) do <strong>double duty</strong>. Today they are a
+    <strong>quality gate</strong>: no question ships on a number that doesn&rsquo;t add up. Later, the same idea becomes a
+    <strong>new family of computation questions</strong> &mdash; &ldquo;verify this subtotal,&rdquo; &ldquo;does Assets = Liabilities + Equity hold for this
+    filing?&rdquo; &mdash; that are fully checkable with no AI judge at all.</p>
+  <div class="callout note">
+    <div class="callout-title">&#9670; Why this is a strategic win, not just a check</div>
+    <p>This kind of consistency-checking is the core of <span class="paper">FINAUDITING</span>, a sibling XBRL benchmark from our own
+      lab circle. Adopting it <strong>aligns us with allied work</strong>, gives our benchmark <strong>harder, fully-deterministic headroom</strong>,
+      and lets us frame our set as the <em>complement</em> of theirs: they detect filings&rsquo; errors, we generate verified questions from clean facts.
+      Worth a sentence to your professor.</p>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ ROADMAP -->
+<section>
+  <h2><span class="num">06</span>Roadmap &amp; what to report at each step</h2>
+  <p>Four milestones, in order, each with a concrete thing to show your professor. No dates here on purpose &mdash; the sequence is the
+    commitment; you set the pace.</p>
+
+  <div class="ms m0">
+    <div class="ms-label">M0 &middot; Done</div>
+    <h3>v0 pilot built, structural QA passing</h3>
+    <p>300 cases generated from real filings; the machine-checkable QA already passes.</p>
+  </div>
+  <div class="ms m1">
+    <div class="ms-label">M1 &middot; Now &mdash; this phase</div>
+    <h3>Standing QA checklist + first human spot-check &rarr; v1 blessed</h3>
+    <p>Your teammate makes the checklist re-runnable and does the first structured human read; you sign the acceptance gate.</p>
+    <div class="report"><b>Report to professor:</b> &ldquo;The set is now a versioned, re-checkable product &mdash; here is the QA report, the reviewer agreement score, and the blessed v1 of 300.&rdquo;</div>
+  </div>
+  <div class="ms m2">
+    <div class="ms-label">M2 &middot; Next</div>
+    <h3>Grading harness &rarr; first agent evaluation</h3>
+    <p>You build the grader (section 04) and run our agent with and without the truth layer.</p>
+    <div class="report"><b>Report to professor:</b> &ldquo;First numbers &mdash; here is the multi-hop accuracy cliff, and the lift our truth layer provides, measured on our own benchmark.&rdquo;</div>
+  </div>
+  <div class="ms m3">
+    <div class="ms-label">M3 &middot; Then</div>
+    <h3>Expand under continuous QA</h3>
+    <p>Grow the set toward balance (the thin templates) and add the auditing question family &mdash; every batch passing the same gate.</p>
+    <div class="report"><b>Report to professor:</b> &ldquo;The set grows safely &mdash; here is v1.x, the changelog, and the refreshed distribution.&rdquo;</div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ OPEN DECISIONS -->
+<section>
+  <h2><span class="num">07</span>Open decisions for you to ratify</h2>
+  <p>These are judgment calls, not facts &mdash; they&rsquo;re yours to make. Recommended defaults are filled in so nothing is blocked; change any of them and the docs follow.</p>
+  <table>
+    <thead><tr><th style="width:26%">Decision</th><th>Recommended default</th><th style="width:18%">Your call</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Rounding tolerance</strong></td><td>Exact for copied facts and identities; a small relative wiggle (e.g. a fraction of a percent) only for ratios and returns.</td><td><em style="color:var(--text-secondary);">&mdash;</em></td></tr>
+      <tr><td><strong>Era cap</strong></td><td>Flag every pre-2020 case; keep them a minority of the set (e.g. &le; 20&ndash;25%). New cases lean recent.</td><td><em style="color:var(--text-secondary);">&mdash;</em></td></tr>
+      <tr><td><strong>Single-template cap</strong></td><td>No template above 25% of the set.</td><td><em style="color:var(--text-secondary);">&mdash;</em></td></tr>
+      <tr><td><strong>Spot-check bar</strong></td><td>Reviewer agreement kappa &ge; 0.8; &ge; 90% of the sample clears the rubric; zero &ldquo;ambiguous answer&rdquo; cases.</td><td><em style="color:var(--text-secondary);">&mdash;</em></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ════════════════════════════════════════════ METHODS + CORRECTION -->
+<section>
+  <h2><span class="num">08</span>Grounded in prior work</h2>
+  <div class="callout methods">
+    <div class="callout-title">&#9670; Where the grading methods come from</div>
+    <p><span class="paper">FINAUDITING</span> &mdash; we take its way of scoring retrieval by <strong>which facts were reached</strong> (Track R), its
+      habit of <strong>separating computation failures by stage</strong> (Track C&rsquo;s three results), and its <strong>subtotal/identity
+      consistency checks</strong> (the auditing tier).</p>
+    <p><span class="paper">QuantEval</span> &mdash; we take its rule that <strong>&ldquo;does it run&rdquo; is a separate score from &ldquo;is it right,&rdquo;</strong> and
+      that a non-running answer is undefined rather than zero (the strategy-coding stretch).</p>
+    <p><span class="paper">FinTagging</span> &mdash; it shows that grading on <strong>exact label match unfairly punishes correct-but-differently-named
+      facts</strong>, which is why our grader credits a fact reached through an accepted alias rather than demanding one exact spelling.</p>
+  </div>
+
+  <div class="callout warning">
+    <div class="callout-title">&#9888; Citation to correct in the earlier docs</div>
+    <p>Our existing PRD and bridge-design docs cite FinTagging as &ldquo;17% semantic / 0% full-taxonomy&rdquo; accuracy. On a close read that&rsquo;s
+      slightly off: FinTagging&rsquo;s own result is <strong>0% when the task is posed as a single step</strong>, with fine-grained tagging
+      <strong>peaking below ~19%</strong> even in its easier two-step form; the &ldquo;17%&rdquo; figure was actually a <em>different</em> system&rsquo;s number
+      quoted in their related-work section. Recommend patching that line in the earlier docs separately &mdash; flagging rather than silently changing it.</p>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ FOOTER -->
+<footer class="doc-footer">
+  <p><strong>XBRL Truth Benchmark</strong> &middot; SecureFinAI Lab &middot; Columbia University<br>
+  This guide covers the owner&rsquo;s side &mdash; the acceptance gate, the grading specification, and the roadmap. The hands-on QA and
+  expansion work lives in the companion <strong>QA &amp; Expansion Playbook</strong>. The grader and QA tooling are built later, in a
+  dedicated implementation spec written from these two guides.</p>
+</footer>
+
+</div>
+</body>
+</html>

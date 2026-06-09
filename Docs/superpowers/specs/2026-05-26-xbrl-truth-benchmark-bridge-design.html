@@ -1058,7 +1058,7 @@ filings(
   <p>This is why <code>filed_date</code> is part of the key, not mere metadata.</p>
 
   <h3>5.5 Concept Normalization</h3>
-  <p>Companies tag the same economic concept differently (<code>Revenues</code> vs <code>RevenueFromContractWithCustomerExcludingAssessedTax</code> vs an extension). FinTagging measured this: LLMs hit only <strong>17% semantic-tag accuracy, 0% full-taxonomy classification</strong> &mdash; agents cannot self-ground.</p>
+  <p>Companies tag the same economic concept differently (<code>Revenues</code> vs <code>RevenueFromContractWithCustomerExcludingAssessedTax</code> vs an extension). FinTagging measured this: fine-grained concept linking peaks <strong>below 19% accuracy</strong>, and collapses to <strong>~0% F1</strong> when posed as single-step tagging over the full ~17k-concept taxonomy &mdash; agents cannot self-ground.</p>
   <p><strong>Mitigation:</strong> Generalize the shipped <code>RATIO_TAG_MAP</code> preference-orders into a <strong>concept-normalization layer</strong> (canonical metric &rarr; ordered list of acceptable tags), and <strong>surface unresolvable facts honestly</strong> (<code>NOT_APPLICABLE</code> &mdash; e.g. banks/insurers/REITs lack <code>AssetsCurrent</code>) rather than guessing.</p>
 </section>
 
@@ -1401,7 +1401,7 @@ filings(
     <details class="adr">
       <summary><span class="adr-tag">ADR-07</span> Concept-normalization layer</summary>
       <div class="adr-body">
-        <p><strong>Why:</strong> Companies tag the same economic concept differently; FinTagging measured LLMs at 17% semantic-tag / 0% full-taxonomy accuracy &mdash; agents cannot self-ground.</p>
+        <p><strong>Why:</strong> Companies tag the same economic concept differently; FinTagging measured LLMs below 19% fine-grained concept-linking accuracy (and ~0% F1 as single-step full-taxonomy tagging) &mdash; agents cannot self-ground.</p>
         <p><strong>Consequence:</strong> Canonical-metric &rarr; ordered-tag maps with explicit, honest unresolvable handling (<code>NOT_APPLICABLE</code>).</p>
       </div>
     </details>
@@ -1459,7 +1459,7 @@ filings(
     <tbody>
       <tr>
         <td>Cross-company tag inconsistency</td>
-        <td>The FinTagging 17%/0% problem at ingest</td>
+        <td>The FinTagging concept-linking problem (&lt;19%) at ingest</td>
         <td>Concept-normalization layer (generalized <code>RATIO_TAG_MAP</code>); honest unresolvable handling</td>
       </tr>
       <tr>
@@ -1556,7 +1556,7 @@ filings(
       <tr><td>FinSearchComp</td><td>arXiv:2509.13160 (Sep 16, 2025)</td></tr>
       <tr><td>FinAgentBench</td><td>arXiv:2508.14052</td></tr>
       <tr><td>&tau;&sup2;-bench</td><td>sierra-research/tau2-bench</td></tr>
-      <tr><td>FinTagging (17%/0%)</td><td>xbrl.org &mdash; &ldquo;Beyond the Hype&rdquo;</td></tr>
+      <tr><td>FinTagging (concept-linking &lt;19%)</td><td>arXiv:2505.20650 (The FinAI) &middot; xbrl.org &ldquo;Beyond the Hype&rdquo;</td></tr>
       <tr><td>SEC Inline XBRL</td><td>sec.gov/data-research/structured-data/inline-xbrl</td></tr>
       <tr><td>QuantEval</td><td>arXiv:2601.08689v2</td></tr>
       <tr><td>LLM 量化预测 Benchmark</td><td>Internal PoC</td></tr>
