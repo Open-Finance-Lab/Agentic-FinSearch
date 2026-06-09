@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Benchmark Owner&rsquo;s Guide &mdash; Acceptance Gates &amp; Grading</title>
+<title>XBRL Truth Benchmark &mdash; Acceptance Gates &amp; Grading</title>
 <style>
   :root {
     --bg: #fafaf9;
@@ -127,14 +127,14 @@
 
 <!-- ════════════════════════════════════════════ HEADER -->
 <header class="doc-header">
-  <h1>Benchmark Owner&rsquo;s Guide</h1>
-  <div class="subtitle">Acceptance gates &amp; grading &mdash; what you decide, sign off, and build next</div>
+  <h1>Acceptance Gates &amp; Grading</h1>
+  <div class="subtitle">The bar a version must clear, how it gets signed off, and what gets built next</div>
   <div class="meta-grid">
     <div class="meta-item"><span class="label">Date</span>2026-06-09</div>
-    <div class="meta-item"><span class="label">For</span>Felix &mdash; benchmark owner</div>
-    <div class="meta-item"><span class="label">Your role</span>Set the bar &middot; bless versions &middot; build grading</div>
+    <div class="meta-item"><span class="label">Covers</span>Acceptance gate &middot; sign-off &middot; grading</div>
+    <div class="meta-item"><span class="label">Key decisions</span>Set the bar &middot; bless versions &middot; define grading</div>
     <div class="meta-item"><span class="label">Sequence</span>QA-harden first, grade next</div>
-    <div class="meta-item"><span class="label">Companion doc</span>QA &amp; Expansion Playbook (contributor)</div>
+    <div class="meta-item"><span class="label">Companion doc</span>QA &amp; Expansion Playbook</div>
     <div class="meta-item"><span class="label">Project</span>XBRL Truth Benchmark &middot; SecureFinAI Lab</div>
   </div>
 </header>
@@ -143,15 +143,15 @@
 <section>
   <h2><span class="num">00</span>What this guide is for</h2>
   <p>
-    Your teammate owns the hands-on QA and the growth of the question set (their playbook is the companion doc).
-    <strong>You own three things they can&rsquo;t:</strong> the <em class="term">bar</em> &mdash; what &ldquo;good enough to ship&rdquo; means;
+    The hands-on QA and the growth of the question set live in the companion <strong>QA &amp; Expansion Playbook</strong>.
+    <strong>This guide covers the three things that sit beside that work:</strong> the <em class="term">bar</em> &mdash; what &ldquo;good enough to ship&rdquo; means;
     the <em class="term">sign-off</em> &mdash; declaring a version blessed; and the <em class="term">grading track</em> &mdash; the
-    machinery that turns the set into actual scores for an AI agent. This guide is written for someone running a benchmark
-    for the first time, so it explains the <em>why</em> as much as the <em>what</em>, and it stays out of tools and code on purpose.
+    machinery that turns the set into actual scores for an AI agent. It is written so someone running a benchmark
+    for the first time can follow it, so it explains the <em>why</em> as much as the <em>what</em>, and it stays out of tools and code on purpose.
   </p>
   <div class="callout warning">
     <div class="callout-title">&#9888; Out of scope here, by design</div>
-    <p>This is not an implementation spec. It tells you <em>what the grader must measure</em> and <em>what a version must clear</em> &mdash; not
+    <p>This is not an implementation spec. It defines <em>what the grader must measure</em> and <em>what a version must clear</em> &mdash; not
       which database, library, or code to use. Those decisions belong in a focused build spec written <em>from</em> this guide, once the set is blessed.</p>
   </div>
 </section>
@@ -159,8 +159,8 @@
 <!-- ════════════════════════════════════════════ WHAT RUNNING A BENCHMARK IS -->
 <section>
   <h2><span class="num">01</span>What &ldquo;running a benchmark&rdquo; actually is</h2>
-  <p>The mental shift, if this is new: a benchmark is <strong>a released product with versions</strong>, not a file you make once.
-    It moves through a repeating lifecycle, and your teammate&rsquo;s QA is the loop that keeps it honest:</p>
+  <p>The mental shift, if this is new: a benchmark is <strong>a released product with versions</strong>, not a file made once.
+    It moves through a repeating lifecycle, and the QA loop (the companion playbook) is what keeps it honest:</p>
 
   <div class="lifecycle">
     <span class="stage">Construct</span><span class="arrow">&rarr;</span>
@@ -171,24 +171,24 @@
     <span style="color:var(--text-secondary);font-size:0.8rem;">(back through QA)</span>
   </div>
 
-  <p>The set is built (done &mdash; v0). It now gets hardened and frozen into a trustworthy <strong>v1</strong>. Only then do you grade agents
-    against it. When you grow it, the new cases loop back through the same QA before the next version. You are at the
+  <p>The set is built (done &mdash; v0). It now gets hardened and frozen into a trustworthy <strong>v1</strong>. Only then are agents graded
+    against it. As the set grows, the new cases loop back through the same QA before the next version. The project is at the
     <strong>QA-harden</strong> step.</p>
 
   <div class="callout thesis">
-    <div class="callout-title">&#9670; The one sentence for your professor</div>
+    <div class="callout-title">&#9670; The one sentence for the professor</div>
     <p>&ldquo;<strong>Continuous QA</strong> means we built a checklist we can re-run on the whole set on command, and the set is only ever
       allowed to grow while that checklist stays green. Each blessed version ships with its own report and changelog.&rdquo;
-      That single discipline is what makes a benchmark expandable instead of fragile &mdash; it is exactly the concern your professor raised.</p>
+      That single discipline is what makes a benchmark expandable instead of fragile &mdash; it is exactly the concern the professor raised.</p>
   </div>
 </section>
 
 <!-- ════════════════════════════════════════════ THE GATE -->
 <section>
   <h2><span class="num">02</span>The acceptance gate &mdash; what makes a version &ldquo;blessed&rdquo;</h2>
-  <p>This is the most important thing you own. The <strong>gate</strong> is the bar a set must clear to become a blessed, citable version
-    (the first one being <em class="term">v1</em>). You don&rsquo;t re-run the checks yourself &mdash; you confirm they were run, read the
-    evidence, and sign off. Tick every box before blessing:</p>
+  <p>This is the most important decision in the lifecycle. The <strong>gate</strong> is the bar a set must clear to become a blessed, citable version
+    (the first one being <em class="term">v1</em>). The checks aren&rsquo;t re-run at the gate &mdash; the gate confirms they were run, reads the
+    evidence, and signs off. Tick every box before blessing:</p>
 
   <div class="gate">
     <div class="gate-title">v1 acceptance gate</div>
@@ -201,22 +201,22 @@
     </ul>
   </div>
 
-  <p>If any box is empty, the set is not v1 &mdash; it goes back to your teammate with the specific gap named. A gate that bends
+  <p>If any box is empty, the set is not v1 &mdash; it goes back to the QA &amp; expansion track with the specific gap named. A gate that bends
     is not a gate.</p>
 </section>
 
 <!-- ════════════════════════════════════════════ REVIEWING -->
 <section>
-  <h2><span class="num">03</span>How to review your teammate&rsquo;s QA</h2>
-  <p>You don&rsquo;t need to read the tooling. You need to read <strong>five pieces of evidence</strong> and do one small check of your own:</p>
+  <h2><span class="num">03</span>How to review the QA before sign-off</h2>
+  <p>Reviewing the QA doesn&rsquo;t mean reading the tooling &mdash; it means reading <strong>five pieces of evidence</strong> and doing one small independent check:</p>
   <table>
-    <thead><tr><th style="width:34%">Look at</th><th>You&rsquo;re confirming</th></tr></thead>
+    <thead><tr><th style="width:34%">Look at</th><th>What it confirms</th></tr></thead>
     <tbody>
       <tr><td><strong>The QA report</strong></td><td>Every integrity and correctness check came back green, on the current version, dated.</td></tr>
       <tr><td><strong>The spot-check log</strong></td><td>The agreement score met the bar, and there are no unresolved &ldquo;ambiguous answer&rdquo; cases.</td></tr>
       <tr><td><strong>The distribution table</strong></td><td>No template exceeds 25%; difficulty and era look reasonable.</td></tr>
       <tr><td><strong>The changelog / dataset card</strong></td><td>What changed since the last version is written down, with counts.</td></tr>
-      <tr><td><strong>Five cases, read cold (your own check)</strong></td><td>Pick five yourself and try to find a <em>second</em> defensible answer to each. If you can&rsquo;t, that&rsquo;s a good sign; if you can, send it back.</td></tr>
+      <tr><td><strong>Five cases, read cold (an independent check)</strong></td><td>Pick five at the gate and try to find a <em>second</em> defensible answer to each. If none turns up, that&rsquo;s a good sign; if one does, send it back.</td></tr>
     </tbody>
   </table>
   <p><strong>Sign-off</strong> = tagging that version as blessed. From that moment it&rsquo;s frozen: future changes create a new version, never an edit in place.</p>
@@ -225,7 +225,7 @@
 <!-- ════════════════════════════════════════════ GRADING -->
 <section>
   <h2><span class="num">04</span>The grading track &mdash; what the grader will measure</h2>
-  <p>Once v1 is blessed, you build the <strong>grader</strong>: the machinery that runs an AI agent against the questions and scores it.
+  <p>Once v1 is blessed, the next build is the <strong>grader</strong>: the machinery that runs an AI agent against the questions and scores it.
     This section is the <em>specification of what to measure</em> &mdash; the build itself is a later spec. A grader asks two things of any answer:
     <strong>did the agent get the right answer, and did it get there honestly</strong> &mdash; using the real facts, not a lucky guess?</p>
 
@@ -244,18 +244,18 @@
     <p>Don&rsquo;t collapse computation into one right/wrong bit. Report, as three separate results:
       <strong>(1) did the agent produce a well-formed answer at all</strong>; <strong>(2) did it pull the right numbers</strong>;
       <strong>(3) did it do the math correctly</strong>. Keeping these apart means a formatting slip is never mistaken for a reasoning
-      failure &mdash; you can see exactly where it broke. <span class="paper">FINAUDITING</span></p>
+      failure &mdash; it is clear exactly where it broke. <span class="paper">FINAUDITING</span></p>
     <p style="font-size:0.88rem;color:var(--text-secondary);"><strong>Tolerance:</strong> exact match for numbers copied straight from a filing and for
-      identities that must hold precisely; a small, stated wiggle only where you divide (ratios, returns). This finally settles the
+      identities that must hold precisely; a small, stated wiggle only where division happens (ratios, returns). This finally settles the
       &ldquo;tolerance decided later&rdquo; note left open in the set&rsquo;s own documentation.</p>
   </div>
 
   <div class="grade stretch">
     <div class="gl">TRACK C &middot; strategy-coding (later stretch)</div>
     <h4>Two separate scores: does it run, and how close is it?</h4>
-    <p>If you later add questions where the agent writes a small strategy, score <strong>whether the code actually runs</strong> under fixed,
+    <p>If questions where the agent writes a small strategy are added later, score <strong>whether the code actually runs</strong> under fixed,
       no-peeking-at-the-future rules, <em>and</em> <strong>how close its results are to the reference</strong> &mdash; as two separate numbers.
-      A run that doesn&rsquo;t execute is &ldquo;undefined,&rdquo; not zero: you can&rsquo;t be accurate if you didn&rsquo;t run. <span class="paper">QuantEval</span></p>
+      A run that doesn&rsquo;t execute is &ldquo;undefined,&rdquo; not zero: accuracy is meaningless if it didn&rsquo;t run. <span class="paper">QuantEval</span></p>
   </div>
 
   <div class="callout decision">
@@ -263,7 +263,7 @@
     <p>Run the <strong>same agent twice &mdash; once with our truth layer, once without</strong> &mdash; and show the difference. This both
       <strong>quantifies the lift our work provides</strong> and <strong>reproduces, on our own data, the well-known finding that agent accuracy
       falls off a cliff</strong> once a question needs more than one step. That contrast is the single most compelling number to put in front
-      of your professor and, later, a paper.</p>
+      of the professor and, later, a paper.</p>
   </div>
 </section>
 
@@ -279,15 +279,15 @@
     <p>This kind of consistency-checking is the core of <span class="paper">FINAUDITING</span>, a sibling XBRL benchmark from our own
       lab circle. Adopting it <strong>aligns us with allied work</strong>, gives our benchmark <strong>harder, fully-deterministic headroom</strong>,
       and lets us frame our set as the <em>complement</em> of theirs: they detect filings&rsquo; errors, we generate verified questions from clean facts.
-      Worth a sentence to your professor.</p>
+      Worth a sentence to the professor.</p>
   </div>
 </section>
 
 <!-- ════════════════════════════════════════════ ROADMAP -->
 <section>
   <h2><span class="num">06</span>Roadmap &amp; what to report at each step</h2>
-  <p>Four milestones, in order, each with a concrete thing to show your professor. No dates here on purpose &mdash; the sequence is the
-    commitment; you set the pace.</p>
+  <p>Four milestones, in order, each with a concrete thing to show the professor. No dates here on purpose &mdash; the sequence is the
+    commitment, not the pace.</p>
 
   <div class="ms m0">
     <div class="ms-label">M0 &middot; Done</div>
@@ -297,13 +297,13 @@
   <div class="ms m1">
     <div class="ms-label">M1 &middot; Now &mdash; this phase</div>
     <h3>Standing QA checklist + first human spot-check &rarr; v1 blessed</h3>
-    <p>Your teammate makes the checklist re-runnable and does the first structured human read; you sign the acceptance gate.</p>
+    <p>The QA &amp; expansion track makes the checklist re-runnable and does the first structured human read; the acceptance gate is then signed.</p>
     <div class="report"><b>Report to professor:</b> &ldquo;The set is now a versioned, re-checkable product &mdash; here is the QA report, the reviewer agreement score, and the blessed v1 of 300.&rdquo;</div>
   </div>
   <div class="ms m2">
     <div class="ms-label">M2 &middot; Next</div>
     <h3>Grading harness &rarr; first agent evaluation</h3>
-    <p>You build the grader (section 04) and run our agent with and without the truth layer.</p>
+    <p>The grader (section 04) is built, and our agent is run with and without the truth layer.</p>
     <div class="report"><b>Report to professor:</b> &ldquo;First numbers &mdash; here is the multi-hop accuracy cliff, and the lift our truth layer provides, measured on our own benchmark.&rdquo;</div>
   </div>
   <div class="ms m3">
@@ -316,10 +316,10 @@
 
 <!-- ════════════════════════════════════════════ OPEN DECISIONS -->
 <section>
-  <h2><span class="num">07</span>Open decisions for you to ratify</h2>
-  <p>These are judgment calls, not facts &mdash; they&rsquo;re yours to make. Recommended defaults are filled in so nothing is blocked; change any of them and the docs follow.</p>
+  <h2><span class="num">07</span>Open decisions to ratify</h2>
+  <p>These are judgment calls, not facts &mdash; they&rsquo;re for the team to ratify. Recommended defaults are filled in so nothing is blocked; change any of them and the docs follow.</p>
   <table>
-    <thead><tr><th style="width:26%">Decision</th><th>Recommended default</th><th style="width:18%">Your call</th></tr></thead>
+    <thead><tr><th style="width:26%">Decision</th><th>Recommended default</th><th style="width:18%">Ratified?</th></tr></thead>
     <tbody>
       <tr><td><strong>Rounding tolerance</strong></td><td>Exact for copied facts and identities; a small relative wiggle (e.g. a fraction of a percent) only for ratios and returns.</td><td><em style="color:var(--text-secondary);">&mdash;</em></td></tr>
       <tr><td><strong>Era cap</strong></td><td>Flag every pre-2020 case; keep them a minority of the set (e.g. &le; 20&ndash;25%). New cases lean recent.</td><td><em style="color:var(--text-secondary);">&mdash;</em></td></tr>
@@ -355,7 +355,7 @@
 <!-- ════════════════════════════════════════════ FOOTER -->
 <footer class="doc-footer">
   <p><strong>XBRL Truth Benchmark</strong> &middot; SecureFinAI Lab &middot; Columbia University<br>
-  This guide covers the owner&rsquo;s side &mdash; the acceptance gate, the grading specification, and the roadmap. The hands-on QA and
+  This guide covers the acceptance gate, the grading specification, and the roadmap. The hands-on QA and
   expansion work lives in the companion <strong>QA &amp; Expansion Playbook</strong>. The grader and QA tooling are built later, in a
   dedicated implementation spec written from these two guides.</p>
 </footer>

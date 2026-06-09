@@ -144,13 +144,13 @@
 <!-- ════════════════════════════════════════════ HEADER -->
 <header class="doc-header">
   <h1>Benchmark QA &amp; Expansion Playbook</h1>
-  <div class="subtitle">For the contributor who built the 300-case set &mdash; how to harden it, then grow it safely</div>
+  <div class="subtitle">How to harden the 300-case set, then grow it safely</div>
   <div class="meta-grid">
     <div class="meta-item"><span class="label">Date</span>2026-06-09</div>
-    <div class="meta-item"><span class="label">Owner of this work</span>Question-set contributor</div>
+    <div class="meta-item"><span class="label">Covers</span>QA &amp; expansion of the case set</div>
     <div class="meta-item"><span class="label">Current state</span>v0 pilot &mdash; 300 cases</div>
     <div class="meta-item"><span class="label">Goal of this phase</span>Reach v1 &ldquo;blessed&rdquo;, then expand</div>
-    <div class="meta-item"><span class="label">Companion doc</span>Owner&rsquo;s Guide &mdash; Gates &amp; Grading</div>
+    <div class="meta-item"><span class="label">Companion doc</span>Gates &amp; Grading guide</div>
     <div class="meta-item"><span class="label">Project</span>XBRL Truth Benchmark &middot; SecureFinAI Lab</div>
   </div>
 </header>
@@ -161,7 +161,7 @@
   <p>
     You generated 300 questions straight from SEC filings, each carrying its own answer and the exact facts
     that answer was built from. That is real work, and it already passes a solid set of automatic checks.
-    This playbook is about the <strong>next job your professor asked for</strong>: turning those one-time checks
+    This playbook is about the <strong>next job the professor asked for</strong>: turning those one-time checks
     into a <strong>standing quality process</strong>, so the set can be trusted and can <strong>keep growing without breaking</strong>.
   </p>
 
@@ -275,7 +275,7 @@
   <div class="check">
     <div class="check-id">C5 &middot; The math re-derives</div>
     <h4>For every computed answer, recomputing it from the cited inputs gives the same number.</h4>
-    <div class="pass"><strong>Pass:</strong> zero mismatches (allowing the small rounding tolerance the Owner&rsquo;s Guide sets).</div>
+    <div class="pass"><strong>Pass:</strong> zero mismatches (allowing the small rounding tolerance the Gates &amp; Grading guide sets).</div>
     <div class="onfail">On fail: the case is wrong &mdash; fix the inputs or the formula, do not ship it.</div>
   </div>
 
@@ -311,7 +311,7 @@
   <div class="check quality">
     <div class="check-id">C10 &middot; Era report</div>
     <h4>Count cases by how old the cutoff date is (e.g. before vs after 2020), and report the old-case share.</h4>
-    <div class="pass"><strong>Outcome:</strong> a number the Owner uses to apply the era policy (section 05).</div>
+    <div class="pass"><strong>Outcome:</strong> a number used to apply the era policy (section 05).</div>
   </div>
 
   <div class="gate">
@@ -358,12 +358,12 @@
   <ol class="steps">
     <li><strong>Calibrate first.</strong> Both reviewers score the same 5 cases together and talk through any disagreement, so &ldquo;pass&rdquo; means the same thing to both.</li>
     <li><strong>Review independently.</strong> Each reviewer then scores the rest of the sample on their own, marking each of R1&ndash;R5 pass or fail with a one-line note.</li>
-    <li><strong>Adjudicate.</strong> A senior person (Felix or the advisor) resolves every disagreement, producing the final verdict per case.</li>
+    <li><strong>Adjudicate.</strong> A senior reviewer resolves every disagreement, producing the final verdict per case.</li>
   </ol>
 
   <div class="callout methods">
     <div class="callout-title">&#9670; How we know two readers agree</div>
-    <p>Report a simple <strong>agreement score</strong> &mdash; how often the two reviewers reached the same verdict, corrected for the agreement you&rsquo;d expect by chance (this is &ldquo;Cohen&rsquo;s kappa&rdquo;; a person needs no formula, just the number). FinTagging reached <strong>96% raw agreement, kappa 0.81</strong> on the same kind of task <span class="paper">FinTagging</span>. The Owner&rsquo;s Guide sets <strong>kappa &ge; 0.8</strong> as the bar. If you&rsquo;re far below that, your rubric isn&rsquo;t being read the same way &mdash; recalibrate and re-review, don&rsquo;t just push the cases through.</p>
+    <p>Report a simple <strong>agreement score</strong> &mdash; how often the two reviewers reached the same verdict, corrected for the agreement you&rsquo;d expect by chance (this is &ldquo;Cohen&rsquo;s kappa&rdquo;; a person needs no formula, just the number). FinTagging reached <strong>96% raw agreement, kappa 0.81</strong> on the same kind of task <span class="paper">FinTagging</span>. The Gates &amp; Grading guide sets <strong>kappa &ge; 0.8</strong> as the bar. If you&rsquo;re far below that, your rubric isn&rsquo;t being read the same way &mdash; recalibrate and re-review, don&rsquo;t just push the cases through.</p>
   </div>
 
   <h3>Worked examples</h3>
@@ -412,7 +412,7 @@
   <h3>Difficulty and era</h3>
   <ul>
     <li><strong>Difficulty spread</strong> is currently 10% easy / 45% medium / 30% hard / 15% very hard &mdash; a reasonable shape. Keep roughly this balance; let the human spot-check (R5) catch cases whose label doesn&rsquo;t match reality.</li>
-    <li><strong>Era policy (decision for the Owner to ratify):</strong> cutoff dates run back to 2011. Old, well-known figures risk being answered from memory rather than from retrieval, which is exactly what this benchmark is meant to measure. <strong>Recommended default:</strong> flag every pre-2020 case and cap them at a modest share of the set (the Owner sets the exact number). New cases should lean recent.</li>
+    <li><strong>Era policy (a decision to ratify at the acceptance gate):</strong> cutoff dates run back to 2011. Old, well-known figures risk being answered from memory rather than from retrieval, which is exactly what this benchmark is meant to measure. <strong>Recommended default:</strong> flag every pre-2020 case and cap them at a modest share of the set (the exact share is set in the Gates &amp; Grading guide). New cases should lean recent.</li>
   </ul>
 </section>
 
@@ -426,7 +426,7 @@
     <li><strong>Check the distribution moved the right way.</strong> The new batch should bring the set <em>closer</em> to the targets, never further from them.</li>
     <li><strong>Spot-check the new batch</strong> (section 04) with the same rubric and the two-reader process.</li>
     <li><strong>Version and document.</strong> Bump the version (v1 &rarr; v1.1), and add one changelog line: what was added, how many, and which templates.</li>
-    <li><strong>Hand it to the Owner&rsquo;s gate</strong> (companion doc) for blessing.</li>
+    <li><strong>Submit it to the acceptance gate</strong> (Gates &amp; Grading guide) for sign-off.</li>
   </ol>
   <div class="callout warning">
     <div class="callout-title">&#9888; The one rule that protects everything</div>
@@ -438,7 +438,7 @@
 <!-- ════════════════════════════════════════════ DEFINITION OF DONE -->
 <section>
   <h2><span class="num">07</span>Definition of done &mdash; what you hand over</h2>
-  <p>A batch is ready for the Owner&rsquo;s blessing when all of the following are true. This is the handoff contract between you and Felix.</p>
+  <p>A batch is ready for the acceptance gate when all of the following are true. This is the handoff contract the gate checks against.</p>
   <div class="gate">
     <div class="gate-title">A case (or batch) is done when&hellip;</div>
     <ul>
@@ -464,7 +464,7 @@
 <!-- ════════════════════════════════════════════ FOOTER -->
 <footer class="doc-footer">
   <p><strong>XBRL Truth Benchmark</strong> &middot; SecureFinAI Lab &middot; Columbia University<br>
-  This playbook covers the contributor&rsquo;s side of the QA + expansion phase. The acceptance gate, grading plan, and roadmap live in the companion <strong>Owner&rsquo;s Guide &mdash; Acceptance Gates &amp; Grading</strong>. Specific tools and code are deliberately out of scope here; they belong in the implementation spec written from these two guides.</p>
+  This playbook covers the QA &amp; expansion side of the next phase. The acceptance gate, grading plan, and roadmap live in the companion <strong>Gates &amp; Grading guide</strong>. Specific tools and code are deliberately out of scope here; they belong in the implementation spec written from these two guides.</p>
 </footer>
 
 </div>
