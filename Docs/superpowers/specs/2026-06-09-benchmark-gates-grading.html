@@ -171,7 +171,7 @@
     <span style="color:var(--text-secondary);font-size:0.8rem;">(back through QA)</span>
   </div>
 
-  <p>The set is built (done &mdash; v0). It now gets hardened and frozen into a trustworthy <strong>v1</strong>. Only then are agents graded
+  <p>The set is built (done &mdash; v0). It now gets hardened and frozen into a trustworthy <strong>v1</strong>. Only then do we grade agents
     against it. As the set grows, the new cases loop back through the same QA before the next version. The project is at the
     <strong>QA-harden</strong> step.</p>
 
@@ -187,8 +187,8 @@
 <section>
   <h2><span class="num">02</span>The acceptance gate &mdash; what makes a version &ldquo;blessed&rdquo;</h2>
   <p>This is the most important decision in the lifecycle. The <strong>gate</strong> is the bar a set must clear to become a blessed, citable version
-    (the first one being <em class="term">v1</em>). The checks aren&rsquo;t re-run at the gate &mdash; the gate confirms they were run, reads the
-    evidence, and signs off. Tick every box before blessing:</p>
+    (the first one being <em class="term">v1</em>). We don&rsquo;t re-run the checks at the gate &mdash; we confirm they were run, read the
+    evidence, and sign off. Tick every box before blessing:</p>
 
   <div class="gate">
     <div class="gate-title">v1 acceptance gate</div>
@@ -225,7 +225,7 @@
 <!-- ════════════════════════════════════════════ GRADING -->
 <section>
   <h2><span class="num">04</span>The grading track &mdash; what the grader will measure</h2>
-  <p>Once v1 is blessed, the next build is the <strong>grader</strong>: the machinery that runs an AI agent against the questions and scores it.
+  <p>Once v1 is blessed, we build the <strong>grader</strong>: the machinery that runs an AI agent against the questions and scores it.
     This section is the <em>specification of what to measure</em> &mdash; the build itself is a later spec. A grader asks two things of any answer:
     <strong>did the agent get the right answer, and did it get there honestly</strong> &mdash; using the real facts, not a lucky guess?</p>
 
@@ -297,13 +297,13 @@
   <div class="ms m1">
     <div class="ms-label">M1 &middot; Now &mdash; this phase</div>
     <h3>Standing QA checklist + first human spot-check &rarr; v1 blessed</h3>
-    <p>The QA &amp; expansion track makes the checklist re-runnable and does the first structured human read; the acceptance gate is then signed.</p>
+    <p>The QA &amp; expansion track makes the checklist re-runnable and does the first structured human read; we then sign the acceptance gate.</p>
     <div class="report"><b>Report to professor:</b> &ldquo;The set is now a versioned, re-checkable product &mdash; here is the QA report, the reviewer agreement score, and the blessed v1 of 300.&rdquo;</div>
   </div>
   <div class="ms m2">
     <div class="ms-label">M2 &middot; Next</div>
     <h3>Grading harness &rarr; first agent evaluation</h3>
-    <p>The grader (section 04) is built, and our agent is run with and without the truth layer.</p>
+    <p>We build the grader (section 04) and run our agent with and without the truth layer.</p>
     <div class="report"><b>Report to professor:</b> &ldquo;First numbers &mdash; here is the multi-hop accuracy cliff, and the lift our truth layer provides, measured on our own benchmark.&rdquo;</div>
   </div>
   <div class="ms m3">

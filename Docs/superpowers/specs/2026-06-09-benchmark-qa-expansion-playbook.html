@@ -159,25 +159,23 @@
 <section>
   <h2><span class="num">00</span>Read this first</h2>
   <p>
-    You generated 300 questions straight from SEC filings, each carrying its own answer and the exact facts
+    We generated 300 questions straight from SEC filings, each carrying its own answer and the exact facts
     that answer was built from. That is real work, and it already passes a solid set of automatic checks.
-    This playbook is about the <strong>next job the professor asked for</strong>: turning those one-time checks
-    into a <strong>standing quality process</strong>, so the set can be trusted and can <strong>keep growing without breaking</strong>.
+    This playbook is about turning those one-time checks into a <strong>standing quality process</strong>, 
+    so the set can be trusted and can <strong>keep growing without breaking</strong>.
   </p>
 
   <div class="callout thesis">
     <div class="callout-title">&#9670; The one idea behind everything here</div>
     <p>
-      &ldquo;Continuous QA&rdquo; is not &ldquo;check the file once.&rdquo; It is a <strong>checklist you can re-run on command</strong>,
+      &ldquo;Continuous QA&rdquo; is not &ldquo;check the file once.&rdquo; It is a <strong>checklist that can re-run on command</strong>,
       every time the set changes. The set is only ever allowed to grow while that checklist stays green.
       A growing benchmark with no standing checklist quietly rots; this playbook is the checklist.
     </p>
   </div>
 
-  <p>This document is deliberately written so you can <strong>act on it without further instructions</strong>. Every check below tells you
-    what it looks at, and exactly what counts as passing. It does <em class="term">not</em> tell you which tools or code to use &mdash;
-    that comes later, in a separate implementation spec built from this doc. Your job in this phase is to make each check
-    real and repeatable, however you choose to build it.</p>
+  <p>This document is written to be executable. Our job in this phase is to make each check
+    real and repeatable, however we choose to build it.</p>
 </section>
 
 <!-- ════════════════════════════════════════════ WHERE THE SET STANDS -->
@@ -196,7 +194,7 @@
     <em class="term">Track R</em> (find the right facts across one or more steps) and
     <em class="term">Track C</em> (compute something from the facts, like a margin or a return on equity).</p>
 
-  <h3>What is already verified (your structural QA &mdash; done)</h3>
+  <h3>What is already verified (our structural QA &mdash; done)</h3>
   <div class="callout shipped">
     <div class="callout-title">&#10003; Passing today, before any further work</div>
     <ul style="margin:0;">
@@ -234,15 +232,15 @@
       </tr>
     </tbody>
   </table>
-  <p>Your structural QA is what makes the benchmark <em class="term">verifiable by construction</em> &mdash; that property is intact and is the whole point.
+  <p>Our structural QA is what makes the benchmark <em class="term">verifiable by construction</em> &mdash; that property is intact and is the whole point.
     What&rsquo;s left is the human-judgment layer and, above all, making the whole thing <strong>repeatable</strong>.</p>
 </section>
 
 <!-- ════════════════════════════════════════════ THE HARNESS -->
 <section>
   <h2><span class="num">03</span>Build the standing QA checklist</h2>
-  <p>Turn the one-time checks into a <strong>checklist you can run on the whole set in one go</strong>, which prints a short
-    pass/fail report. Below are the ten checks it must contain. The first five you have already done once &mdash; now they
+  <p>Turn the one-time checks into a <strong>checklist that can run on the whole set in one go</strong>, which prints a short
+    pass/fail report. Below are the ten checks it must contain. The first five we have already done once &mdash; now they
     become permanent. The next two are <strong>new correctness checks</strong> borrowed from prior benchmarks. The last three are
     <strong>quality reports</strong> that flag things for human judgment rather than pass/fail outright.</p>
 
@@ -363,7 +361,7 @@
 
   <div class="callout methods">
     <div class="callout-title">&#9670; How we know two readers agree</div>
-    <p>Report a simple <strong>agreement score</strong> &mdash; how often the two reviewers reached the same verdict, corrected for the agreement you&rsquo;d expect by chance (this is &ldquo;Cohen&rsquo;s kappa&rdquo;; a person needs no formula, just the number). FinTagging reached <strong>96% raw agreement, kappa 0.81</strong> on the same kind of task <span class="paper">FinTagging</span>. The Gates &amp; Grading guide sets <strong>kappa &ge; 0.8</strong> as the bar. If you&rsquo;re far below that, your rubric isn&rsquo;t being read the same way &mdash; recalibrate and re-review, don&rsquo;t just push the cases through.</p>
+    <p>Report a simple <strong>agreement score</strong> &mdash; how often the two reviewers reached the same verdict, corrected for the agreement we&rsquo;d expect by chance (this is &ldquo;Cohen&rsquo;s kappa&rdquo;; a person needs no formula, just the number). FinTagging reached <strong>96% raw agreement, kappa 0.81</strong> on the same kind of task <span class="paper">FinTagging</span>. The Gates &amp; Grading guide sets <strong>kappa &ge; 0.8</strong> as the bar. If we&rsquo;re far below that, our rubric isn&rsquo;t being read the same way &mdash; recalibrate and re-review, don&rsquo;t just push the cases through.</p>
   </div>
 
   <h3>Worked examples</h3>
@@ -406,7 +404,7 @@
       <tr><td>All companies meeting two constraints at once</td><td>6</td><td class="flag">2%</td><td class="flag">Thin &mdash; grow</td></tr>
     </tbody>
   </table>
-  <p><strong>What to do:</strong> as you add cases, favor the thin templates (the bottom four rows) until no template tops 25%.
+  <p><strong>What to do:</strong> as we add cases, favor the thin templates (the bottom four rows) until no template tops 25%.
     The fastest single fix is to add cross-company and multi-constraint questions, which are also the hardest and most valuable.</p>
 
   <h3>Difficulty and era</h3>
@@ -419,7 +417,7 @@
 <!-- ════════════════════════════════════════════ EXPANSION WORKFLOW -->
 <section>
   <h2><span class="num">06</span>The expansion workflow</h2>
-  <p>Every time you add cases, follow the same loop. This is the &ldquo;continuous&rdquo; in continuous QA.</p>
+  <p>Every time we add cases, follow the same loop. This is the &ldquo;continuous&rdquo; in continuous QA.</p>
   <ol class="steps">
     <li><strong>Generate the new batch</strong>, aiming at the under-filled templates from section 05.</li>
     <li><strong>Run the full checklist (section 03) on the whole set.</strong> It must come back green &mdash; integrity and correctness with zero failures, quality flags reviewed.</li>
@@ -437,8 +435,8 @@
 
 <!-- ════════════════════════════════════════════ DEFINITION OF DONE -->
 <section>
-  <h2><span class="num">07</span>Definition of done &mdash; what you hand over</h2>
-  <p>A batch is ready for the acceptance gate when all of the following are true. This is the handoff contract the gate checks against.</p>
+  <h2><span class="num">07</span>Definition of done</h2>
+  <p>A batch is ready for the acceptance gate when all of the following are true.</p>
   <div class="gate">
     <div class="gate-title">A case (or batch) is done when&hellip;</div>
     <ul>
