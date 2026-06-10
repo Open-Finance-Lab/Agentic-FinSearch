@@ -13,6 +13,7 @@ import argparse
 import email.utils
 import html
 import json
+import math
 import os
 import re
 import sys
@@ -25,7 +26,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "2026-06-10.3"
+VERSION = "2026-06-10.4"
 
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -670,7 +671,14 @@ def post_discord(messages, token, channel_id):
                 if isinstance(exc, urllib.error.HTTPError):
                     retry_after = exc.headers.get("Retry-After")
                     if exc.code == 429 and retry_after:
-                        wait = float(retry_after) + 1
+                        # header is server input: non-numeric, NaN, negative,
+                        # or absurd values keep the exponential backoff
+                        try:
+                            parsed = float(retry_after) + 1
+                            if math.isfinite(parsed) and parsed > 0:
+                                wait = min(parsed, 60)
+                        except ValueError:
+                            pass
                     detail = exc.read(500).decode("utf-8", errors="replace")
                     log(f"WARN Discord HTTP {exc.code} (attempt {attempt + 1}/3): "
                         f"{detail[:200]}")

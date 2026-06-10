@@ -1,0 +1,30 @@
+name: Heartbeat Tests
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "Heartbeat/**"
+      - ".github/workflows/heartbeat-tests.yml"
+  pull_request:
+    paths:
+      - "Heartbeat/**"
+      - ".github/workflows/heartbeat-tests.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # The heartbeat is stdlib-only by design (see Heartbeat/README.md):
+      # the runner's system python3 is all it needs — no setup, no deps.
+      - name: Run heartbeat unit tests
+        working-directory: Heartbeat
+        run: python3 -m unittest discover -s tests -v

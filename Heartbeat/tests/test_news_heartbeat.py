@@ -4,10 +4,13 @@ Fixtures under tests/fixtures/ are real captures from the 2026-06-10 droplet
 probes of live Yahoo Finance endpoints (single-line XML, both date schemas).
 """
 
+import email.message
+import io
 import json
 import sys
 import time
 import unittest
+import urllib.error
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -52,6 +55,30 @@ def bulk_digest(n=40):
 def all_descs(messages):
     return "".join(e.get("description", "")
                    for m in messages for e in m["embeds"])
+
+
+class FakeResponse:
+    """Stands in for urllib's HTTP response (context manager + read)."""
+
+    def __init__(self, body):
+        self._body = body if isinstance(body, bytes) else body.encode("utf-8")
+
+    def read(self, n=-1):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def http_429(retry_after):
+    headers = email.message.Message()
+    headers["Retry-After"] = retry_after
+    return urllib.error.HTTPError(
+        "https://discord.com/api", 429, "rate limited", headers,
+        io.BytesIO(b"slow down"))
 
 
 class TestParseRss(unittest.TestCase):
@@ -412,6 +439,122 @@ class TestEnrichment(unittest.TestCase):
         self.assertEqual(normal["description"], "OG summary")
         self.assertEqual(offsite["description"], "")
         self.assertEqual(roundup["description"], "")
+
+
+class TestLlmDigest(unittest.TestCase):
+    def _call(self, content, candidates=None):
+        """Run llm_digest against a faked chat.completions endpoint."""
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["req"] = req
+            return FakeResponse(json.dumps(
+                {"choices": [{"message": {"content": content}}]}))
+
+        candidates = candidates or [story(guid="g1", description="D " * 400)]
+        real = nh.urllib.request.urlopen
+        nh.urllib.request.urlopen = fake_urlopen
+        try:
+            digest = nh.llm_digest(candidates, api_key="sk-test",
+                                   model="gpt-4o-mini",
+                                   base_url="https://api.openai.com/v1",
+                                   now=NOW)
+        finally:
+            nh.urllib.request.urlopen = real
+        return digest, captured["req"]
+
+    def test_request_shape_and_fenced_json_accepted(self):
+        content = "```json\n" + json.dumps({
+            "overview": "Markets rose.",
+            "sections": [{"title": "📈 Market Pulse",
+                          "items": [{"guid": "g1", "summary": "Up day."}]}],
+        }) + "\n```"
+        digest, req = self._call(content)
+        self.assertEqual(digest["sections"][0]["items"][0]["guid"], "g1")
+        self.assertEqual(req.full_url,
+                         "https://api.openai.com/v1/chat/completions")
+        self.assertEqual(req.get_header("Authorization"), "Bearer sk-test")
+        body = json.loads(req.data)
+        self.assertEqual(body["model"], "gpt-4o-mini")
+        self.assertEqual(body["response_format"], {"type": "json_object"})
+        payload = json.loads(
+            body["messages"][1]["content"].split("\n\n")[0]
+            .removeprefix("Candidate stories (JSON):\n"))
+        self.assertEqual(payload[0]["guid"], "g1")
+        # the 800-char candidate description must be capped before sending
+        # (literal 300, independent of the constant, plus the ellipsis marker)
+        self.assertLessEqual(len(payload[0]["description"]), 300)
+        self.assertTrue(payload[0]["description"].endswith("…"))
+
+    def test_non_json_content_falls_back_to_none(self):
+        digest, _ = self._call("sorry, here is prose instead of JSON")
+        self.assertIsNone(digest)
+
+    def test_hallucinated_guids_fall_back_to_none(self):
+        content = json.dumps({"overview": "x", "sections": [
+            {"title": "t", "items": [{"guid": "nope", "summary": "y"}]}]})
+        digest, _ = self._call(content)
+        self.assertIsNone(digest)
+
+
+class TestPostDiscord(unittest.TestCase):
+    def _run(self, outcomes, messages=None):
+        """outcomes: per-request 'ok' or a zero-arg exception factory (the
+        last entry repeats). Returns nothing; inspect self.calls/self.sleeps."""
+        self.calls, self.sleeps = [], []
+
+        def fake_urlopen(req, timeout=None):
+            outcome = outcomes[min(len(self.calls), len(outcomes) - 1)]
+            self.calls.append(req)
+            if outcome == "ok":
+                return FakeResponse(b"{}")
+            raise outcome()
+
+        messages = messages or [{"embeds": [{"description": "d"}],
+                                 "allowed_mentions": {"parse": []}}]
+        real_open, real_sleep = nh.urllib.request.urlopen, nh.time.sleep
+        nh.urllib.request.urlopen = fake_urlopen
+        nh.time.sleep = self.sleeps.append
+        try:
+            nh.post_discord(messages, token="t0k", channel_id="123")
+        finally:
+            nh.urllib.request.urlopen, nh.time.sleep = real_open, real_sleep
+
+    def test_request_shape(self):
+        self._run(["ok"])
+        req = self.calls[0]
+        self.assertEqual(req.full_url,
+                         "https://discord.com/api/v10/channels/123/messages")
+        self.assertEqual(req.get_header("Authorization"), "Bot t0k")
+        self.assertEqual(json.loads(req.data)["allowed_mentions"],
+                         {"parse": []})
+
+    def test_retry_honors_retry_after(self):
+        self._run([lambda: http_429("2.5"), "ok"])
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(self.sleeps[0], 3.5)  # float("2.5") + 1
+
+    def test_malformed_retry_after_falls_back_to_backoff(self):
+        # Discord sending a non-numeric Retry-After must not crash the
+        # delivery loop — the exponential backoff covers it
+        self._run([lambda: http_429("soon"), "ok"])
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(self.sleeps[0], 2)  # 2 ** (attempt + 1), attempt 0
+
+    def test_unreasonable_retry_after_is_ignored_or_clamped(self):
+        # NaN and negatives parse as floats but cannot be slept on; absurd
+        # waits must not hang the beat until systemd's timeout kills it
+        self._run([lambda: http_429("nan"), "ok"])
+        self.assertEqual(self.sleeps[0], 2)    # NaN → default backoff
+        self._run([lambda: http_429("-5"), "ok"])
+        self.assertEqual(self.sleeps[0], 2)    # negative → default backoff
+        self._run([lambda: http_429("86400"), "ok"])
+        self.assertEqual(self.sleeps[0], 60)   # absurd waits are capped
+
+    def test_raises_after_three_failures(self):
+        with self.assertRaises(urllib.error.URLError):
+            self._run([lambda: urllib.error.URLError("network down")])
+        self.assertEqual(len(self.calls), 3)
 
 
 class TestFakeAliveDetection(unittest.TestCase):
