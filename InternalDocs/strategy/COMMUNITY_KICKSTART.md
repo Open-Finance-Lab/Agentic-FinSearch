@@ -244,6 +244,43 @@ Bonus quality signal worth tracking once the loop runs: **verified accuracy bugs
 
 ---
 
+## PROPOSED AMENDMENT (2026-06-10) — News Heartbeat & #market-news [pending ratification]
+
+**Status:** Proposed — per the source-of-truth rule at the end of this document, this amendment resolves the conflict between the new News Heartbeat service and the current text. Existing section numbering is untouched; on ratification, fold A–D into §6, §11, and the Weekly cadence in place.
+
+### A. Channel addition (amends §6, INFO category)
+
+Add one channel to the INFO category:
+
+```
+INFO
+  #market-news       — read-only; daily automated Yahoo Finance news digest
+                       (short summaries + attributed links out), posted by the
+                       Agentic FinSearch bot at 11:00 UTC
+```
+
+Members read-only; only the bot posts. Rationale in this plan's own terms: "Silence kills momentum" (§8), "Empty channels signal 'this is dead'" and the pre-seed requirement (§4) — plus the channel doubles as a daily public demo of the product's retrieval → aggregation → summarization pipeline. Tone is audience-facing standard: factual, sourced, no hype. The §6 lifecycle rule (open on demand, close after 30 days of no activity) does not apply to `#market-news` while the heartbeat runs; if the heartbeat is paused (see D), review the channel under the normal monthly rule.
+
+### B. Bot policy clarification (amends §11)
+
+"No third-party bots until actually needed" **stands unchanged.** The Agentic FinSearch bot is **first-party product surface** — the product posting its own output under its own name — not a third-party moderation bot, and it is "actually needed" as the content engine of `#market-news`. Moderation remains Discord AutoMod only; the bot moderates nothing, posts via REST only (no gateway connection, no privileged intents), and the pinned disclaimer "FinSearch outputs are not financial advice." applies to its output.
+
+### C. Cadence addition (amends Weekly recurring actions)
+
+- [ ] **Daily (automated):** `#market-news` digest at 11:00 UTC, posted by the Agentic FinSearch bot.
+
+This *complements* the manual Mon/Wed/Fri human cadence — it does not replace it, and automated posts never count toward the human-touch weekly items.
+
+### D. ToS guardrail (extends the existing Yahoo trigger)
+
+The digest is short summaries + attribution + links **out** to Yahoo — no republication of article text — consistent with the Yahoo Finance ToS constraint (§1). The existing trigger-based action "Yahoo Finance changes ToS or breaks scraping" gains one clause: **pause the heartbeat** under the same contingency (it ships with a dry-run switch for exactly this), alongside pausing member acquisition and communicating transparently in `#announcements`.
+
+### E. Implementation pointer
+
+Design + runbook: `Docs/superpowers/specs/2026-06-10-news-heartbeat-design.md` and `Heartbeat/DISCORD_BOT_SETUP.md`.
+
+---
+
 ## 12. Open Strategic Questions
 
 These need resolution before or shortly after launch. Flag to professor / team.
