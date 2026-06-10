@@ -16,6 +16,7 @@ import json
 import os
 import re
 import sys
+import textwrap
 import time
 import urllib.error
 import urllib.parse
@@ -24,7 +25,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "2026-06-10.2"
+VERSION = "2026-06-10.3"
 
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -43,8 +44,14 @@ DEFAULT_WATCHLIST = "AAPL MSFT NVDA GOOGL AMZN META TSLA BRK-B JPM BTC-USD"
 DISCLAIMER = ("Summaries by Agentic FinSearch · Sources: Yahoo Finance & linked "
               "publishers · Not financial advice")
 
-EMBED_DESC_LIMIT = 4096
-EMBED_PACK_LIMIT = 3900  # headroom under 4096 / 6000-per-message limits
+# Discord hard limits: 4096 chars per embed description, 6000 per message.
+# Packing to 3900 leaves headroom for embed title + footer under both.
+EMBED_PACK_LIMIT = 3900
+HEADLINE_LIMIT = 200     # feed headline cap inside rendered masked links
+SUMMARY_CAP = 500        # per-item summary cap enforced on LLM output
+LLM_DESC_CAP = 300       # description chars sent to the LLM per candidate
+CANDIDATE_CAP = 25       # ranked stories offered to the LLM / fallback digest
+OG_HEAD_BYTES = 262144   # how much of an article page to read for og: tags
 
 TIER1 = ("reuters", "bloomberg", "associated press", "wall street journal",
          "financial times", "cnbc", "barron")
@@ -133,11 +140,19 @@ def _strip_html(text):
     return html.unescape(re.sub(r"<[^>]+>", " ", text or "")).strip()
 
 
+def _host(url):
+    return (urllib.parse.urlsplit(url or "").hostname or "").lower()
+
+
+def _yahoo_host(host):
+    return host == "yahoo.com" or host.endswith(".yahoo.com")
+
+
 def _source_from_link(link):
-    netloc = re.sub(r"^https?://(www\.)?", "", link or "").split("/")[0]
-    if netloc == "finance.yahoo.com" and "/m/" in link:
+    host = _host(link).removeprefix("www.")
+    if host == "finance.yahoo.com" and "/m/" in link:
         return "via Yahoo Finance"  # Yahoo-hosted syndication, publisher unknown
-    return SOURCE_NAMES.get(netloc, netloc or "unknown")
+    return SOURCE_NAMES.get(host, host or "unknown")
 
 
 DTD_RE = re.compile(r"<!\s*(DOCTYPE|ENTITY)", re.I)
@@ -153,22 +168,24 @@ def parse_rss(xml_text, feed, ticker=None):
         return []
     stories = []
     for item in root.iter("item"):
-        title = _strip_html((item.findtext("title") or ""))
+        title = _strip_html(item.findtext("title"))
         link = (item.findtext("link") or "").strip()
         if not title or not link:
             continue
-        if ".tsrc=rss" in link and "yahoo.com" not in link.split("/")[2]:
+        if ".tsrc=rss" in link and not _yahoo_host(_host(link)):
             link = link.split("?.tsrc=rss")[0]  # inert Yahoo param off-domain
         guid = (item.findtext("guid") or "").strip() or link.rstrip("/").rsplit("/", 1)[-1]
-        source_el = item.find("source")
-        source = (source_el.text or "").strip() if source_el is not None else ""
+        source = (item.findtext("source") or "").strip()
+        description = _strip_html(item.findtext("description"))
+        if description and ROUNDUP_TITLE_RE.search(title):
+            description = ""  # live-blog descriptions drift to other stories
         stories.append({
             "guid": guid,
             "title": title,
             "link": link,
             "source": source or _source_from_link(link),
             "published": _parse_date(item.findtext("pubDate")),
-            "description": _strip_html(item.findtext("description")),
+            "description": description,
             "tickers": [ticker] if ticker else [],
             "feeds": [feed],
         })
@@ -178,7 +195,7 @@ def parse_rss(xml_text, feed, ticker=None):
 # ----------------------------------------------------- merge / dedupe ------
 
 def _union(a, b):
-    return list(dict.fromkeys(list(a) + list(b)))
+    return list(dict.fromkeys([*a, *b]))
 
 
 def merge_stories(story_lists):
@@ -205,25 +222,30 @@ def title_tokens(title):
 
 def collapse_near_dups(stories, threshold=0.7):
     """Collapse near-identical headlines; the higher-scored story survives."""
-    kept = []
+    kept = []  # (story, tokens) pairs — tokenize each title exactly once
     for s in sorted(stories, key=lambda x: x.get("score", 0.0), reverse=True):
         toks = title_tokens(s["title"])
-        for k in kept:
-            ktoks = title_tokens(k["title"])
+        for k, ktoks in kept:
             union = toks | ktoks
             if union and len(toks & ktoks) / len(union) >= threshold:
                 k["tickers"] = _union(k["tickers"], s["tickers"])
                 k["feeds"] = _union(k["feeds"], s["feeds"])
                 break
         else:
-            kept.append(s)
-    return kept
+            kept.append((s, toks))
+    return [k for k, _ in kept]
 
 
 # ------------------------------------------------------- window / state ----
 
+def window_floor(now, hours):
+    """Oldest publish time still inside the digest window — the single
+    definition shared by windowing and the seen-state computation."""
+    return now - hours * 3600
+
+
 def filter_window(stories, now, hours, seen):
-    lo = now - hours * 3600
+    lo = window_floor(now, hours)
     return [s for s in stories
             if lo <= s["published"] <= now + 3600 and s["guid"] not in seen]
 
@@ -321,9 +343,8 @@ def validate_llm_digest(payload, valid_guids):
                     and isinstance(item.get("summary"), str)
                     and item["summary"].strip()):
                 used.add(item["guid"])
-                summary = " ".join(item["summary"].split())
-                if len(summary) > 500:
-                    summary = summary[:499].rsplit(" ", 1)[0] + "…"
+                summary = textwrap.shorten(item["summary"], width=SUMMARY_CAP,
+                                           placeholder="…")
                 items.append({"guid": item["guid"], "summary": summary})
         if items:
             sections.append({"title": str(sec.get("title") or "News"),
@@ -344,22 +365,31 @@ def _md_escape(text):
     return (text or "").replace("[", "(").replace("]", ")")
 
 
+def _masked_link(title, link):
+    """The single site that builds [text](url) markdown from feed data."""
+    return f"**[{_md_escape(title)}]({link})**"
+
+
 def _age_label(published, now):
     hours = max(0, int((now - published) / 3600))
     return f"{hours}h ago" if hours < 48 else f"{hours // 24}d ago"
 
 
+def _utc_date(ts):
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d")
+
+
 def _item_line(item, idx, now):
     s = idx[item["guid"]]
-    return (f"- **[{_md_escape(s['title'])}]({s['link']})** — "
+    return (f"- {_masked_link(s['title'], s['link'])} — "
             f"{_md_escape(item['summary'])} "
-            f"*({s['source']}, {_age_label(s['published'], now)})*")
+            f"*({_md_escape(s['source'])}, {_age_label(s['published'], now)})*")
 
 
 def render_markdown(digest, idx, now):
-    date = datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m-%d")
-    lines = [f"# Agentic FinSearch — Daily Market Digest",
-             f"**{date} UTC**", "", f"> {_md_escape(digest['overview'])}", ""]
+    lines = ["# Agentic FinSearch — Daily Market Digest",
+             f"**{_utc_date(now)} UTC**", "",
+             f"> {_md_escape(digest['overview'])}", ""]
     for sec in digest["sections"]:
         lines.append(f"## {_md_escape(sec['title'])}")
         for item in sec["items"]:
@@ -372,8 +402,7 @@ def render_markdown(digest, idx, now):
 
 def _embed_block(item, idx):
     s = idx[item["guid"]]
-    title = _md_escape(s["title"][:200])
-    return (f"**[{title}]({s['link']})**\n"
+    return (f"{_masked_link(s['title'][:HEADLINE_LIMIT], s['link'])}\n"
             f"{_md_escape(item['summary'])} — *{_md_escape(s['source'])}*")
 
 
@@ -401,7 +430,7 @@ def discord_messages(digest, idx):
         embed = {
             "title": ("📰 Agentic FinSearch — Daily Market Digest" if i == 0
                       else "📰 Daily Market Digest (continued)"),
-            "description": desc[:EMBED_DESC_LIMIT],
+            "description": desc,  # packing already caps under Discord limits
             "color": 0x2E86C1,
             # the compliance line must survive partial-post failures
             "footer": {"text": DISCLAIMER},
@@ -413,10 +442,20 @@ def discord_messages(digest, idx):
 
 # ------------------------------------------------------------- fetching ----
 
-def fetch_url(url, timeout=20, max_bytes=2 * 1024 * 1024, headers=None):
-    req = urllib.request.Request(url, headers=headers or HEADERS)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+def fetch_url(url, timeout=20, max_bytes=2 * 1024 * 1024, opener=None):
+    req = urllib.request.Request(url, headers=HEADERS)
+    open_fn = opener.open if opener else urllib.request.urlopen
+    with open_fn(req, timeout=timeout) as resp:
         return resp.read(max_bytes).decode("utf-8", errors="replace")
+
+
+def _fetch_feed(url, feed, ticker=None):
+    """Fetch and parse one feed; None (with a WARN) on network failure."""
+    try:
+        return parse_rss(fetch_url(url), feed=feed, ticker=ticker)
+    except (urllib.error.URLError, OSError) as exc:
+        log(f"WARN feed {feed} failed: {exc}")
+        return None
 
 
 def looks_like_market_clone(ticker_stories, market_guids, threshold=0.9):
@@ -432,27 +471,22 @@ def fetch_all(watchlist, pause=1.0):
     story_lists = []
     market_guids = set()
     for feed, url in MARKET_FEEDS.items():
-        try:
-            stories = parse_rss(fetch_url(url), feed=feed)
+        stories = _fetch_feed(url, feed)
+        if stories is not None:
             log(f"fetched {feed}: {len(stories)} items")
             story_lists.append(stories)
             market_guids.update(s["guid"] for s in stories)
-        except (urllib.error.URLError, OSError) as exc:
-            log(f"WARN feed {feed} failed: {exc}")
         time.sleep(pause)
     for ticker in watchlist:
-        url = TICKER_FEED.format(ticker=ticker)
-        try:
-            stories = parse_rss(fetch_url(url), feed=f"ticker:{ticker}",
-                                ticker=ticker)
+        feed = f"ticker:{ticker}"
+        stories = _fetch_feed(TICKER_FEED.format(ticker=ticker), feed, ticker)
+        if stories is not None:
             if looks_like_market_clone(stories, market_guids):
-                log(f"WARN feed ticker:{ticker} looks like a market-feed clone "
+                log(f"WARN feed {feed} looks like a market-feed clone "
                     f"(fake-alive trap) — skipped")
-                continue
-            log(f"fetched ticker:{ticker}: {len(stories)} items")
-            story_lists.append(stories)
-        except (urllib.error.URLError, OSError) as exc:
-            log(f"WARN feed ticker:{ticker} failed: {exc}")
+            else:
+                log(f"fetched {feed}: {len(stories)} items")
+                story_lists.append(stories)
         time.sleep(pause)
     return story_lists
 
@@ -467,10 +501,8 @@ _NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect)
 
 def _og_host_ok(url):
     """Enrichment fetches only ever hit Yahoo over http(s) — SSRF guard."""
-    parts = urllib.parse.urlsplit(url)
-    host = (parts.hostname or "").lower()
-    return (parts.scheme in ("http", "https")
-            and (host == "yahoo.com" or host.endswith(".yahoo.com")))
+    return (urllib.parse.urlsplit(url).scheme in ("http", "https")
+            and _yahoo_host(_host(url)))
 
 
 OG_DESC_RE = re.compile(
@@ -482,12 +514,16 @@ OG_DESC_RE_REV = re.compile(
 
 
 def fetch_og_description(link):
+    """og:description from a Yahoo article page.
+
+    Returns None when the host is off the allowlist (no request made — the
+    SSRF policy lives here and only here), "" when a fetch was attempted but
+    yielded nothing."""
     if not _og_host_ok(link):
-        return ""
-    req = urllib.request.Request(link, headers=HEADERS)
+        return None
     try:
-        with _NO_REDIRECT_OPENER.open(req, timeout=15) as resp:
-            head = resp.read(262144).decode("utf-8", errors="replace")
+        head = fetch_url(link, timeout=15, max_bytes=OG_HEAD_BYTES,
+                         opener=_NO_REDIRECT_OPENER)
     except (urllib.error.URLError, OSError):
         return ""
     m = OG_DESC_RE.search(head) or OG_DESC_RE_REV.search(head)
@@ -500,10 +536,15 @@ def enrich_descriptions(stories, cap=8, pause=1.0):
     for s in stories:
         if fetched >= cap:
             break
-        if not s["description"] and _og_host_ok(s["link"]):
-            s["description"] = fetch_og_description(s["link"])
-            fetched += 1
-            time.sleep(pause)
+        # roundup pages drift like their RSS descriptions — never enrich them
+        if s["description"] or ROUNDUP_TITLE_RE.search(s["title"]):
+            continue
+        desc = fetch_og_description(s["link"])
+        if desc is None:
+            continue  # host not eligible — no request was spent
+        s["description"] = desc
+        fetched += 1
+        time.sleep(pause)
     if fetched:
         log(f"enriched {fetched} stories via og:description")
 
@@ -561,21 +602,15 @@ def _extract_llm_content(data):
 
 def llm_digest(candidates, api_key, model, base_url, now):
     """One chat.completions call. Returns a validated digest dict or None."""
-    payload_stories = []
-    for s in candidates:
-        desc = s["description"]
-        if ROUNDUP_TITLE_RE.search(s["title"]):
-            desc = ""  # live-blog descriptions drift away from the headline
-        elif len(desc) > 300:
-            desc = desc[:300].rsplit(" ", 1)[0] + "…"
-        payload_stories.append({
-            "guid": s["guid"],
-            "title": s["title"],
-            "source": s["source"],
-            "age_hours": round((now - s["published"]) / 3600, 1),
-            "tickers": s["tickers"],
-            "description": desc,
-        })
+    payload_stories = [{
+        "guid": s["guid"],
+        "title": s["title"],
+        "source": s["source"],
+        "age_hours": round((now - s["published"]) / 3600, 1),
+        "tickers": s["tickers"],
+        "description": textwrap.shorten(s["description"], width=LLM_DESC_CAP,
+                                        placeholder="…"),
+    } for s in candidates]
     body = json.dumps({
         "model": model,
         "temperature": 0.3,
@@ -618,35 +653,32 @@ def llm_digest(candidates, api_key, model, base_url, now):
 def post_discord(messages, token, channel_id):
     url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
     for i, message in enumerate(messages):
-        body = json.dumps(message).encode("utf-8")
-        for attempt in range(3):
-            req = urllib.request.Request(url, data=body, headers={
+        req = urllib.request.Request(
+            url, data=json.dumps(message).encode("utf-8"), headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bot {token}",
                 "User-Agent": "AgenticFinSearch-Heartbeat (agenticfinsearch.org, v1)",
             })
+        for attempt in range(3):
             try:
                 with urllib.request.urlopen(req, timeout=30) as resp:
                     resp.read()
                 log(f"posted Discord message {i + 1}/{len(messages)}")
                 break
-            except urllib.error.HTTPError as exc:
-                retry_after = exc.headers.get("Retry-After")
-                if exc.code == 429 and retry_after:
-                    wait = float(retry_after) + 1
+            except (urllib.error.URLError, OSError) as exc:
+                wait = 2 ** (attempt + 1)
+                if isinstance(exc, urllib.error.HTTPError):
+                    retry_after = exc.headers.get("Retry-After")
+                    if exc.code == 429 and retry_after:
+                        wait = float(retry_after) + 1
+                    detail = exc.read(500).decode("utf-8", errors="replace")
+                    log(f"WARN Discord HTTP {exc.code} (attempt {attempt + 1}/3): "
+                        f"{detail[:200]}")
                 else:
-                    wait = 2 ** (attempt + 1)
-                detail = exc.read(500).decode("utf-8", errors="replace")
-                log(f"WARN Discord HTTP {exc.code} (attempt {attempt + 1}/3): "
-                    f"{detail[:200]}")
+                    log(f"WARN Discord post failed (attempt {attempt + 1}/3): {exc}")
                 if attempt == 2:
                     raise
                 time.sleep(wait)
-            except (urllib.error.URLError, OSError) as exc:
-                log(f"WARN Discord post failed (attempt {attempt + 1}/3): {exc}")
-                if attempt == 2:
-                    raise
-                time.sleep(2 ** (attempt + 1))
         time.sleep(1)
 
 
@@ -657,7 +689,7 @@ def compute_seen_updates(merged, fresh, now, hours):
     older than the window. Future/undated stories must stay unseen so they get
     a chance at the next beat."""
     seen = {s["guid"] for s in fresh}
-    lo = now - hours * 3600
+    lo = window_floor(now, hours)
     seen.update(s["guid"] for s in merged if 0 < s["published"] < lo)
     return seen
 
@@ -686,18 +718,13 @@ def load_env_file(path):
 
 
 def prune_old_digests(digests, now, max_age_days=90):
-    for path in digests.glob("*.md"):
-        try:
-            if now - path.stat().st_mtime > max_age_days * 86400:
-                path.unlink()
-        except OSError:
-            pass
-    for path in digests.glob("*.jsonl"):
-        try:
-            if now - path.stat().st_mtime > max_age_days * 86400:
-                path.unlink()
-        except OSError:
-            pass
+    for pattern in ("*.md", "*.jsonl"):
+        for path in digests.glob(pattern):
+            try:
+                if now - path.stat().st_mtime > max_age_days * 86400:
+                    path.unlink()
+            except OSError:
+                pass
 
 
 def main(argv=None):
@@ -732,7 +759,7 @@ def main(argv=None):
         return 3
 
     now = time.time()
-    date = datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m-%d")
+    date = _utc_date(now)
     log(f"heartbeat v{VERSION} start (dry_run={dry_run}, "
         f"watchlist={' '.join(watchlist)})")
 
@@ -759,8 +786,10 @@ def main(argv=None):
 
     ranked = rank_stories(fresh, watchlist=set(watchlist), now=now)
     ranked = collapse_near_dups(ranked)
-    enrich_descriptions(ranked)
-    candidates = ranked[:25]
+    candidates = ranked[:CANDIDATE_CAP]
+    # enrich only stories that can reach the digest; the slice shares dicts
+    # with `ranked`, so the jsonl log still sees the enriched text
+    enrich_descriptions(candidates)
 
     digest = None
     if api_key:
@@ -773,14 +802,14 @@ def main(argv=None):
 
     idx = {s["guid"]: s for s in ranked}
     markdown = render_markdown(digest, idx, now=now)
-    md_path = digests / f"digest-{date}.md"
-    jsonl_path = digests / f"items-{date}.jsonl"
-    if md_path.exists():
+    stem = date
+    if (digests / f"digest-{date}.md").exists():
         # a second same-day beat must never clobber the morning digest
         suffix = datetime.fromtimestamp(now, timezone.utc).strftime("%H%M%S")
-        md_path = digests / f"digest-{date}-{suffix}.md"
-        jsonl_path = digests / f"items-{date}-{suffix}.jsonl"
-        log(f"WARN second beat today — writing supplemental {md_path.name}")
+        stem = f"{date}-{suffix}"
+        log(f"WARN second beat today — writing supplemental digest-{stem}.md")
+    md_path = digests / f"digest-{stem}.md"
+    jsonl_path = digests / f"items-{stem}.jsonl"
     md_path.write_text(markdown, encoding="utf-8")
     with jsonl_path.open("w", encoding="utf-8") as fh:
         for s in ranked:

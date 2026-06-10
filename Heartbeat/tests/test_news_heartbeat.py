@@ -37,6 +37,23 @@ def story(**kw):
     return base
 
 
+def bulk_digest(n=40):
+    """A digest bulky enough to force multi-message Discord packing."""
+    stories = [story(guid=f"g{i}", title=("Long headline %d " % i) + "x" * 120,
+                     link=f"https://finance.yahoo.com/news/long-{i}.html",
+                     score=5.0) for i in range(n)]
+    digest = {"overview": "O" * 500,
+              "sections": [{"title": "Market Pulse",
+                            "items": [{"guid": f"g{i}", "summary": "S" * 300}
+                                      for i in range(n)]}]}
+    return digest, {s["guid"]: s for s in stories}
+
+
+def all_descs(messages):
+    return "".join(e.get("description", "")
+                   for m in messages for e in m["embeds"])
+
+
 class TestParseRss(unittest.TestCase):
     def test_parses_market_feed_fixture(self):
         stories = nh.parse_rss(fx("topstories.xml"), feed="topstories")
@@ -78,7 +95,7 @@ class TestParseRss(unittest.TestCase):
         xml = fx("aapl2.xml")
         stories = nh.parse_rss(xml, feed="ticker:AAPL", ticker="AAPL")
         for s in stories:
-            if "yahoo.com" not in s["link"].split("/")[2]:
+            if not nh._yahoo_host(nh._host(s["link"])):
                 self.assertNotIn(".tsrc=rss", s["link"])
 
     def test_naive_dates_assumed_utc(self):
@@ -89,6 +106,18 @@ class TestParseRss(unittest.TestCase):
     def test_bad_xml_returns_empty(self):
         self.assertEqual(nh.parse_rss("<html>sad panda</html>", feed="x"), [])
         self.assertEqual(nh.parse_rss("", feed="x"), [])
+
+    def test_roundup_description_blanked_at_parse(self):
+        # live-blog descriptions drift to other stories; blanking must happen
+        # once at parse so scoring, the extractive fallback, and the LLM all
+        # see the same truth
+        xml = ("<rss><channel><item>"
+               "<title>Stock Market Today: Dow Slips As Tech Rallies</title>"
+               "<link>https://finance.yahoo.com/news/stock-market-today-1.html</link>"
+               "<description>Tesla shares jumped 5% after deliveries beat."
+               "</description></item></channel></rss>")
+        stories = nh.parse_rss(xml, feed="topstories")
+        self.assertEqual(stories[0]["description"], "")
 
     def test_rejects_doctype_and_entities(self):
         # XXE / billion-laughs guard: real Yahoo feeds never carry a DTD
@@ -253,16 +282,7 @@ class TestRender(unittest.TestCase):
         self.assertIn("A calm day in the markets.", md)
 
     def test_discord_messages_respect_limits(self):
-        stories, items = [], []
-        for i in range(40):
-            stories.append(story(
-                guid=f"g{i}",
-                title=("Long headline %d " % i) + "x" * 120,
-                link=f"https://finance.yahoo.com/news/long-{i}.html", score=5.0))
-            items.append({"guid": f"g{i}", "summary": "S" * 300})
-        digest = {"overview": "O" * 500,
-                  "sections": [{"title": "Market Pulse", "items": items}]}
-        idx = {s["guid"]: s for s in stories}
+        digest, idx = bulk_digest(40)
         messages = nh.discord_messages(digest, idx)
         self.assertTrue(messages)
         for msg in messages:
@@ -276,16 +296,13 @@ class TestRender(unittest.TestCase):
                 total += len(e.get("footer", {}).get("text", ""))
             self.assertLessEqual(total, 6000)
         # every item must appear exactly once across all messages
-        joined = "".join(e.get("description", "")
-                         for m in messages for e in m["embeds"])
+        joined = all_descs(messages)
         for i in range(40):
             self.assertIn(f"long-{i}.html", joined)
 
     def test_masked_links_in_embeds(self):
         digest, idx = self._digest_and_index(1)
-        messages = nh.discord_messages(digest, idx)
-        descs = "".join(e.get("description", "")
-                        for m in messages for e in m["embeds"])
+        descs = all_descs(nh.discord_messages(digest, idx))
         self.assertIn("](https://finance.yahoo.com/news/story-0.html)", descs)
 
 
@@ -298,8 +315,7 @@ class TestSecurityHardening(unittest.TestCase):
                   "sections": [{"title": "Market Pulse", "items": [
                       {"guid": "e", "summary": "Sum ](https://evil.example/s) x."}]}]}
         idx = {"e": evil}
-        descs = "".join(e.get("description", "") for m in
-                        nh.discord_messages(digest, idx) for e in m["embeds"])
+        descs = all_descs(nh.discord_messages(digest, idx))
         md = nh.render_markdown(digest, idx, now=NOW)
         for rendered in (descs, md):
             self.assertNotIn("](https://evil.example", rendered)
@@ -358,16 +374,44 @@ class TestRobustness(unittest.TestCase):
         self.assertNotIn("undated", seen)
 
     def test_footer_disclaimer_on_every_message(self):
-        items = [{"guid": f"g{i}", "summary": "S" * 300} for i in range(40)]
-        stories = {f"g{i}": story(guid=f"g{i}", title="T" * 100,
-                                  link=f"https://finance.yahoo.com/news/{i}.html",
-                                  score=1.0) for i in range(40)}
-        digest = {"overview": "O", "sections": [{"title": "M", "items": items}]}
-        msgs = nh.discord_messages(digest, stories)
+        digest, idx = bulk_digest(40)
+        msgs = nh.discord_messages(digest, idx)
         self.assertGreater(len(msgs), 1)
         for m in msgs:
             for e in m["embeds"]:
                 self.assertEqual(e["footer"]["text"], nh.DISCLAIMER)
+
+
+class TestEnrichment(unittest.TestCase):
+    def test_enrich_skips_offsite_and_roundups_without_burning_cap(self):
+        calls = []
+
+        def fake_fetch(url, **kw):
+            calls.append(url)
+            return '<meta property="og:description" content="OG summary">'
+
+        class BoomOpener:  # any direct (non-fetch_url) network path must fail
+            def open(self, *a, **kw):
+                raise AssertionError("unexpected direct network call")
+
+        offsite = story(guid="o", description="", link="https://example.com/x")
+        roundup = story(guid="r", description="",
+                        title="Stock Market Today: Live Updates",
+                        link="https://finance.yahoo.com/news/r.html")
+        normal = story(guid="n", description="",
+                       link="https://finance.yahoo.com/news/n.html")
+        real_fetch, real_opener = nh.fetch_url, nh._NO_REDIRECT_OPENER
+        nh.fetch_url, nh._NO_REDIRECT_OPENER = fake_fetch, BoomOpener()
+        try:
+            nh.enrich_descriptions([offsite, roundup, normal], cap=1, pause=0)
+        finally:
+            nh.fetch_url, nh._NO_REDIRECT_OPENER = real_fetch, real_opener
+        # neither the off-allowlist link nor the drifting roundup may consume
+        # the enrichment budget; the one slot goes to the eligible story
+        self.assertEqual(calls, ["https://finance.yahoo.com/news/n.html"])
+        self.assertEqual(normal["description"], "OG summary")
+        self.assertEqual(offsite["description"], "")
+        self.assertEqual(roundup["description"], "")
 
 
 class TestFakeAliveDetection(unittest.TestCase):
