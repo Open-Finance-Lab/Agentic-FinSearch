@@ -259,32 +259,120 @@ class TestExtractiveFallback(unittest.TestCase):
 
 
 class TestLlmValidation(unittest.TestCase):
+    CANDIDATES = [story(guid="g1")]
     GOOD = {
         "overview": "Markets were mixed.",
         "sections": [
             {"title": "Market Pulse",
-             "items": [{"guid": "g1", "summary": "A fine summary."}]},
+             "items": [{"guid": "g1", "summary": "The first sentence."}]},
         ],
     }
 
     def test_accepts_valid_payload(self):
-        out = nh.validate_llm_digest(self.GOOD, valid_guids={"g1"})
+        out = nh.validate_llm_digest(self.GOOD, self.CANDIDATES)
         self.assertIsNotNone(out)
         self.assertEqual(out["sections"][0]["items"][0]["guid"], "g1")
+        self.assertEqual(out["sections"][0]["items"][0]["summary"],
+                         "The first sentence.")
 
     def test_rejects_unknown_guid_items_but_keeps_rest(self):
         payload = json.loads(json.dumps(self.GOOD))
         payload["sections"][0]["items"].append(
             {"guid": "hallucinated", "summary": "Made up."})
-        out = nh.validate_llm_digest(payload, valid_guids={"g1"})
+        out = nh.validate_llm_digest(payload, self.CANDIDATES)
         self.assertEqual(len(out["sections"][0]["items"]), 1)
 
     def test_rejects_garbage(self):
-        self.assertIsNone(nh.validate_llm_digest({"nope": 1}, valid_guids={"g1"}))
-        self.assertIsNone(nh.validate_llm_digest(None, valid_guids={"g1"}))
+        self.assertIsNone(nh.validate_llm_digest({"nope": 1}, self.CANDIDATES))
+        self.assertIsNone(nh.validate_llm_digest(None, self.CANDIDATES))
         empty = {"overview": "x", "sections": [{"title": "t", "items": [
             {"guid": "hallucinated", "summary": "y"}]}]}
-        self.assertIsNone(nh.validate_llm_digest(empty, valid_guids={"g1"}))
+        self.assertIsNone(nh.validate_llm_digest(empty, self.CANDIDATES))
+
+
+class TestSummaryGrounding(unittest.TestCase):
+    """The 2026-06-10 dry run posted a digest where the LLM attached another
+    story's summary to the TSMC guid. Guid-only validation passed it; the
+    grounding check must not. Stories and summaries below are the real pair
+    from that beat's items.jsonl / digest."""
+
+    TSMC = story(
+        guid="1431adca-686f-367c-93b1-53ec5b49f5e8",
+        title="TSMC’s Monthly Sales Rise 30% Thanks to Sustained AI Chip Demand",
+        description="(Bloomberg) -- Taiwan Semiconductor Manufacturing Co. "
+                    "reported a 30% rise in its monthly sales, reflecting "
+                    "continued strength in demand spurred by a global rush to "
+                    "build AI infrastructure. Most Read from Bloomberg…")
+    MICRON = story(
+        guid="e3800f3d-cecd-37c2-bdc1-defb7b7d5467",
+        title="Micron Adds AI Veteran To Board As Valuation Stretches On Hot Rally",
+        description="Micron Technology (NasdaqGS:MU) has added Dr. Alexis Black "
+                    "Björlin to its board of directors. Dr. Black Björlin is an "
+                    "experienced AI and semiconductor executive with prior "
+                    "leadership roles at NVIDIA, Meta, Broadcom, and Intel. The "
+                    "appointment brings deeper expertise in AI infrastructure, "
+                    "cloud platforms, and advanced semiconductor hardware.")
+    CROSS_WIRED = ("Alphabet committed to a $920 million monthly expenditure at "
+                   "SpaceX through June 2029 for access to Nvidia GPUs, "
+                   "impacting its valuation.")
+    FAITHFUL = ("Micron appointed Dr. Alexis Black Björlin to its board, "
+                "enhancing its expertise in AI infrastructure and cloud "
+                "technology.")
+
+    def test_cross_wired_summary_fails_grounding(self):
+        self.assertFalse(nh.summary_grounded(self.CROSS_WIRED, self.TSMC))
+
+    def test_faithful_paraphrase_passes_grounding(self):
+        # paraphrases ("appointed" for "added") must survive the threshold
+        self.assertTrue(nh.summary_grounded(self.FAITHFUL, self.MICRON))
+
+    def test_all_stopword_summary_fails_grounding(self):
+        self.assertFalse(nh.summary_grounded("And of the that.", self.TSMC))
+
+    def test_validator_repairs_cross_wired_summary_with_excerpt(self):
+        payload = {"overview": "o", "sections": [{"title": "Company Watch",
+                   "items": [{"guid": self.TSMC["guid"],
+                              "summary": self.CROSS_WIRED}]}]}
+        out = nh.validate_llm_digest(payload, [self.TSMC])
+        item = out["sections"][0]["items"][0]
+        self.assertEqual(item["guid"], self.TSMC["guid"])
+        self.assertNotIn("Alphabet", item["summary"])
+        self.assertNotIn("SpaceX", item["summary"])
+        # the repair is the publisher's own words, marked as a quotation
+        self.assertTrue(item["summary"].startswith("“"))
+        self.assertIn("Taiwan Semiconductor", item["summary"])
+
+    def test_repair_excerpt_is_capped_and_quote_balanced(self):
+        # 5/183 stories in the 2026-06-10 beat had ~500-char single-sentence
+        # descriptions; shortening AFTER quoting would eat the closing mark
+        long_desc = ("AI selloff worries investors as "
+                     + "valuation stretch " * 40).strip()
+        s = story(guid="long", title="Totally different headline about bonds",
+                  description=long_desc)
+        payload = {"overview": "o", "sections": [{"title": "t",
+                   "items": [{"guid": "long", "summary": self.CROSS_WIRED}]}]}
+        out = nh.validate_llm_digest(payload, [s])
+        summary = out["sections"][0]["items"][0]["summary"]
+        self.assertLessEqual(len(summary), nh.SUMMARY_CAP)
+        self.assertTrue(summary.startswith("“"))
+        self.assertTrue(summary.endswith("”"))
+
+    def test_validator_drops_cross_wired_item_without_description(self):
+        bare = story(guid="bare", title="TSMC sales rise on AI chip demand",
+                     description="")
+        payload = {"overview": "o", "sections": [{"title": "t",
+                   "items": [{"guid": "bare", "summary": self.CROSS_WIRED}]}]}
+        # no publisher prose to repair with — the item must go; with it being
+        # the only item, the whole digest degrades to the extractive fallback
+        self.assertIsNone(nh.validate_llm_digest(payload, [bare]))
+
+    def test_grounded_summary_is_kept_verbatim(self):
+        payload = {"overview": "o", "sections": [{"title": "t",
+                   "items": [{"guid": self.MICRON["guid"],
+                              "summary": self.FAITHFUL}]}]}
+        out = nh.validate_llm_digest(payload, [self.MICRON])
+        self.assertEqual(out["sections"][0]["items"][0]["summary"],
+                         self.FAITHFUL)
 
 
 class TestRender(unittest.TestCase):
@@ -375,16 +463,17 @@ class TestRobustness(unittest.TestCase):
 
     def test_validator_dedupes_guid_across_sections(self):
         payload = {"overview": "o", "sections": [
-            {"title": "A", "items": [{"guid": "g1", "summary": "a"}]},
-            {"title": "B", "items": [{"guid": "g1", "summary": "b"}]}]}
-        out = nh.validate_llm_digest(payload, valid_guids={"g1"})
+            {"title": "A", "items": [{"guid": "g1", "summary": "The first sentence."}]},
+            {"title": "B", "items": [{"guid": "g1", "summary": "The second sentence."}]}]}
+        out = nh.validate_llm_digest(payload, [story(guid="g1")])
         total = sum(len(s["items"]) for s in out["sections"])
         self.assertEqual(total, 1)
 
     def test_validator_caps_summary_length(self):
         payload = {"overview": "o", "sections": [
             {"title": "A", "items": [{"guid": "g1", "summary": "word " * 200}]}]}
-        out = nh.validate_llm_digest(payload, valid_guids={"g1"})
+        out = nh.validate_llm_digest(
+            payload, [story(guid="g1", description="A word salad. More.")])
         self.assertLessEqual(len(out["sections"][0]["items"][0]["summary"]), 500)
 
     def test_seen_updates_exclude_future_and_undated(self):
@@ -451,7 +540,8 @@ class TestLlmDigest(unittest.TestCase):
             return FakeResponse(json.dumps(
                 {"choices": [{"message": {"content": content}}]}))
 
-        candidates = candidates or [story(guid="g1", description="D " * 400)]
+        candidates = candidates or [story(
+            guid="g1", description="Stocks climbed broadly on tech strength. " * 12)]
         real = nh.urllib.request.urlopen
         nh.urllib.request.urlopen = fake_urlopen
         try:
@@ -467,7 +557,8 @@ class TestLlmDigest(unittest.TestCase):
         content = "```json\n" + json.dumps({
             "overview": "Markets rose.",
             "sections": [{"title": "📈 Market Pulse",
-                          "items": [{"guid": "g1", "summary": "Up day."}]}],
+                          "items": [{"guid": "g1", "summary":
+                                     "Stocks climbed on tech strength."}]}],
         }) + "\n```"
         digest, req = self._call(content)
         self.assertEqual(digest["sections"][0]["items"][0]["guid"], "g1")
