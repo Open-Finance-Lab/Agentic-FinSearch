@@ -35,13 +35,19 @@ log) and `items-YYYY-MM-DD.jsonl` (every normalized story with scores).
 
 ## Deploy (droplet, as `deploy`)
 
+Merging to `main` deploys automatically: `.github/workflows/heartbeat-tests.yml`
+runs the test suite, then copies `news_heartbeat.py` to the droplet (checksum-
+verified, byte-compiled, atomically installed). Only the script auto-deploys —
+the systemd units, directories, and env file below are droplet config and stay
+manual.
+
 ```bash
 # first time only: directories + config
 ssh finsearch-deploy 'mkdir -p ~/fingpt/heartbeat/digests ~/fingpt/envs ~/.config/systemd/user'
 scp Heartbeat/.env.heartbeat.example finsearch-deploy:/home/deploy/fingpt/envs/.env.heartbeat
 ssh finsearch-deploy 'chmod 600 ~/fingpt/envs/.env.heartbeat'   # then fill it in
 
-# every deploy
+# manual deploy (first install, unit changes, or CI fallback)
 scp Heartbeat/news_heartbeat.py finsearch-deploy:/home/deploy/fingpt/heartbeat/
 scp Heartbeat/systemd/finsearch-heartbeat.* \
     finsearch-deploy:/home/deploy/.config/systemd/user/

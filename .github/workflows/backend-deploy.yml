@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+    # Heartbeat and docs changes don't feed the backend image, so skip the
+    # rebuild/restart for them. Heartbeat merges run heartbeat-tests.yml
+    # (tests + script deploy) instead; docs-only merges run nothing.
+    paths-ignore:
+      - "Heartbeat/**"
+      - "Docs/**"
+      - ".github/workflows/heartbeat-tests.yml"
   workflow_dispatch:
 
 env:

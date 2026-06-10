@@ -1,4 +1,4 @@
-name: Heartbeat Tests
+name: Heartbeat CI
 
 on:
   push:
@@ -12,6 +12,11 @@ on:
       - "Heartbeat/**"
       - ".github/workflows/heartbeat-tests.yml"
   workflow_dispatch:
+
+env:
+  DROPLET_HOST: agenticfinsearch.org
+  DROPLET_USER: deploy
+  HEARTBEAT_HOME: /home/deploy/fingpt/heartbeat
 
 jobs:
   test:
@@ -28,3 +33,71 @@ jobs:
       - name: Run heartbeat unit tests
         working-directory: Heartbeat
         run: python3 -m unittest discover -s tests -v
+
+  deploy:
+    # Tests run everywhere; the droplet only ever tracks main. (PR runs have
+    # ref refs/pull/N/merge, dispatches on a branch have that branch's ref —
+    # both fall through to skipped.)
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    needs: test
+    # Serialize deploys so two merges in quick succession can't land
+    # out of order and leave the droplet on the older commit.
+    concurrency:
+      group: heartbeat-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine deploy eligibility
+        id: deploy-gate
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${DEPLOY_SSH_KEY:-}" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute artifact checksum
+        id: artifact
+        run: echo "sha256=$(sha256sum Heartbeat/news_heartbeat.py | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      # The droplet fetches the script straight from this commit (the repo is
+      # public), verifies it against the checksum computed from the checkout
+      # above, byte-compiles it, then installs via an atomic same-directory
+      # rename so the heartbeat timer can never observe a half-written file.
+      # The systemd units and env file are droplet config and stay manually
+      # managed — see "Deploy" in Heartbeat/README.md.
+      - name: Deploy heartbeat script to droplet
+        if: ${{ steps.deploy-gate.outputs.enabled == 'true' }}
+        uses: appleboy/ssh-action@v0.1.10
+        env:
+          REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+          EXPECTED_SHA256: ${{ steps.artifact.outputs.sha256 }}
+        with:
+          host: ${{ env.DROPLET_HOST }}
+          username: ${{ env.DROPLET_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: 22
+          envs: REPO,COMMIT_SHA,EXPECTED_SHA256,HEARTBEAT_HOME
+          script: |
+            set -euo pipefail
+            tmp=$(mktemp "$HEARTBEAT_HOME/.news_heartbeat.deploy.XXXXXX")
+            trap 'rm -f "$tmp"' EXIT
+            curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "https://raw.githubusercontent.com/$REPO/$COMMIT_SHA/Heartbeat/news_heartbeat.py" -o "$tmp"
+            echo "$EXPECTED_SHA256  $tmp" | sha256sum -c -
+            python3 -m py_compile "$tmp"
+            grep -m1 '^VERSION' "$tmp"
+            rm -rf "$HEARTBEAT_HOME/__pycache__"
+            chmod 644 "$tmp"
+            mv "$tmp" "$HEARTBEAT_HOME/news_heartbeat.py"
+            trap - EXIT
+            echo "Deployed news_heartbeat.py @ $COMMIT_SHA"
