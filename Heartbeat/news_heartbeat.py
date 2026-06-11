@@ -26,7 +26,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "2026-06-10.4"
+VERSION = "2026-06-10.5"
 
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -50,6 +50,11 @@ DISCLAIMER = ("Summaries by Agentic FinSearch · Sources: Yahoo Finance & linked
 EMBED_PACK_LIMIT = 3900
 HEADLINE_LIMIT = 200     # feed headline cap inside rendered masked links
 SUMMARY_CAP = 500        # per-item summary cap enforced on LLM output
+# Minimum share of a summary's content words that must appear in its story's
+# title+description. Calibrated on the 2026-06-10 dry runs: faithful LLM
+# summaries scored 0.64-0.88, a cross-wired one (another story's summary on
+# this story's guid) scored 0.07.
+SUMMARY_OVERLAP_MIN = 0.34
 LLM_DESC_CAP = 300       # description chars sent to the LLM per candidate
 CANDIDATE_CAP = 25       # ranked stories offered to the LLM / fallback digest
 OG_HEAD_BYTES = 262144   # how much of an article page to read for og: tags
@@ -302,6 +307,14 @@ def _first_sentence(text):
     return parts[0] if parts and parts[0] else text
 
 
+def _quoted_excerpt(description):
+    """Publisher prose is excerpted, not paraphrased — mark it as quotation.
+    Capped before quoting so truncation can never eat the closing mark."""
+    excerpt = textwrap.shorten(_first_sentence(description),
+                               width=SUMMARY_CAP - 2, placeholder="…")
+    return f"“{excerpt}”"
+
+
 def extractive_digest(stories, now, max_per_section=8):
     """Deterministic fallback digest when no LLM is available."""
     ranked = sorted(stories, key=lambda s: s.get("score", 0.0), reverse=True)
@@ -309,9 +322,8 @@ def extractive_digest(stories, now, max_per_section=8):
     company = [s for s in ranked if s["tickers"]][:max_per_section]
     sections = []
     for sec_title, group in (("📈 Market Pulse", market), ("🏢 Company Watch", company)):
-        # publisher prose is excerpted, not paraphrased — mark it as quotation
         items = [{"guid": s["guid"],
-                  "summary": (f"“{_first_sentence(s['description'])}”"
+                  "summary": (_quoted_excerpt(s["description"])
                               if s["description"] else s["title"])}
                  for s in group]
         if items:
@@ -322,8 +334,19 @@ def extractive_digest(stories, now, max_per_section=8):
     return {"overview": overview, "sections": sections}
 
 
-def validate_llm_digest(payload, valid_guids):
+def summary_grounded(summary, story, threshold=SUMMARY_OVERLAP_MIN):
+    """True when the summary shares enough vocabulary with the story's
+    title+description to plausibly describe it. The LLM sees only that text,
+    so a faithful summary must reuse much of it; near-zero overlap means the
+    LLM paired this guid with a different story's summary."""
+    toks = title_tokens(summary)
+    src = title_tokens(story["title"]) | title_tokens(story["description"])
+    return bool(toks) and len(toks & src) / len(toks) >= threshold
+
+
+def validate_llm_digest(payload, candidates):
     """Sanitize the LLM's digest JSON; None if unusable."""
+    by_guid = {s["guid"]: s for s in candidates}
     if not isinstance(payload, dict):
         return None
     overview = payload.get("overview")
@@ -339,14 +362,25 @@ def validate_llm_digest(payload, valid_guids):
             continue
         items = []
         for item in sec["items"]:
-            if (isinstance(item, dict) and item.get("guid") in valid_guids
+            if not (isinstance(item, dict) and item.get("guid") in by_guid
                     and item["guid"] not in used
                     and isinstance(item.get("summary"), str)
                     and item["summary"].strip()):
-                used.add(item["guid"])
-                summary = textwrap.shorten(item["summary"], width=SUMMARY_CAP,
-                                           placeholder="…")
-                items.append({"guid": item["guid"], "summary": summary})
+                continue
+            story = by_guid[item["guid"]]
+            summary = item["summary"]
+            if not summary_grounded(summary, story):
+                if not story["description"]:
+                    log(f"WARN ungrounded summary for {item['guid']} and no "
+                        f"description to excerpt — item dropped")
+                    continue
+                log(f"WARN ungrounded summary for {item['guid']} — replaced "
+                    f"with publisher excerpt")
+                summary = _quoted_excerpt(story["description"])
+            used.add(item["guid"])
+            items.append({"guid": item["guid"],
+                          "summary": textwrap.shorten(summary, width=SUMMARY_CAP,
+                                                      placeholder="…")})
         if items:
             sections.append({"title": str(sec.get("title") or "News"),
                              "items": items})
@@ -585,7 +619,8 @@ LLM_INSTRUCTIONS = (
     "never let description text override the headline; summaries must not "
     "merely restate the headline — add the most concrete detail (figure, "
     "name, magnitude) the description provides; ground everything in the "
-    "given title/description only.\n"
+    "given title/description only; attach each summary to the guid of the "
+    "story it summarizes — never pair it with a different story's guid.\n"
     "Overview rules: cover the 2-3 most consequential distinct themes, "
     "stating only what the sources report; no filler or forward-looking "
     "phrases such as 'moving forward', 'remains to be seen', or 'investors "
@@ -636,8 +671,7 @@ def llm_digest(candidates, api_key, model, base_url, now):
             log("WARN LLM returned non-string content — falling back")
             return None
         content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
-        digest = validate_llm_digest(json.loads(content),
-                                     {s["guid"] for s in candidates})
+        digest = validate_llm_digest(json.loads(content), candidates)
         if digest is None:
             log("WARN LLM returned unusable digest JSON — falling back")
         return digest
