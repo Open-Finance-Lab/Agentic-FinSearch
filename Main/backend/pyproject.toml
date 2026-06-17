@@ -63,12 +63,15 @@ docs = [
 package = false
 override-dependencies = [
     "protobuf>=6.33.5",        # CVE-2026-0994: JSON recursion depth bypass (overrides mem0ai's <6 pin)
-    "PyJWT>=2.12.0",           # GHSA: accepts unknown crit header extensions (via mcp)
-    "tornado>=6.5.5",          # GHSA: DoS via multipart + incomplete cookie validation (via jupyter_client)
+    "PyJWT>=2.13.0",           # GHSA: HS256 forgery via JWK, algo allow-list bypass, file:// SSRF, DoS (via mcp)
+    "tornado>=6.5.7",          # GHSA: cross-origin auth-header forward, gzip bomb, curl cred leak (via jupyter_client)
     "urllib3>=2.7.0",          # GHSA: sensitive header forwarding + decompression-bomb bypass
-    "python-multipart>=0.0.27",# GHSA: DoS via unbounded multipart part headers
+    "python-multipart>=0.0.31",# GHSA: quadratic querystring DoS, param smuggling, negative Content-Length OOM
     "idna>=3.15",              # GHSA: CVE-2024-3651 fix bypass via crafted inputs
     "authlib>=1.6.12",         # GHSA: OIDC open redirect in implicit/hybrid flow
+    "cryptography>=48.0.1",    # GHSA: vulnerable OpenSSL bundled in wheels (via authlib)
+    "bleach>=6.4.0",           # GHSA: formaction URI bypass + Unicode scheme sanitization gap
+    "starlette>=1.3.1",        # GHSA: form-limit DoS, UNC SSRF, host poisoning, getattr dispatch (via mcp)
 ]
 
 [tool.pytest.ini_options]
