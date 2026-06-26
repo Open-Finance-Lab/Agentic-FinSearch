@@ -129,7 +129,7 @@ def _restated_later(con, r: dict, as_of) -> bool:
     ).fetchone() is not None
 
 
-def _build(q: Query, spec, r: dict, con, tags_tried: tuple[str, ...]) -> Evidence:
+def _build(q: Query, r: dict, con, tags_tried: tuple[str, ...]) -> Evidence:
     prov = Provenance(r["fact_id"], r["cik"], r["accession"], r["filed"], r["form"],
                       r["taxonomy"], r["tag"], r["fy"], r["fp"], r["frame"])
     return Evidence(
@@ -156,13 +156,28 @@ def retrieve_evidence(q: Query, con=None) -> Evidence:
         if r is not None:
             # Report the tags actually attempted (through the one that hit), not the
             # whole registry tuple — tags_tried is provenance, so it must be honest.
-            return _build(q, spec, r, con, tags_tried=spec.tags[:i + 1])
+            return _build(q, r, con, tags_tried=spec.tags[:i + 1])
     return _miss(q, spec)                           # all tags tried, none matched
 
 
 def retrieve_evidence_batch(qs: Sequence[Query], con=None) -> list[Evidence]:
     con = con or _conn()
     return [retrieve_evidence(q, con=con) for q in qs]
+
+
+def _latest_accession(con, cik: int, form: str) -> str | None:
+    """The entity's most-recently-filed accession of `form`, or None.
+
+    `filed DESC, accession DESC` is a deterministic tiebreak: an entity can file two
+    of the same `form` on the same date (e.g. a 10-K and a same-day 10-K/A), and
+    without the secondary key which one wins — and thus any verdict derived from it —
+    could flip across rebuilds depending on insert order. Single source of this
+    "latest filing of a form" query so the tiebreak can't silently diverge."""
+    row = con.execute(
+        "SELECT accession FROM facts WHERE cik = ? AND form = ? "
+        "ORDER BY filed DESC, accession DESC LIMIT 1",
+        [cik, form]).fetchone()
+    return row[0] if row else None
 
 
 def filing_reports_tag(entity: str, tag: str, form: str = "10-K", con=None) -> bool | None:
@@ -177,19 +192,12 @@ def filing_reports_tag(entity: str, tag: str, form: str = "10-K", con=None) -> b
     cik = _resolve_cik(con, entity)
     if cik is None:
         return None
-    # accession DESC is a deterministic secondary tiebreak: an entity can file two
-    # of the same `form` on the same date (e.g. a 10-K and a same-day 10-K/A), and
-    # without it which one wins — and thus the classified/unclassified verdict — could
-    # flip across rebuilds depending on insert order.
-    row = con.execute(
-        "SELECT accession FROM facts WHERE cik = ? AND form = ? "
-        "ORDER BY filed DESC, accession DESC LIMIT 1",
-        [cik, form]).fetchone()
-    if row is None:
+    accession = _latest_accession(con, cik, form)
+    if accession is None:
         return None
     return con.execute(
         "SELECT 1 FROM facts WHERE cik = ? AND accession = ? AND tag = ? LIMIT 1",
-        [cik, row[0], tag]).fetchone() is not None
+        [cik, accession, tag]).fetchone() is not None
 
 
 def latest_filing(entity: str, form: str = "10-K", con=None) -> str | None:
@@ -199,8 +207,4 @@ def latest_filing(entity: str, form: str = "10-K", con=None) -> str | None:
     cik = _resolve_cik(con, entity)
     if cik is None:
         return None
-    row = con.execute(
-        "SELECT accession FROM facts WHERE cik = ? AND form = ? "
-        "ORDER BY filed DESC, accession DESC LIMIT 1",        # deterministic same-day tiebreak
-        [cik, form]).fetchone()
-    return row[0] if row else None
+    return _latest_accession(con, cik, form)
