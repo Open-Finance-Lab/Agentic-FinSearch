@@ -14,6 +14,9 @@ class Provenance:
     form: str
     taxonomy: str
     tag: str            # the ACTUAL us-gaap tag matched
+    # fy/fp widened to Optional vs spec S5's non-null prose: companyfacts entries
+    # can omit fiscal year/period, and the facts table declares them NULLable. This
+    # is the non-breaking direction; spec S5 of-record should be aligned to match.
     fy: int | None
     fp: str | None
     frame: str | None
