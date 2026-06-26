@@ -69,9 +69,16 @@ def make_fact_id(cik, taxonomy, tag, unit, period_start, period_end, accession) 
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
-def connect(db_path=DB_PATH) -> "duckdb.DuckDBPyConnection":
-    if db_path != ":memory:":
+def connect(db_path=DB_PATH, read_only=False) -> "duckdb.DuckDBPyConnection":
+    """Open the store. ``read_only=True`` is the request-path mode: DuckDB's
+    read-write lock is exclusive across processes (a second gunicorn worker can't
+    open an RW-locked file even read-only), whereas any number of processes — and
+    threads, each with its own connection — may open the same file read-only. The
+    file must already exist in that mode and ``_SCHEMA`` (a write/DDL) is skipped;
+    callers go through ingest/build for the one-time write."""
+    if db_path != ":memory:" and not read_only:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect(str(db_path))
-    con.execute(_SCHEMA)
+    con = duckdb.connect(str(db_path), read_only=read_only)
+    if not read_only:
+        con.execute(_SCHEMA)
     return con

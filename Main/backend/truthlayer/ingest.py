@@ -81,10 +81,11 @@ def fetch_companyfacts(cik: int) -> dict:
 
 def _prune(doc: dict) -> dict:
     """Keep only the us-gaap tags the registry references; drop everything else
-    so the committed snapshot is ~tens of KB instead of multiple MB."""
+    so the committed snapshot is ~tens of KB instead of multiple MB. Returns a new
+    dict — does not mutate the caller's doc."""
     gaap = doc.get("facts", {}).get("us-gaap", {})
-    doc["facts"] = {"us-gaap": {t: gaap[t] for t in _KEEP_TAGS if t in gaap}}
-    return doc
+    kept = {t: gaap[t] for t in _KEEP_TAGS if t in gaap}
+    return {**doc, "facts": {"us-gaap": kept}}
 
 
 def save_snapshots() -> None:

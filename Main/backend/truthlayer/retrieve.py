@@ -1,23 +1,63 @@
 from __future__ import annotations
 
+import os
+import threading
 from collections.abc import Sequence
 
 from truthlayer import registry, store
 from truthlayer.contracts import Evidence, Period, Provenance, Query
 
-_con = None
+# One read-only DuckDB connection PER THREAD. A single connection is not safe for
+# concurrent use across threads — interleaved .execute() calls clobber each other's
+# cursor/description and return another query's row (silently wrong "truth"). The
+# store is read-only at request time, so each thread opens its own read-only handle;
+# read-only opens stack freely across the gunicorn gthread pool AND its forked
+# worker processes (an RW handle, by contrast, would lock every other worker out).
+_local = threading.local()
+_build_lock = threading.Lock()
+
+
+def _ensure_built() -> None:
+    """Build the store from vendored snapshots once, if it isn't there yet.
+
+    Builds into a private temp file and atomically renames it into place, so two
+    cold-start builders (threads here, OR separate worker processes) can never see
+    a half-written DB or collide on the RW lock of the shared path — each writes
+    its own temp and the rename is atomic; last writer wins, data is identical.
+    In production the build runs once in entrypoint.sh before workers fork, so this
+    is normally a no-op fast path."""
+    if store.DB_PATH.exists():
+        return
+    with _build_lock:                              # serialize threads within this process
+        if store.DB_PATH.exists():                 # double-checked after acquiring the lock
+            return
+        from truthlayer import ingest
+        tmp = store.DB_PATH.with_name(f".building-{os.getpid()}-{store.DB_PATH.name}")
+        wal = tmp.with_name(tmp.name + ".wal")     # DuckDB's write-ahead-log sidecar
+        try:
+            con = ingest.build_from_vendored(tmp)
+            con.execute("CHECKPOINT")              # fold the WAL in so the renamed file is self-contained
+            con.close()                            # release the RW lock before the rename
+            os.replace(tmp, store.DB_PATH)         # atomic on POSIX
+        finally:
+            # Clean BOTH the temp DB and its WAL sidecar — os.replace moves only the
+            # main file, and a build that crashes before close can leave either behind.
+            for leftover in (tmp, wal):
+                try:
+                    leftover.unlink()
+                except FileNotFoundError:
+                    pass
 
 
 def _conn():
-    """Lazily open the persistent store, building it from vendored snapshots
-    on first use so a fresh checkout works offline."""
-    global _con
-    if _con is None:
-        if not store.DB_PATH.exists():
-            from truthlayer import ingest
-            ingest.build_from_vendored()
-        _con = store.connect(store.DB_PATH)
-    return _con
+    """Return this thread's read-only connection to the store, opening it (and
+    building the store on first use, for offline fresh checkouts) on demand."""
+    con = getattr(_local, "con", None)
+    if con is None:
+        _ensure_built()
+        con = store.connect(store.DB_PATH, read_only=True)
+        _local.con = con
+    return con
 
 
 def _resolve_cik(con, entity: str) -> int | None:
@@ -89,14 +129,14 @@ def _restated_later(con, r: dict, as_of) -> bool:
     ).fetchone() is not None
 
 
-def _build(q: Query, spec, r: dict, con) -> Evidence:
+def _build(q: Query, spec, r: dict, con, tags_tried: tuple[str, ...]) -> Evidence:
     prov = Provenance(r["fact_id"], r["cik"], r["accession"], r["filed"], r["form"],
                       r["taxonomy"], r["tag"], r["fy"], r["fp"], r["frame"])
     return Evidence(
         concept=q.concept,
         value=float(r["value"]) if r["value"] is not None else None,
         value_exact=r["value_exact"], unit=r["unit"], period=q.period, as_of=q.as_of,
-        provenance=prov, found=True, tags_tried=spec.tags,
+        provenance=prov, found=True, tags_tried=tags_tried,
         restated_later=_restated_later(con, r, q.as_of),
     )
 
@@ -111,11 +151,13 @@ def retrieve_evidence(q: Query, con=None) -> Evidence:
     cik = _resolve_cik(con, q.entity)
     if cik is None:
         return _miss(q, spec)
-    for tag in spec.tags:                          # first match wins
+    for i, tag in enumerate(spec.tags):            # first match wins
         r = _select(con, cik, tag, spec.period_type, q.period, q.as_of)
         if r is not None:
-            return _build(q, spec, r, con)
-    return _miss(q, spec)
+            # Report the tags actually attempted (through the one that hit), not the
+            # whole registry tuple — tags_tried is provenance, so it must be honest.
+            return _build(q, spec, r, con, tags_tried=spec.tags[:i + 1])
+    return _miss(q, spec)                           # all tags tried, none matched
 
 
 def retrieve_evidence_batch(qs: Sequence[Query], con=None) -> list[Evidence]:
@@ -123,13 +165,31 @@ def retrieve_evidence_batch(qs: Sequence[Query], con=None) -> list[Evidence]:
     return [retrieve_evidence(q, con=con) for q in qs]
 
 
-def entity_has_tag(entity: str, tag: str, con=None) -> bool:
+def filing_reports_tag(entity: str, tag: str, form: str = "10-K", con=None) -> bool | None:
+    """Whether the entity's MOST RECENTLY FILED `form` reports `tag`.
+
+    Scoped to the latest filing (not "any filing ever") so a structural check like
+    "is the balance sheet classified?" reflects current reporting policy — the
+    faithful analog of the old resolver, which inspected the single most-recent
+    local filing. Returns None when the entity has no such filing in the store
+    (unknown to the truth layer — distinct from a filing that omits the tag)."""
     con = con or _conn()
     cik = _resolve_cik(con, entity)
     if cik is None:
-        return False
+        return None
+    # accession DESC is a deterministic secondary tiebreak: an entity can file two
+    # of the same `form` on the same date (e.g. a 10-K and a same-day 10-K/A), and
+    # without it which one wins — and thus the classified/unclassified verdict — could
+    # flip across rebuilds depending on insert order.
+    row = con.execute(
+        "SELECT accession FROM facts WHERE cik = ? AND form = ? "
+        "ORDER BY filed DESC, accession DESC LIMIT 1",
+        [cik, form]).fetchone()
+    if row is None:
+        return None
     return con.execute(
-        "SELECT 1 FROM facts WHERE cik = ? AND tag = ? LIMIT 1", [cik, tag]).fetchone() is not None
+        "SELECT 1 FROM facts WHERE cik = ? AND accession = ? AND tag = ? LIMIT 1",
+        [cik, row[0], tag]).fetchone() is not None
 
 
 def latest_filing(entity: str, form: str = "10-K", con=None) -> str | None:
@@ -140,6 +200,7 @@ def latest_filing(entity: str, form: str = "10-K", con=None) -> str | None:
     if cik is None:
         return None
     row = con.execute(
-        "SELECT accession FROM facts WHERE cik = ? AND form = ? ORDER BY filed DESC LIMIT 1",
+        "SELECT accession FROM facts WHERE cik = ? AND form = ? "
+        "ORDER BY filed DESC, accession DESC LIMIT 1",        # deterministic same-day tiebreak
         [cik, form]).fetchone()
     return row[0] if row else None

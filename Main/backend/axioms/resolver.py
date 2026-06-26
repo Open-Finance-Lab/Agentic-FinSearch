@@ -57,22 +57,22 @@ def check_applicability(ratio: str, ticker: str) -> Optional[Dict[str, str]]:
     filer's reporting structure; else None. Structural (tag-presence), not SIC."""
     if ratio not in _REQUIRES_CLASSIFIED_BS:
         return None
-    # Unknown entity (no data in the truth layer) -> defer downstream, not
-    # "unclassified". `Assets` is universal across SEC filers (incl. banks/insurers/
-    # REITs that lack the current/non-current split), so its absence means we simply
-    # have no balance sheet for this ticker, which is distinct from an unclassified one.
-    if not tl.entity_has_tag(ticker, "Assets"):
+    # Inspect the entity's MOST RECENT 10-K, mirroring the old resolver. None means
+    # no filing for this ticker in the truth layer -> defer downstream (distinct from
+    # an unclassified filer). False means the latest 10-K omits AssetsCurrent, i.e. an
+    # unclassified balance sheet (banks/insurers/REITs lack the current/non-current
+    # split). True means classified -> the current ratio applies.
+    reports_current = tl.filing_reports_tag(ticker, "AssetsCurrent", form="10-K")
+    if reports_current is None or reports_current:
         return None
-    if not tl.entity_has_tag(ticker, "AssetsCurrent"):
-        return {
-            "ratio": ratio,
-            "reason": (
-                f"{ticker.upper()} uses an unclassified balance sheet (typical for "
-                "banks, insurance, and REITs). The current ratio is not defined "
-                "for this reporting structure."
-            ),
-        }
-    return None
+    return {
+        "ratio": ratio,
+        "reason": (
+            f"{ticker.upper()} uses an unclassified balance sheet (typical for "
+            "banks, insurance, and REITs). The current ratio is not defined "
+            "for this reporting structure."
+        ),
+    }
 
 
 def xbrl_source_url(ticker: str) -> Optional[str]:
