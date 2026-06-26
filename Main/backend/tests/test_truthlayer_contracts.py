@@ -4,6 +4,16 @@ from decimal import Decimal
 from truthlayer.contracts import Evidence, Provenance, Period, Query
 
 
+def test_package_reexports_frozen_public_surface():
+    import truthlayer
+    from truthlayer import (  # noqa: F401 — the import itself is the assertion
+        retrieve_evidence, retrieve_evidence_batch, Query as Q, Period as P, Evidence as E,
+    )
+    assert {"retrieve_evidence", "retrieve_evidence_batch", "Query", "Period", "Evidence"} \
+        <= set(truthlayer.__all__)
+    assert truthlayer.Evidence is Evidence and truthlayer.Query is Query
+
+
 def test_period_demo_path_and_benchmark_path():
     demo = Period(period_end=date(2023, 9, 30))
     assert demo.period_end == date(2023, 9, 30) and demo.fiscal_year is None
