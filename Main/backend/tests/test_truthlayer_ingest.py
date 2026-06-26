@@ -1,3 +1,5 @@
+import pytest
+
 from truthlayer import store, ingest
 
 # Minimal companyfacts shape: one instant tag with an ORIGINAL and a RESTATED entry
@@ -52,3 +54,23 @@ def test_ingest_is_idempotent():
     n = con.execute("SELECT count(*) FROM facts").fetchone()[0]
     assert n == 3                                # 2 Assets + 1 Revenues
     assert con.execute("SELECT count(*) FROM entities").fetchone()[0] == 1
+
+
+# Two entries sharing the canonical tuple (cik,taxonomy,tag,unit,start,end,accn) but
+# differing in fp/frame/val — same accession tagging a period both FY and Q4. The
+# current fact_id recipe can't tell them apart; ingest must fail loud, not silently drop.
+COLLIDING = {
+    "cik": 777, "entityName": "Col",
+    "facts": {"us-gaap": {"Revenues": {"units": {"USD": [
+        {"start": "2023-01-01", "end": "2023-12-31", "val": 100, "accn": "x", "fy": 2023,
+         "fp": "FY", "form": "10-K", "filed": "2024-02-01", "frame": "CY2023"},
+        {"start": "2023-01-01", "end": "2023-12-31", "val": 25, "accn": "x", "fy": 2023,
+         "fp": "Q4", "form": "10-K", "filed": "2024-02-01", "frame": "CY2023Q4"},
+    ]}}}},
+}
+
+
+def test_intra_doc_factid_collision_raises_not_silently_drops():
+    con = store.connect(":memory:")
+    with pytest.raises(ValueError, match="collision"):
+        ingest.ingest_doc(con, COLLIDING)

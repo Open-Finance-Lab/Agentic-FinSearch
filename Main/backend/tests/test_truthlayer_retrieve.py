@@ -55,3 +55,42 @@ def test_unknown_concept_raises(con):
     with pytest.raises(ConceptNotFound):
         retrieve.retrieve_evidence(
             Query("INST", "ebitda_magic", Period(period_end=date(2023, 12, 31))), con=con)
+
+
+DUAL_UNIT = {
+    "cik": 555, "entityName": "Dual Co",
+    "facts": {"us-gaap": {"Assets": {"units": {
+        "USD": [{"end": "2023-12-31", "val": 5000, "accn": "u", "fy": 2023, "fp": "FY",
+                 "form": "10-K", "filed": "2024-02-01"}],
+        "EUR": [{"end": "2023-12-31", "val": 4600, "accn": "e", "fy": 2023, "fp": "FY",
+                 "form": "10-K", "filed": "2024-03-01"}],   # later-filed, but wrong currency
+    }}}},
+}
+
+
+def test_prefers_usd_when_multiple_units():
+    c = store.connect(":memory:")
+    ingest.ingest_doc(c, DUAL_UNIT)
+    c.execute("UPDATE entities SET ticker = 'DUAL' WHERE cik = 555")
+    ev = retrieve.retrieve_evidence(
+        Query("DUAL", "assets", Period(period_end=date(2023, 12, 31))), con=c)
+    assert ev.value == 5000.0 and ev.unit == "USD"   # not the later-filed EUR 4600
+
+
+def test_whitespace_entity_still_resolves(con):
+    clean = retrieve.retrieve_evidence(
+        Query("INST", "assets", Period(period_end=date(2023, 12, 31))), con=con)
+    padded = retrieve.retrieve_evidence(
+        Query(" INST ", "assets", Period(period_end=date(2023, 12, 31))), con=con)
+    assert clean.found and padded.found and padded.value == clean.value
+
+
+def test_numeric_ticker_resolves_to_its_cik_not_the_literal_int():
+    c = store.connect(":memory:")
+    ingest.ingest_doc(c, {"cik": 999, "entityName": "N", "facts": {"us-gaap": {"Assets": {
+        "units": {"USD": [{"end": "2023-12-31", "val": 7, "accn": "a", "fy": 2023, "fp": "FY",
+                           "form": "10-K", "filed": "2024-02-01"}]}}}}})
+    c.execute("UPDATE entities SET ticker = '8086' WHERE cik = 999")   # non-US numeric ticker
+    ev = retrieve.retrieve_evidence(
+        Query("8086", "assets", Period(period_end=date(2023, 12, 31))), con=c)
+    assert ev.found and ev.value == 7.0    # via ticker 8086 -> cik 999, not int('8086')

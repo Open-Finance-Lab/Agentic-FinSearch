@@ -43,6 +43,23 @@ def companyfacts_rows(doc: dict):
 
 def ingest_doc(con, doc: dict) -> None:
     rows = list(companyfacts_rows(doc))
+    # Fail loud on an intra-document fact_id collision: two entries the canonical tuple
+    # (cik,taxonomy,tag,unit,period_start,period_end,accession) cannot distinguish but
+    # that differ in fy/fp/frame/value (e.g. one accession tagging a period both
+    # FY/CYxxxx and Q4/CYxxxxQ4). DuckDB ON CONFLICT DO NOTHING would SILENTLY keep
+    # whichever came first in source order — non-deterministic data loss. The vendored
+    # snapshots have zero such collisions; if a new one trips this, the fact_id recipe
+    # must fold the distinguishing field (the S2/S13 reconcile checkpoint).
+    seen: dict[str, tuple] = {}
+    for row in rows:
+        fid = row[0]
+        if fid in seen and seen[fid] != row:
+            raise ValueError(
+                f"intra-document fact_id collision for {fid!r}: two distinct facts share "
+                f"the canonical tuple. Fold the distinguishing field into make_fact_id "
+                f"(spec S2/S13). cik={doc.get('cik')} tag={row[3]!r}"
+            )
+        seen[fid] = row
     placeholders = ",".join(["?"] * len(store.FACT_COLUMNS))
     con.executemany(
         f"INSERT INTO facts VALUES ({placeholders}) ON CONFLICT (fact_id) DO NOTHING", rows

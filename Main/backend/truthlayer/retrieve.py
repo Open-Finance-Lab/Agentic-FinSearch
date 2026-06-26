@@ -21,11 +21,16 @@ def _conn():
 
 
 def _resolve_cik(con, entity: str) -> int | None:
-    if str(entity).isdigit():
-        return int(entity)
+    # Ticker-first, then fall back to an all-digit CIK: a numeric ticker (e.g. non-US
+    # exchange codes) must not be misread as a CIK. .strip() so entity strings from CSV
+    # cells / LLM tool-call args with stray whitespace still resolve instead of silently
+    # missing — _resolve_cik is the single choke point for all four read functions.
+    entity = str(entity).strip()
     row = con.execute(
         "SELECT cik FROM entities WHERE upper(ticker) = upper(?)", [entity]).fetchone()
-    return row[0] if row else None
+    if row:
+        return row[0]
+    return int(entity) if entity.isdigit() else None
 
 
 def _select(con, cik: int, tag: str, period_type: str, period: Period, as_of):
@@ -38,7 +43,20 @@ def _select(con, cik: int, tag: str, period_type: str, period: Period, as_of):
         where.append("fy = ? AND fp = ?"); params += [period.fiscal_year, period.fiscal_period]
     if as_of is not None:
         where.append("filed <= ?"); params.append(as_of)
-    order = "(period_end - period_start) DESC, filed DESC" if period_type == "duration" else "filed DESC"
+    # Tiebreaks — all no-ops on the demo path (period_end pinned, USD-only data), so
+    # shipped behavior is unchanged; they only disambiguate the (fy,fp) benchmark path
+    # and dual-currency/duplicate rows:
+    #  - period_end DESC pins the period that CLOSES the fiscal period, beating the
+    #    prior-year comparatives that share the same (fy, fp) on one filing.
+    #  - (unit = 'USD') DESC prefers USD when a tag reports one period in several units
+    #    (a per-share concept has no USD row, so this is a no-op for it). Default policy
+    #    pending a registry unit model.
+    #  - accession DESC is a final deterministic tiebreak so provenance is reproducible.
+    usd_pref = "(unit = 'USD') DESC"
+    if period_type == "duration":
+        order = f"(period_end - period_start) DESC, {usd_pref}, period_end DESC, filed DESC, accession DESC"
+    else:
+        order = f"{usd_pref}, period_end DESC, filed DESC, accession DESC"
     sql = f"SELECT * FROM facts WHERE {' AND '.join(where)} ORDER BY {order} LIMIT 1"
     res = con.execute(sql, params)
     row = res.fetchone()
@@ -48,13 +66,26 @@ def _select(con, cik: int, tag: str, period_type: str, period: Period, as_of):
 
 
 def _restated_later(con, r: dict, as_of) -> bool:
+    """True if a filing after as_of changed this same (entity, tag, unit, period) fact.
+
+    Compares value_exact (DECIMAL), not value (DOUBLE): float collapses distinct
+    integers at/above 2^53, silently missing a restatement. Filters on unit so a
+    same-period fact in another currency is never mistaken for a restatement.
+
+    Deferred limitation: on the (fy, fp) benchmark path, a restatement that SHIFTS
+    the period_end (52/53-week fiscal calendars) is not detected, because the probe
+    keys on the selected row's period_end. Reconcile when the benchmark path gets its
+    first consumer/test (P4) — see Docs/superpowers/.../*-deferred.md.
+    """
     if as_of is None:
         return False
     q = ("SELECT 1 FROM facts WHERE cik = ? AND taxonomy = 'us-gaap' AND tag = ? "
+         "AND unit IS NOT DISTINCT FROM ? "
          "AND period_end IS NOT DISTINCT FROM ? AND period_start IS NOT DISTINCT FROM ? "
-         "AND filed > ? AND value <> ? LIMIT 1")
+         "AND filed > ? AND value_exact <> ? LIMIT 1")
     return con.execute(
-        q, [r["cik"], r["tag"], r["period_end"], r["period_start"], r["filed"], r["value"]]
+        q, [r["cik"], r["tag"], r["unit"], r["period_end"], r["period_start"],
+            r["filed"], r["value_exact"]]
     ).fetchone() is not None
 
 
