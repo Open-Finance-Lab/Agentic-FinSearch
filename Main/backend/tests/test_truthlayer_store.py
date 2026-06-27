@@ -1,11 +1,24 @@
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from truthlayer import store
 
 
+@pytest.fixture
+def built_store_db(tmp_path):
+    """A freshly built, checkpointed, closed store; yields its on-disk path."""
+    from truthlayer import ingest
+    db = tmp_path / "t.duckdb"
+    con = ingest.build_from_vendored(db)
+    con.execute("CHECKPOINT")
+    con.close()
+    return db
+
+
 def test_make_fact_id_is_stable_and_distinguishes_accession():
-    # Signature: (cik, tag, period_start, period_end, unit, accession, dim_hash='')
+    # Signature: (cik, concept, period_start, period_end, unit, accession, *, dim_hash='')
     a = store.make_fact_id(320193, "Assets", None, date(2023, 9, 30), "USD", "acc-1")
     a_again = store.make_fact_id(320193, "Assets", None, date(2023, 9, 30), "USD", "acc-1")
     b = store.make_fact_id(320193, "Assets", None, date(2023, 9, 30), "USD", "acc-2")
@@ -21,6 +34,20 @@ def test_connect_creates_schema():
     assert {"fact_id", "value_exact", "filed", "period_start", "frame"} <= set(cols)
     ent_cols = [r[1] for r in con.execute("PRAGMA table_info('entities')").fetchall()]
     assert {"cik", "ticker", "name"} <= set(ent_cols)
+    meta_cols = [r[1] for r in con.execute("PRAGMA table_info('meta')").fetchall()]
+    assert {"key", "value"} <= set(meta_cols)
+
+
+def test_dim_hash_is_keyword_only():
+    # Keyword-only so it can't be supplied by accident in the wrong positional slot of
+    # a 7-field, all-stringified JOIN KEY. A 7th positional arg must raise, not hash.
+    with pytest.raises(TypeError):
+        store.make_fact_id(320193, "Assets", None, date(2023, 9, 30), "USD", "acc-1", "x")
+    # Supplied by keyword it participates in the hash (a real param, not a constant).
+    base = store.make_fact_id(320193, "Assets", None, date(2023, 9, 30), "USD", "acc-1")
+    dimmed = store.make_fact_id(320193, "Assets", None, date(2023, 9, 30), "USD", "acc-1",
+                                dim_hash="seg=US")
+    assert base != dimmed
 
 
 def test_value_exact_preserves_more_than_six_decimals():
@@ -67,3 +94,55 @@ def test_make_fact_id_golden():
         1045810, "Revenues", date(2025, 1, 27), date(2026, 1, 25), "USD",
         "0001045810-26-000021")
     assert fid == "d7a34159f863a4bbbbe3b092a3f9611070cfe5ad"
+
+
+def test_built_store_fact_ids_match_recipe(tmp_path):
+    # End-to-end ingest->store pin: EVERY stored fact_id must equal make_fact_id
+    # recomputed from that same row's fields. Without this, a store built under an old
+    # recipe would pass every other test (none assert on a STORED fact_id) while
+    # serving ids that never join to the benchmark gold. Recompute over the WHOLE table
+    # (no LIMIT) — a few thousand rows hash in milliseconds — so a recipe desync scoped
+    # to a single entity or tag can't slip through an unordered sample.
+    from truthlayer import ingest
+    con = ingest.build_from_vendored(tmp_path / "t.duckdb")
+    try:
+        rows = con.execute(
+            "SELECT fact_id, cik, tag, period_start, period_end, unit, accession "
+            "FROM facts"
+        ).fetchall()
+        assert rows, "vendored snapshots produced no facts"
+        mismatched = [
+            fid for fid, cik, tag, ps, pe, unit, accn in rows
+            if fid != store.make_fact_id(cik, tag, ps, pe, unit, accn)
+        ]
+        assert not mismatched, f"{len(mismatched)}/{len(rows)} stored fact_ids != recipe"
+    finally:
+        con.close()
+
+
+def test_built_store_stamps_versions(built_store_db):
+    # The build records its recipe+registry versions into `meta` so staleness is
+    # detectable; read_meta must round-trip exactly what build_versions() declared.
+    assert store.read_meta(built_store_db) == store.build_versions()
+
+
+def test_read_meta_treats_missing_or_legacy_store_as_stale(tmp_path):
+    # Missing file -> {}. A store predating the meta table -> {} (so it reads as stale
+    # and is rebuilt, never trusted) instead of raising.
+    assert store.read_meta(tmp_path / "nope.duckdb") == {}
+    legacy = tmp_path / "legacy.duckdb"
+    con = store.connect(legacy)
+    con.execute("DROP TABLE meta")          # simulate a store built before the meta table
+    con.execute("CHECKPOINT")
+    con.close()
+    assert store.read_meta(legacy) == {}
+
+
+def test_store_is_current_detects_version_drift(built_store_db, monkeypatch):
+    # The payoff of the meta stamp: a recipe/registry bump must invalidate a store
+    # built under the old version so _ensure_built rebuilds it.
+    from truthlayer import retrieve
+    monkeypatch.setattr(store, "DB_PATH", built_store_db)
+    assert retrieve._store_is_current() is True
+    monkeypatch.setattr(store, "FACT_ID_RECIPE_VERSION", "0000-00-00")  # simulate a bump
+    assert retrieve._store_is_current() is False

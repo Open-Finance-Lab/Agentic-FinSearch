@@ -16,6 +16,12 @@ USER_AGENT = "Agentic FinSearch admin@agenticfinsearch.org"
 DEMO_CIKS = {"AAPL": 320193, "MSFT": 789019, "TSLA": 1318605}
 
 # Keep vendored snapshots small: prune to the tags the registry actually uses.
+# NOTE: _prune() applies this set at save_snapshots() time, so the COMMITTED demo
+# snapshots only contain tags the registry referenced when they were last saved.
+# Adding a concept to the registry does NOT retroactively add its tag to those
+# snapshots — re-run save_snapshots() (needs network) if a newly added concept must
+# resolve on the demo trio. (The benchmark's 197-company breadth ingest is a separate
+# frozen source — see the deferred-items doc.)
 from truthlayer.registry import CONCEPT_REGISTRY  # noqa: E402
 _KEEP_TAGS = {t for spec in CONCEPT_REGISTRY.values() for t in spec.tags}
 
@@ -107,4 +113,7 @@ def build_from_vendored(db_path=store.DB_PATH):
         ingest_doc(con, doc)
         con.execute("UPDATE entities SET ticker = ? WHERE cik = ?",
                     [ticker_by_cik.get(doc["cik"]), doc["cik"]])
+    # Stamp the recipe + registry versions this store was built with, so a later
+    # recipe/registry bump invalidates it (retrieve._store_is_current rebuilds).
+    store.write_meta(con, store.build_versions())
     return con

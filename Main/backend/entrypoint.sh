@@ -25,8 +25,11 @@ mkdir -p "${CACHE_FILE_PATH:-/tmp/fingpt_cache}"
 # read-write lock is exclusive across processes, so the workers must all open the
 # store read-only — which requires it to already exist. Building here (single process,
 # connection closed immediately) avoids a cold-start lock fight between workers.
+# Gate on _store_is_current (NOT mere existence): an image-baked store built under an
+# older fact_id recipe / registry version must be rebuilt here, not lazily in a
+# concurrent post-fork window. This mirrors the request-path gate in retrieve._ensure_built.
 echo "Building XBRL truth-layer store..."
-python -c "from truthlayer import ingest, store; ingest.build_from_vendored().close() if not store.DB_PATH.exists() else print('truth-layer store already present')" || {
+python -c "from truthlayer import ingest, retrieve; ingest.build_from_vendored().close() if not retrieve._store_is_current() else print('truth-layer store already current')" || {
     echo "ERROR: failed to build truth-layer store" >&2
     exit 1
 }

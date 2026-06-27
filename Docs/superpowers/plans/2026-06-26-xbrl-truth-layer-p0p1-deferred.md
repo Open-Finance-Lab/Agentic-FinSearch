@@ -105,6 +105,18 @@ benchmark's own frozen snapshot (`xbrl.duckdb`), not a live re-fetch.** This is 
 gating fact-join risk, downstream of (not the) tag selection. Entry point: source the
 benchmark `xbrl.duckdb` (487,623 facts / 246 cos — not checked in) before the P4 grader.
 
+**⚠️ Forward risk for breadth ingest — `taxonomy` dropped from the key + multi-taxonomy
+docs.** The reconciled recipe drops `taxonomy` (the generator's key is us-gaap-only), but
+`ingest.companyfacts_rows` still iterates *every* taxonomy in a companyfacts doc
+(`us-gaap`, `dei`, `srt`, …). For the demo trio this is moot — `_prune` keeps only
+us-gaap. But an unpruned breadth ingest could mint the same `fact_id` for two facts that
+differ only by taxonomy (same tag name + period + unit + accession + value across, say,
+`us-gaap` and `srt`). This is **caught loud, not silent**: the intra-doc collision guard
+in `ingest_doc` raises rather than `ON CONFLICT DO NOTHING`. Mitigation is to ingest from
+the benchmark's frozen `xbrl.duckdb` (already us-gaap facts) rather than re-deriving from
+multi-taxonomy companyfacts; if a future path must ingest raw companyfacts, filter to
+`us-gaap` first (or fold `taxonomy`/`dim_hash` into the key for the non-benchmark store).
+
 ---
 
 ### S2/S13 (historical) — original defer rationale

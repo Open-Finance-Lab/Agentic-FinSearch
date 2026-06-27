@@ -17,8 +17,24 @@ _local = threading.local()
 _build_lock = threading.Lock()
 
 
+def _store_is_current() -> bool:
+    """True only if a built store exists AND was stamped with the current recipe +
+    registry versions. A persisted store bakes fact_ids (recipe) and tag coverage
+    (registry) at build time; on a version drift the on-disk store is stale and is
+    rebuilt by _ensure_built — otherwise it would silently serve old-recipe fact_ids
+    that never join to the benchmark gold, or miss concepts added after it was built.
+    A store predating the `meta` table reads as {} (read_meta), so it counts as stale."""
+    if not store.DB_PATH.exists():
+        return False
+    actual = store.read_meta(store.DB_PATH)
+    return all(actual.get(k) == v for k, v in store.build_versions().items())
+
+
 def _ensure_built() -> None:
-    """Build the store from vendored snapshots once, if it isn't there yet.
+    """Build the store from vendored snapshots if it is missing OR stale.
+
+    "Stale" = built with a different fact_id recipe / registry version than the
+    running code (see _store_is_current); the rebuilt file atomically replaces it.
 
     Builds into a private temp file and atomically renames it into place, so two
     cold-start builders (threads here, OR separate worker processes) can never see
@@ -26,10 +42,10 @@ def _ensure_built() -> None:
     its own temp and the rename is atomic; last writer wins, data is identical.
     In production the build runs once in entrypoint.sh before workers fork, so this
     is normally a no-op fast path."""
-    if store.DB_PATH.exists():
+    if _store_is_current():
         return
     with _build_lock:                              # serialize threads within this process
-        if store.DB_PATH.exists():                 # double-checked after acquiring the lock
+        if _store_is_current():                    # double-checked after acquiring the lock
             return
         from truthlayer import ingest
         tmp = store.DB_PATH.with_name(f".building-{os.getpid()}-{store.DB_PATH.name}")
