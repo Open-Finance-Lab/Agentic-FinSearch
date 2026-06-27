@@ -38,6 +38,77 @@ Est. effort: ~half a day, gated on the benchmark/P4 design.
 
 ### S2/S13 — `fact_id` canonical recipe reconciliation (encoding + field set)
 
+**Status: ✅ RESOLVED 2026-06-26.** The recipe was reconciled against the benchmark
+generator and `make_fact_id` was changed to match byte-for-byte.
+
+**How it was reconciled (the generator source is NOT checked in — only its output
+`Materials/XBRL Tree/Benchmark/cases_v1_final.json` + the contributor guide).** The
+guide documents the field set; the exact serialization was recovered empirically by
+reproducing two real `gold_fact_path` sha1s against their SEC `companyfacts` source
+fields (a known-plaintext/known-digest recovery). The generator's recipe is:
+
+```
+sha1("|".join(str(x) for x in (cik, concept, period_start, period_end, unit, accession, dim_hash)))
+```
+- `concept` = the raw us-gaap tag (e.g. `Revenues`); `period_start=None` (instant facts)
+  → `str()` → `'None'`; `dim_hash=''` for consolidated companyfacts facts (trailing `|`).
+- Verified anchors (pinned in `tests/test_truthlayer_store.py::test_make_fact_id_matches_benchmark_gold_path`):
+  NVDA FY2026 `Revenues` → `d7a34159f863a4bbbbe3b092a3f9611070cfe5ad`;
+  Meta FY2025 `Assets` → `293b650557be02293fc40c70526e46d6b9096ee2`.
+
+**Deltas applied to our recipe (was `cik|taxonomy|tag|unit|pstart|pend|accn`):** dropped
+`taxonomy`; moved `unit` to after the period dates; appended `dim_hash` (a real param,
+default `''`, so the deferred raw-XBRL dimensional path can populate it without
+re-hashing the consolidated facts). The intra-doc collision guard in `ingest_doc` stays
+(the field set still omits `fy/fp/frame/value`, matching the generator). Prose was wrong
+twice — the contributor guide omitted `period_start`, the cases guide added `value` — so
+the empirical hash match is of record.
+
+**concept→tag SELECTION divergence — ✅ RESOLVED 2026-06-27.** The other half of the
+S2/S13 join (tag selection, not the hash) is reconciled and exhaustively validated.
+
+*The NVDA alarm was a false positive.* NVDA does report `Revenues` AND (historically)
+`RevenueFromContractWithCustomerExcludingAssessedTax`, but **not** the latter for the
+FY2026 consolidated period — so first-tag-wins correctly falls through to `Revenues`,
+because `retrieve._select` only considers a tag that reports a fact *for the queried
+period*. The registry order was never wrong for revenue.
+
+*How it was reconciled (empirically, not from the guide's `CANONICAL_METRICS` prose —
+which proved unreliable twice already).* Reversed every `gold_fact_path` hash in
+`cases_v1_final.json` against full us-gaap companyfacts for all 197 referenced companies
+(harness: `Main/backend/truthlayer/_tagrecover/`, see its README). Recovered: the
+generator uses a single **conflict-free global tag-priority order** per concept;
+per-company "divergence" is just which tags each company reports. `validate_full.py`
+confirms the reconciled registry reproduces the gold tag on **742/742** resolvable
+single-entity facts, 0 mismatches.
+
+*Registry deltas (`truthlayer/registry.py`, REGISTRY_VERSION → 2026-06-27):* added 5
+benchmark concepts — `net_income` (`NetIncomeLoss`≻`ProfitLoss`), `operating_income`
+(`OperatingIncomeLoss`), `gross_profit` (`GrossProfit`), `research_and_development`
+(`ResearchAndDevelopmentExpense`), `cash_and_equivalents`
+(`CashAndCashEquivalentsAtCarryingValue`); inserted
+`RevenueFromContractWithCustomerIncludingAssessedTax` below `Revenues` (CrowdStrike is
+the lone gold fact using it); added `BENCHMARK_CONCEPT_ALIAS` +
+`resolve_benchmark_concept` mapping the benchmark's own concept names
+(`total_assets`→`assets`, `cogs`→`cost_of_revenue`, `stockholders_equity`→`equity`,
+`reported_gross_profit`→`gross_profit`, …). Existing orders (revenue, cogs, equity,
+assets) were already correct — verified, unchanged. Pinned offline by
+`tests/test_truthlayer_benchmark_selection.py` (5 real gold anchors + order/alias).
+
+**⚠️ NEW open item surfaced during reconciliation — accession DRIFT (gating for breadth
+ingest / P4).** For ~33 facts across a few companies (BLK, CEG, CRWV) the *entire*
+`gold_fact_path` points to accessions that **live** SEC companyfacts no longer returns:
+the benchmark's gold was generated against a **frozen** companyfacts snapshot since
+drifted. Because `fact_id` includes `accession`, a grader re-fetching from live SEC mints
+different ids than gold for any drifted fact. **Breadth ingest for P4 must load the
+benchmark's own frozen snapshot (`xbrl.duckdb`), not a live re-fetch.** This is the next
+gating fact-join risk, downstream of (not the) tag selection. Entry point: source the
+benchmark `xbrl.duckdb` (487,623 facts / 246 cos — not checked in) before the P4 grader.
+
+---
+
+### S2/S13 (historical) — original defer rationale
+
 **Status: deferred 2026-06-26 (Phase A + Phase B self-reviews; defer rule D6 — spec-scheduled checkpoint)**
 
 **What:** Two latent properties of `make_fact_id` (`store.py`), both unreachable on the current
