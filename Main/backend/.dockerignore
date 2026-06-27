@@ -87,6 +87,16 @@ node_modules/
 npm-debug.log
 yarn-error.log
 
+# Truth-layer store: a build artifact, NOT source. entrypoint.sh rebuilds it from the
+# vendored companyfacts snapshots at container start, so never bake a developer's local
+# copy into the image — it may be stale relative to the fact_id recipe / registry
+# version (the committed truthlayer/data/companyfacts/*.json snapshots ARE kept).
+truthlayer/data/truthlayer.duckdb
+truthlayer/data/truthlayer.duckdb.wal
+truthlayer/data/.building-*
+# _tagrecover investigation cache (~760 MB of fetched companyfacts; tooling-only).
+truthlayer/_tagrecover/companyfacts/
+
 # Temporary files
 tmp/
 temp/

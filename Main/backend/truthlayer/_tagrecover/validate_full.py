@@ -19,7 +19,9 @@ def load(cik):
 
 
 def concept_of(key):
-    return re.sub(r"_(\d{4}|y\d+|t\d*|prior|current|base|end|start)$", "", key)
+    # Period tokens always carry a number (t1/t2, y1, 2025); t\d+ not t\d* so a
+    # concept legitimately ending in a bare '_t' is not over-stripped.
+    return re.sub(r"_(\d{4}|y\d+|t\d+|prior|current|base|end|start)$", "", key)
 
 
 def tags_present_at(doc, ps, pe, unit):
