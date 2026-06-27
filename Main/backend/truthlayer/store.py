@@ -49,23 +49,32 @@ CREATE TABLE IF NOT EXISTS entities (
 """
 
 
-def make_fact_id(cik, taxonomy, tag, unit, period_start, period_end, accession) -> str:
-    """sha1 of the documented canonical tuple (spec S2). This is a cross-system
-    JOIN KEY: the benchmark gold_fact_path is a list of these hashes, so the recipe
-    must be reconciled byte-for-byte against the teammate's case generator BEFORE
-    the P4 grader (spec S2/S13 checkpoint — intentionally NOT changed in this unit).
+def make_fact_id(cik, tag, period_start, period_end, unit, accession, dim_hash="") -> str:
+    """sha1 of the canonical fact tuple — the cross-system JOIN KEY (spec S2/S13).
 
-    Two encoding couplings the S13 reconciliation MUST pin (kept as-is here so the
-    teammate's most-likely-identical default join also matches):
-      - Delimiter is a literal '|' with NO escaping; a field containing '|' would
-        bleed into the next (unreachable with SEC data: PascalCase tags, USD/shares
-        units, digit-dash accessions never contain '|').
-      - None serializes via str() to the literal 'None' (only period_start is ever
-        None — instant facts; real dates stringify to ISO, so no instant/duration
-        collision). A reconciler using '' for NULL would produce different hashes.
-    See tests/test_truthlayer_store.py::test_make_fact_id_golden for the pinned recipe.
+    RECONCILED 2026-06-26 against the benchmark generator's gold_fact_path. The
+    recipe was recovered empirically (the generator source is not checked in) by
+    reproducing two real gold hashes from cases_v1_final.json against their SEC
+    companyfacts source fields, and is pinned by
+    tests/test_truthlayer_store.py::test_make_fact_id_matches_benchmark_gold_path.
+
+    Canonical tuple order (== the generator's):
+        (cik, concept, period_start, period_end, unit, accession, dim_hash)
+    where `tag` here IS the generator's `concept` (the raw us-gaap tag, e.g.
+    'Revenues'). Earlier prose was wrong twice — the contributor guide omitted
+    period_start and the cases guide added value; the empirical match is of record.
+
+    Encoding couplings (verified byte-for-byte against the gold hashes):
+      - Delimiter is a literal '|' with NO escaping; unreachable with SEC data
+        (PascalCase tags, USD/shares units, digit-dash accessions never contain '|').
+      - None serializes via str() to the literal 'None' (period_start is None for
+        instant/balance-sheet facts; real dates stringify to ISO).
+      - dim_hash is '' for consolidated companyfacts facts (no segment/member
+        dimensions), producing a trailing '|'. It is a real parameter, not a
+        constant, so the deferred raw-XBRL dimensional ingest path can populate it
+        without changing the recipe (and without re-hashing the consolidated facts).
     """
-    raw = "|".join(str(x) for x in (cik, taxonomy, tag, unit, period_start, period_end, accession))
+    raw = "|".join(str(x) for x in (cik, tag, period_start, period_end, unit, accession, dim_hash))
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
