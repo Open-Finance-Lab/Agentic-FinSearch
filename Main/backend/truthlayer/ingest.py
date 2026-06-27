@@ -34,7 +34,8 @@ def companyfacts_rows(doc: dict):
                     ps, pe = _d(e.get("start")), _d(e.get("end"))
                     val = e["val"]
                     yield (
-                        store.make_fact_id(cik, taxonomy, tag, unit, ps, pe, e["accn"]),
+                        # dim_hash defaults to '' — companyfacts is consolidated only.
+                        store.make_fact_id(cik, tag, ps, pe, unit, e["accn"]),
                         cik, taxonomy, tag, unit, float(val), Decimal(str(val)),
                         ps, pe, e.get("fy"), e.get("fp"), e.get("form"),
                         e["accn"], _d(e.get("filed")), e.get("frame"),
