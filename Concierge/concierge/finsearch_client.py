@@ -1,10 +1,22 @@
 import asyncio
 import json
+import re
 from dataclasses import dataclass
 from typing import AsyncIterator, Iterable, Iterator, Optional, Union
 from urllib.parse import urlencode
 
 import aiohttp
+from aiohttp.http_exceptions import LineTooLong
+
+# The backend's final-frame `wrapped_content` carries claim values wrapped in literal HTML
+# (<span data-claim-id="...">value</span>) meant for the web client. Discord has no HTML, so
+# strip those tags to their inner text before using wrapped_content as a fallback. Only the
+# open/close <span ...> tags are removed; the value text inside is kept.
+_SPAN_TAG_RE = re.compile(r"</?span[^>]*>")
+
+
+def _unwrap_spans(text: str) -> str:
+    return _SPAN_TAG_RE.sub("", text)
 
 
 @dataclass(frozen=True)
@@ -48,7 +60,7 @@ def reduce_events(events: Iterable[dict]):
         if c:
             acc.append(c)
     error = final.get("error")
-    text = "".join(acc) or (final.get("wrapped_content") or "")
+    text = "".join(acc) or _unwrap_spans(final.get("wrapped_content") or "")
     # An in-band error frame arrives WITH done:true over an already-200 stream, so
     # raise_for_status can't see it. Surface `error`, and force truncated so a partial
     # answer is never rendered as authoritative even if a consumer ignores `error`.
@@ -104,16 +116,18 @@ class FinSearchClient:
                             yield ChatChunk(c)
                     if done:
                         break
-        except (aiohttp.ClientError, asyncio.TimeoutError):
-            # Transport-level failure. With NO partial text (backend down / 5xx / pre-stream
-            # drop) re-raise so the caller can show the friendly error. With partial text,
-            # fall through and finalize it as truncated "rather than losing it" (spec §6) —
+        except (aiohttp.ClientError, asyncio.TimeoutError, LineTooLong):
+            # Transport-level failure (dropped connection, timeout, or an oversized SSE line —
+            # LineTooLong is NOT an aiohttp.ClientError, so it must be named explicitly or it
+            # would escape and discard the partial). With NO partial text (backend down / 5xx /
+            # pre-stream drop) re-raise so the caller can show the friendly error. With partial
+            # text, fall through and finalize it as truncated "rather than losing it" (spec §6) —
             # translating the transport failure into the domain ChatResult here keeps the
             # handler transport-agnostic and stops it from having to swallow exceptions.
             if not acc:
                 raise
         error = final.get("error")
-        text = "".join(acc) or (final.get("wrapped_content") or "")
+        text = "".join(acc) or _unwrap_spans(final.get("wrapped_content") or "")
         yield ChatResult(text=text,
                          used_sources=final.get("used_sources") or [],
                          used_urls=final.get("used_urls") or [],

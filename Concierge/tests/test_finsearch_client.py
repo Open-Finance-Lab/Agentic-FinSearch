@@ -1,5 +1,7 @@
+import json
 from pathlib import Path
 import aiohttp
+from aiohttp.http_exceptions import LineTooLong
 import pytest
 from concierge.finsearch_client import iter_sse_data, reduce_events, ChatResult, FinSearchClient
 
@@ -41,6 +43,17 @@ def test_in_band_error_frame_is_surfaced_not_clean():
     assert result.text == "partial "
     assert result.error == "agent crashed"
     assert result.truncated is True
+
+
+def test_reduce_unwraps_span_markup_in_wrapped_content_fallback():
+    # When no content chunks arrive, the text falls back to the final frame's wrapped_content,
+    # which the backend wraps in literal <span data-claim-id=...> HTML for the web client.
+    # Discord has no HTML, so those tags must be stripped to their inner value text.
+    payload = json.dumps({"wrapped_content": 'Revenue <span data-claim-id="c1">$100M</span> grew',
+                          "done": True})
+    acc, result = reduce_events(iter_sse_data(["data: " + payload]))
+    assert "<span" not in result.text and "</span>" not in result.text
+    assert result.text == "Revenue $100M grew"
 
 
 @pytest.mark.asyncio
@@ -126,3 +139,35 @@ async def test_stream_chat_in_band_error_frame_surfaced():
     assert out[-1].text == "partial"
     assert out[-1].error == "boom"
     assert out[-1].truncated is True
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_oversized_line_finalizes_partial_as_truncated():
+    # An oversized SSE line raises aiohttp LineTooLong, which is NOT an aiohttp.ClientError.
+    # It must be salvaged like any transport drop — keep the partial, finalize as truncated —
+    # not escape and discard a successfully-streamed answer.
+    content = _FakeContent([b'data: {"content": "partial", "done": false}\n'],
+                           exc=LineTooLong("oversized SSE line"))
+    out = await _drain(_client_with(content))
+    assert isinstance(out[-1], ChatResult)
+    assert out[-1].text == "partial"        # kept, not lost
+    assert out[-1].truncated is True
+    assert out[-1].error is None            # an oversized line is a transport issue, not in-band
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_oversized_line_before_content_reraises():
+    content = _FakeContent([], exc=LineTooLong("oversized first line"))
+    with pytest.raises(LineTooLong):
+        await _drain(_client_with(content))
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_unwraps_span_markup_in_fallback():
+    payload = json.dumps({"wrapped_content": 'Net margin <span data-claim-id="c2">12.3%</span>',
+                          "done": True})
+    content = _FakeContent([("data: " + payload + "\n").encode("utf-8")])
+    out = await _drain(_client_with(content))
+    assert isinstance(out[-1], ChatResult)
+    assert "<span" not in out[-1].text
+    assert out[-1].text == "Net margin 12.3%"
