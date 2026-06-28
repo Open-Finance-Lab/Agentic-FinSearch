@@ -1,3 +1,4 @@
+import asyncio
 import json
 from dataclasses import dataclass
 from typing import AsyncIterator, Iterable, Iterator, Optional, Union
@@ -85,23 +86,32 @@ class FinSearchClient:
         url = f"{self._base}/get_chat_response_stream/?{urlencode(params)}"
         session = await self._ensure_session()
         acc, done, final = [], False, {}
-        async with session.get(url) as resp:
-            resp.raise_for_status()
-            # INVARIANT: resp.content yields ONE line per iteration (aiohttp readline),
-            # so each iter_sse_data() sees a single SSE event and the break-on-done below
-            # cannot strand a sibling content frame. Do NOT switch to iter_chunked()/iter_any()
-            # without restructuring this into a line-buffer reducer.
-            async for raw in resp.content:
-                for ev in iter_sse_data([raw.decode("utf-8", "replace")]):
-                    if ev.get("done") is True:
-                        done, final = True, ev
+        try:
+            async with session.get(url) as resp:
+                resp.raise_for_status()
+                # INVARIANT: resp.content yields ONE line per iteration (aiohttp readline),
+                # so each iter_sse_data() sees a single SSE event and the break-on-done below
+                # cannot strand a sibling content frame. Do NOT switch to iter_chunked()/iter_any()
+                # without restructuring this into a line-buffer reducer.
+                async for raw in resp.content:
+                    for ev in iter_sse_data([raw.decode("utf-8", "replace")]):
+                        if ev.get("done") is True:
+                            done, final = True, ev
+                            break
+                        c = ev.get("content")
+                        if c:
+                            acc.append(c)
+                            yield ChatChunk(c)
+                    if done:
                         break
-                    c = ev.get("content")
-                    if c:
-                        acc.append(c)
-                        yield ChatChunk(c)
-                if done:
-                    break
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            # Transport-level failure. With NO partial text (backend down / 5xx / pre-stream
+            # drop) re-raise so the caller can show the friendly error. With partial text,
+            # fall through and finalize it as truncated "rather than losing it" (spec §6) —
+            # translating the transport failure into the domain ChatResult here keeps the
+            # handler transport-agnostic and stops it from having to swallow exceptions.
+            if not acc:
+                raise
         error = final.get("error")
         text = "".join(acc) or (final.get("wrapped_content") or "")
         yield ChatResult(text=text,

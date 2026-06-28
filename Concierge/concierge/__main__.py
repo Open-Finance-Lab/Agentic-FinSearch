@@ -23,8 +23,10 @@ class ConciergeClient(discord.Client):
         self._finsearch = finsearch
 
     async def close(self) -> None:
-        await self._finsearch.aclose()
-        await super().close()
+        try:
+            await self._finsearch.aclose()
+        finally:
+            await super().close()   # always tear down discord's sockets/HTTP
 
 
 def main() -> None:
