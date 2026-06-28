@@ -17,6 +17,7 @@ class ChatResult:
     used_sources: list
     used_urls: list
     truncated: bool
+    error: Optional[str] = None   # backend in-band failure ({"error": ..., "done": true})
 
 
 def iter_sse_data(lines: Iterable[str]) -> Iterator[dict]:
@@ -45,11 +46,16 @@ def reduce_events(events: Iterable[dict]):
         c = ev.get("content")
         if c:
             acc.append(c)
+    error = final.get("error")
     text = "".join(acc) or (final.get("wrapped_content") or "")
+    # An in-band error frame arrives WITH done:true over an already-200 stream, so
+    # raise_for_status can't see it. Surface `error`, and force truncated so a partial
+    # answer is never rendered as authoritative even if a consumer ignores `error`.
     return acc, ChatResult(text=text,
                            used_sources=final.get("used_sources") or [],
                            used_urls=final.get("used_urls") or [],
-                           truncated=not done)
+                           truncated=(not done) or bool(error),
+                           error=(str(error) if error else None))
 
 
 class FinSearchClient:
@@ -96,11 +102,13 @@ class FinSearchClient:
                         yield ChatChunk(c)
                 if done:
                     break
+        error = final.get("error")
         text = "".join(acc) or (final.get("wrapped_content") or "")
         yield ChatResult(text=text,
                          used_sources=final.get("used_sources") or [],
                          used_urls=final.get("used_urls") or [],
-                         truncated=not done)
+                         truncated=(not done) or bool(error),
+                         error=(str(error) if error else None))
 
     async def aclose(self) -> None:
         if self._session and not self._session.closed:
