@@ -1,4 +1,3 @@
-import asyncio
 import contextlib
 import pytest
 from concierge.handlers import chat_handler
@@ -7,6 +6,7 @@ from concierge.finsearch_client import ChatChunk, ChatResult
 from concierge.identity import IdentityStore
 from concierge.session import make_session_id
 from concierge.throttle import EditThrottle
+from concierge.render import chunk_message
 
 
 class FakeDiscord:
@@ -68,3 +68,42 @@ async def test_backend_error_shows_friendly_message():
     with pytest.raises(RuntimeError):
         await chat_handler(_msg(), FakeApp(d, Boom()))
     assert "Couldn't reach FinSearch" in d.edits[-1]
+
+
+@pytest.mark.asyncio
+async def test_in_band_error_frame_surfaced_with_partial_preserved():
+    # Backend emits {"error": ..., "done": true} mid-stream: partial kept, error shown,
+    # and it must NOT be presented as a clean/complete answer.
+    d = FakeDiscord()
+    f = FakeFinSearch([ChatChunk("partial "),
+                       ChatResult("partial ", [], [], True, error="agent crashed")])
+    await chat_handler(_msg(), FakeApp(d, f))
+    assert "partial " in d.edits[-1]
+    assert "error before finishing" in d.edits[-1]
+
+
+@pytest.mark.asyncio
+async def test_midstream_transport_drop_preserves_partial_no_raise():
+    # A transport drop (connection reset) raises mid-stream AFTER content arrived.
+    # Spec §6: keep the partial "rather than losing it" — and recover gracefully (no raise).
+    d = FakeDiscord()
+    class Drop:
+        async def stream_chat(self, **kw):
+            yield ChatChunk("partial answer")
+            raise ConnectionError("reset")
+    await chat_handler(_msg(), FakeApp(d, Drop()))
+    assert "partial answer" in d.edits[-1]
+    assert "cut off" in d.edits[-1]
+
+
+@pytest.mark.asyncio
+async def test_overflow_uses_followups():
+    # >2000 chars -> placeholder gets part 0, the rest go out as followups.
+    d = FakeDiscord()
+    big = ("A" * 1500) + "\n" + ("B" * 1500)
+    f = FakeFinSearch([ChatResult(big, [], [], False)])
+    await chat_handler(_msg(), FakeApp(d, f))
+    parts = chunk_message(big)
+    assert len(parts) == 2
+    assert d.edits[-1] == parts[0]
+    assert d.followups == [parts[1]]

@@ -42,3 +42,13 @@ async def test_other_users_not_blocked():
     await asyncio.gather(guard.run("u1", lambda: job("a")),
                          guard.run("u2", lambda: job("b")))
     assert set(started) == {"a", "b"}
+
+
+@pytest.mark.asyncio
+async def test_idle_user_state_is_evicted():
+    # _users must stay bounded by ACTIVE users, not every user who ever messaged the bot.
+    guard = InFlightGuard(cooldown_s=0.0, max_queue_per_user=5)
+    async def job(): await asyncio.sleep(0)
+    await guard.run("u1", job)
+    await guard.run("u2", job)
+    assert guard._users == {}     # provably-idle state dropped after completion

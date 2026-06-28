@@ -34,3 +34,11 @@ def test_sources_embed_none_when_empty():
 
 def test_escape():
     assert escape_markdown("a*b_c") == "a\\*b\\_c"
+
+
+def test_chunk_no_empty_piece_on_whitespace_boundary():
+    # A boundary inside a leading whitespace run must not yield a "" chunk (Discord rejects
+    # empty content with HTTP 400); no characters may be dropped either.
+    parts = chunk_message((" " * 2000) + ("a" * 5), limit=2000)
+    assert "" not in parts
+    assert "".join(parts).strip() == "a" * 5
