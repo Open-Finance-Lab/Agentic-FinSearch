@@ -1,0 +1,17 @@
+[Unit]
+Description=Agentic FinSearch - Discord conversational chat adapter (Concierge)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/deploy/fingpt/concierge
+EnvironmentFile=/home/deploy/fingpt/envs/.env.concierge
+ExecStart=/home/deploy/fingpt/concierge/.venv/bin/python -m concierge
+Restart=on-failure
+RestartSec=5
+MemoryHigh=256M
+MemoryMax=384M
+
+[Install]
+WantedBy=default.target
