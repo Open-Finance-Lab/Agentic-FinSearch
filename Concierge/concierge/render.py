@@ -20,7 +20,9 @@ def chunk_message(text: str, limit: int = DISCORD_MSG_LIMIT) -> list:
             cut = window.rfind(" ")
         if cut <= 0:
             cut = limit            # no boundary: hard split
-        chunks.append(remaining[:cut].rstrip())
+        piece = remaining[:cut].rstrip()
+        if piece:                  # a boundary inside a whitespace run can strip to "";
+            chunks.append(piece)   # Discord rejects empty content, so never emit it
         remaining = remaining[cut:].lstrip()
     if remaining:
         chunks.append(remaining)
