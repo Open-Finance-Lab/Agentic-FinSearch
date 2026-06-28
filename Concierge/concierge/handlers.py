@@ -42,12 +42,10 @@ async def chat_handler(msg: InboundMessage, app) -> None:
                 elif isinstance(item, ChatResult):
                     result = item
     except Exception:
-        # A transport-level drop (connection reset / server restart / read timeout) raises
-        # here. Spec §6 wants already-streamed text kept "rather than losing it"; only fall
-        # back to the generic error when nothing arrived at all.
-        if acc:
-            await _deliver(app, msg, placeholder, acc + _CUTOFF)
-            return
+        # The transport layer already salvages partial output on a mid-stream drop (it yields
+        # a truncated ChatResult), so anything raising here is a hard/unexpected failure
+        # (backend unreachable, a bad edit, a bug). Show the friendly error and RE-RAISE so
+        # on_message records the traceback — never silently mask it as a "cut off".
         await app.discord.edit(placeholder, _ERR)
         raise
 
