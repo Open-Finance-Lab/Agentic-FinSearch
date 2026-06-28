@@ -49,6 +49,26 @@ def iter_sse_data(lines: Iterable[str]) -> Iterator[dict]:
             yield obj
 
 
+def _finalize(acc: list, done: bool, final: dict) -> ChatResult:
+    """Single source of truth for the terminal ChatResult — shared by the pure reducer and
+    the live streaming path so the text fallback, source lists, and truncated/error policy
+    can never drift between them.
+
+    An in-band error frame arrives WITH done:true over an already-200 stream, so
+    raise_for_status can't see it. We surface `error` and force truncated, so a partial answer
+    is never rendered as authoritative even if a consumer ignores `error`. The text falls back
+    to the final frame's wrapped_content (span markup stripped) only when no chunks streamed.
+    """
+    error = final.get("error")
+    return ChatResult(
+        text="".join(acc) or _unwrap_spans(final.get("wrapped_content") or ""),
+        used_sources=final.get("used_sources") or [],
+        used_urls=final.get("used_urls") or [],
+        truncated=(not done) or bool(error),
+        error=(str(error) if error else None),
+    )
+
+
 def reduce_events(events: Iterable[dict]):
     """Pure reducer -> (content chunks, ChatResult). Mirrors stream_chat's accumulation."""
     acc, done, final = [], False, {}
@@ -59,16 +79,7 @@ def reduce_events(events: Iterable[dict]):
         c = ev.get("content")
         if c:
             acc.append(c)
-    error = final.get("error")
-    text = "".join(acc) or _unwrap_spans(final.get("wrapped_content") or "")
-    # An in-band error frame arrives WITH done:true over an already-200 stream, so
-    # raise_for_status can't see it. Surface `error`, and force truncated so a partial
-    # answer is never rendered as authoritative even if a consumer ignores `error`.
-    return acc, ChatResult(text=text,
-                           used_sources=final.get("used_sources") or [],
-                           used_urls=final.get("used_urls") or [],
-                           truncated=(not done) or bool(error),
-                           error=(str(error) if error else None))
+    return acc, _finalize(acc, done, final)
 
 
 class FinSearchClient:
@@ -126,13 +137,7 @@ class FinSearchClient:
             # handler transport-agnostic and stops it from having to swallow exceptions.
             if not acc:
                 raise
-        error = final.get("error")
-        text = "".join(acc) or _unwrap_spans(final.get("wrapped_content") or "")
-        yield ChatResult(text=text,
-                         used_sources=final.get("used_sources") or [],
-                         used_urls=final.get("used_urls") or [],
-                         truncated=(not done) or bool(error),
-                         error=(str(error) if error else None))
+        yield _finalize(acc, done, final)
 
     async def aclose(self) -> None:
         if self._session and not self._session.closed:
