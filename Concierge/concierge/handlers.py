@@ -4,10 +4,21 @@ from .router import InboundMessage
 
 _THINKING = "\U0001f4ad Thinking…"   # 💭 Thinking…
 _ERR = "⚠️ Couldn't reach FinSearch, try again in a moment."
+_CUTOFF = "\n\n*(response was cut off)*"
+_ERR_NOTE = "\n\n⚠️ *FinSearch hit an error before finishing — this answer may be incomplete.*"
 
 
 def _preview(text: str) -> str:
     return text[:DISCORD_MSG_LIMIT] if len(text) > DISCORD_MSG_LIMIT else text
+
+
+async def _deliver(app, msg, placeholder, text: str) -> None:
+    # Final-edit the placeholder with part 0, post the overflow as followups. Filter empty
+    # pieces — a whitespace-boundary split can produce "" which Discord rejects (400).
+    parts = [p for p in chunk_message(text) if p] or ["*(no response)*"]
+    await app.discord.edit(placeholder, parts[0])
+    for extra in parts[1:]:
+        await app.discord.send_followup(msg, extra)
 
 
 async def chat_handler(msg: InboundMessage, app) -> None:
@@ -31,16 +42,21 @@ async def chat_handler(msg: InboundMessage, app) -> None:
                 elif isinstance(item, ChatResult):
                     result = item
     except Exception:
+        # A transport-level drop (connection reset / server restart / read timeout) raises
+        # here. Spec §6 wants already-streamed text kept "rather than losing it"; only fall
+        # back to the generic error when nothing arrived at all.
+        if acc:
+            await _deliver(app, msg, placeholder, acc + _CUTOFF)
+            return
         await app.discord.edit(placeholder, _ERR)
         raise
 
     text = (result.text if result else acc) or "*(no response)*"
-    if result and result.truncated:
-        text += "\n\n*(response was cut off)*"
-    parts = chunk_message(text)
-    await app.discord.edit(placeholder, parts[0] if parts else "*(no response)*")
-    for extra in parts[1:]:
-        await app.discord.send_followup(msg, extra)
+    if result and result.error:
+        text += _ERR_NOTE          # in-band backend failure ({"error":...,"done":true}) surfaced
+    elif result and result.truncated:
+        text += _CUTOFF
+    await _deliver(app, msg, placeholder, text)
     if result:
         embed = sources_embed(result.used_sources, result.used_urls)
         if embed:
