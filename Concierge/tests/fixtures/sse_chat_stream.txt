@@ -1,0 +1,10 @@
+event: connected
+data: {"status": "connected"}
+
+data: {"status": {"label": "Preparing context"}}
+
+data: {"content": "AAPL ", "done": false}
+
+data: {"content": "is Apple.", "done": false}
+
+data: {"content": "", "done": true, "wrapped_content": "AAPL is Apple.", "used_sources": [{"url": "http://x", "title": "X"}], "used_urls": ["http://y"]}
