@@ -8,6 +8,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Least-privilege GITHUB_TOKEN (CodeQL actions/missing-workflow-permissions); matches
+    # the sibling heartbeat-tests.yml. This job only checks out + runs tests — no writes.
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: Concierge
