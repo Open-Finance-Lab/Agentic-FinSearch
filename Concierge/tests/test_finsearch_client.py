@@ -1,4 +1,5 @@
 from pathlib import Path
+import aiohttp
 import pytest
 from concierge.finsearch_client import iter_sse_data, reduce_events, ChatResult, FinSearchClient
 
@@ -55,3 +56,73 @@ async def test_aclose_closes_session_and_is_idempotent():
     await client.aclose()      # already closed -> no-op, must not raise
     # never-opened client: aclose is a no-op
     await FinSearchClient("http://x", None, 1.0, "m").aclose()
+
+
+# --- stream_chat against a fake aiohttp session (the real async consumer) ----------------
+
+class _FakeContent:
+    """resp.content: async-iterates the given byte lines, then raises `exc` (or stops)."""
+    def __init__(self, lines, exc=None): self._lines = lines; self._exc = exc
+    def __aiter__(self): self._i = 0; return self
+    async def __anext__(self):
+        if self._i < len(self._lines):
+            v = self._lines[self._i]; self._i += 1; return v
+        if self._exc is not None:
+            raise self._exc
+        raise StopAsyncIteration
+
+
+class _FakeResp:
+    def __init__(self, content): self.content = content
+    def raise_for_status(self): pass
+
+
+class _FakeGetCtx:
+    def __init__(self, resp): self._resp = resp
+    async def __aenter__(self): return self._resp
+    async def __aexit__(self, *a): return False
+
+
+class _FakeSession:
+    def __init__(self, resp): self._resp = resp; self.closed = False
+    def get(self, url): return _FakeGetCtx(self._resp)
+    async def close(self): self.closed = True
+
+
+def _client_with(content):
+    c = FinSearchClient("http://x", None, 1.0, "m")
+    c._session = _FakeSession(_FakeResp(content))
+    return c
+
+
+async def _drain(client):
+    return [item async for item in client.stream_chat(
+        question="q", session_id="discord:1:1", user_timezone="UTC", user_time="t")]
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_transport_drop_finalizes_partial_as_truncated():
+    content = _FakeContent([b'data: {"content": "partial", "done": false}\n'],
+                           exc=aiohttp.ClientPayloadError("reset"))
+    out = await _drain(_client_with(content))
+    assert isinstance(out[-1], ChatResult)
+    assert out[-1].text == "partial"        # kept "rather than losing it"
+    assert out[-1].truncated is True
+    assert out[-1].error is None            # a transport drop is not an in-band error
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_drop_before_any_content_reraises():
+    content = _FakeContent([], exc=aiohttp.ServerDisconnectedError())
+    with pytest.raises(aiohttp.ClientError):
+        await _drain(_client_with(content))
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_in_band_error_frame_surfaced():
+    content = _FakeContent([b'data: {"content": "partial", "done": false}\n',
+                            b'data: {"error": "boom", "done": true}\n'])
+    out = await _drain(_client_with(content))
+    assert out[-1].text == "partial"
+    assert out[-1].error == "boom"
+    assert out[-1].truncated is True

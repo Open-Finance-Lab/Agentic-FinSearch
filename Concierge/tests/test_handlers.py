@@ -83,17 +83,18 @@ async def test_in_band_error_frame_surfaced_with_partial_preserved():
 
 
 @pytest.mark.asyncio
-async def test_midstream_transport_drop_preserves_partial_no_raise():
-    # A transport drop (connection reset) raises mid-stream AFTER content arrived.
-    # Spec §6: keep the partial "rather than losing it" — and recover gracefully (no raise).
+async def test_unexpected_error_is_not_masked_as_cutoff():
+    # A non-transport error mid-stream (e.g. a bug) must surface the friendly error AND
+    # re-raise (so on_message logs it) — never be silently relabeled a "cut off".
     d = FakeDiscord()
-    class Drop:
+    class Bug:
         async def stream_chat(self, **kw):
-            yield ChatChunk("partial answer")
-            raise ConnectionError("reset")
-    await chat_handler(_msg(), FakeApp(d, Drop()))
-    assert "partial answer" in d.edits[-1]
-    assert "cut off" in d.edits[-1]
+            yield ChatChunk("partial")
+            raise AttributeError("boom")
+    with pytest.raises(AttributeError):
+        await chat_handler(_msg(), FakeApp(d, Bug()))
+    assert "Couldn't reach FinSearch" in d.edits[-1]
+    assert "cut off" not in d.edits[-1]
 
 
 @pytest.mark.asyncio
