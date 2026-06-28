@@ -43,3 +43,12 @@ class InFlightGuard:
                     st.last_done_s = asyncio.get_event_loop().time()
         finally:
             st.waiting -= 1
+            # Evict provably-idle state so _users stays bounded by *active* users, not
+            # every user who ever messaged the bot. No await here -> atomic w.r.t. other
+            # run() coroutines on the single event loop; the identity guard avoids
+            # clobbering a state another waiter just recreated. A later request simply
+            # recreates a (correctly cold-cooldown) state.
+            if (st.waiting == 0
+                    and asyncio.get_running_loop().time() - st.last_done_s >= self._cooldown_s
+                    and self._users.get(user_id) is st):
+                del self._users[user_id]

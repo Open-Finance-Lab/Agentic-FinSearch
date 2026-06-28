@@ -13,6 +13,20 @@ from .ratelimit import InFlightGuard
 from .router import Router
 
 
+class ConciergeClient(discord.Client):
+    """discord.Client that also closes the FinSearch HTTP session on shutdown. close() is
+    invoked via `async with self` inside client.run()'s runner, so the long-lived aiohttp
+    ClientSession is torn down deterministically on the live loop (incl. SIGTERM)."""
+
+    def __init__(self, *args, finsearch: FinSearchClient, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._finsearch = finsearch
+
+    async def close(self) -> None:
+        await self._finsearch.aclose()
+        await super().close()
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -30,7 +44,7 @@ def main() -> None:
     # NON-mentioning trigger (prefix command, history scan) would read empty content
     # until that privileged intent is enabled.
     intents.message_content = False
-    client = discord.Client(intents=intents)
+    client = ConciergeClient(intents=intents, finsearch=finsearch)
 
     app = AppContext(cfg, identity, finsearch, DiscordIO(client))
     register_handlers(client, app, router, guard)
