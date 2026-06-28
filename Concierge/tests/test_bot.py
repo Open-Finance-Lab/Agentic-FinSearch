@@ -1,9 +1,10 @@
 import contextlib
 import pytest
 import discord
-from concierge.bot import should_handle, _strip_mention, register_handlers
-from concierge.router import Router
+from concierge.bot import should_handle, _strip_mention, register_handlers, DiscordIO
+from concierge.router import Router, InboundMessage
 from concierge.ratelimit import QueueFullError
+from concierge.render import sources_embed
 
 
 def test_should_handle_rules():
@@ -149,3 +150,85 @@ async def test_on_message_forbidden_then_failed_reaction_is_swallowed():
     async def boom(emoji): raise discord.HTTPException(_Resp(), "cannot react")
     msg.add_reaction = boom
     await on_message(msg)   # must NOT raise — nested HTTPException is logged + swallowed
+
+
+# --- DiscordIO transport wrapper (the 'transport-thin' layer this PR exists to provide) ----
+
+class _IOSent:
+    """A sent message that records its edits (DiscordIO.edit -> message.edit(...))."""
+    def __init__(self): self.edits = []
+    async def edit(self, *, content=None, allowed_mentions=None):
+        self.edits.append({"content": content, "allowed_mentions": allowed_mentions})
+
+
+class _IOChannel:
+    def __init__(self, cid): self.id = cid; self.sent = []
+    async def send(self, content=None, *, embed=None, allowed_mentions=None):
+        self.sent.append({"content": content, "embed": embed, "allowed_mentions": allowed_mentions})
+        return _IOSent()
+
+
+class _IOClient:
+    """get_channel hits an in-memory map; a miss forces the REST fetch_channel fallback."""
+    def __init__(self, get_map=None): self._get = get_map or {}; self.fetched = []
+    def get_channel(self, cid): return self._get.get(cid)
+    async def fetch_channel(self, cid): self.fetched.append(cid); return _IOChannel(cid)
+
+
+def _io_msg(cid): return InboundMessage(user_id="1", location_id=str(cid), text="hi", is_dm=True)
+
+
+def _none(am):  # AllowedMentions has no __eq__; assert the suppression flags directly
+    return (am.everyone, am.users, am.roles)
+
+
+@pytest.mark.asyncio
+async def test_discordio_remembered_channel_skips_resolve():
+    client = _IOClient()                     # get_channel would miss; fetch would record
+    io = DiscordIO(client)
+    ch = _IOChannel(77)
+    io.remember_channel(ch)
+    await io.send(_io_msg(77), "yo")
+    assert ch.sent[0]["content"] == "yo"
+    assert client.fetched == []              # remembered live channel -> no get/fetch round-trip
+
+
+@pytest.mark.asyncio
+async def test_discordio_fetch_fallback_on_miss_then_caches():
+    client = _IOClient(get_map={})           # get_channel miss -> REST fetch_channel
+    io = DiscordIO(client)
+    await io.send(_io_msg(88), "a")
+    assert client.fetched == [88]            # fell back to fetch_channel
+    await io.send(_io_msg(88), "b")
+    assert client.fetched == [88]            # second send reuses the cached channel (no 2nd fetch)
+
+
+@pytest.mark.asyncio
+async def test_discordio_get_channel_hit_avoids_fetch():
+    ch = _IOChannel(99)
+    client = _IOClient(get_map={99: ch})
+    await DiscordIO(client).send(_io_msg(99), "x")
+    assert ch.sent[0]["content"] == "x"
+    assert client.fetched == []              # resolved via get_channel, never fetched
+
+
+@pytest.mark.asyncio
+async def test_discordio_send_and_edit_suppress_all_mentions():
+    ch = _IOChannel(5)
+    io = DiscordIO(_IOClient(get_map={5: ch}))
+    sent = await io.send(_io_msg(5), "hello")
+    assert _none(ch.sent[0]["allowed_mentions"]) == (False, False, False)
+    await io.edit(sent, "edited")
+    assert _none(sent.edits[0]["allowed_mentions"]) == (False, False, False)
+
+
+@pytest.mark.asyncio
+async def test_discordio_send_embed_roundtrips_sources_dict():
+    ch = _IOChannel(6)
+    io = DiscordIO(_IOClient(get_map={6: ch}))
+    embed_dict = sources_embed([{"url": "http://x", "title": "X"}], ["http://y"])
+    await io.send_embed(_io_msg(6), embed_dict)
+    sent_embed = ch.sent[0]["embed"]
+    assert isinstance(sent_embed, discord.Embed)   # Embed.from_dict accepted the dict (no raise)
+    assert sent_embed.title == "Sources"
+    assert _none(ch.sent[0]["allowed_mentions"]) == (False, False, False)

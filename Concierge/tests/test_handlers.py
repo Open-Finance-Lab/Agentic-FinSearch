@@ -97,6 +97,25 @@ async def test_unexpected_error_is_not_masked_as_cutoff():
     assert "cut off" not in d.edits[-1]
 
 
+class _ThrottledApp(FakeApp):
+    def new_throttle(self): return EditThrottle(1.2, 1500)   # production throttle values
+
+
+@pytest.mark.asyncio
+async def test_streaming_edits_are_throttled_and_capped_at_discord_limit():
+    # Drive the streaming-edit loop with the PRODUCTION throttle (1.2s / 1500 chars) and a
+    # deterministic +1.0s/chunk clock, so realistic batching AND the _preview 2000-char cap
+    # are exercised — the other handler tests all use the always-flush EditThrottle(0.0, 1).
+    d = FakeDiscord()
+    chunks = [ChatChunk("a" * 600) for _ in range(5)]            # 3000 chars streamed
+    f = FakeFinSearch(chunks + [ChatResult("a" * 3000, [], [], False)])
+    await chat_handler(_msg(), _ThrottledApp(d, f))
+    assert all(len(e) <= 2000 for e in d.edits)                 # never exceed Discord's limit
+    assert max(len(e) for e in d.edits) == 2000                 # _preview capped a >2000 acc to 2000
+    assert len(d.edits) - 1 < len(chunks)                       # throttled: <1 streaming edit/chunk
+    assert "".join([d.edits[-1]] + d.followups) == "a" * 3000   # full answer delivered, nothing lost
+
+
 @pytest.mark.asyncio
 async def test_overflow_uses_followups():
     # >2000 chars -> placeholder gets part 0, the rest go out as followups.

@@ -1,4 +1,6 @@
 discord.py>=2.4,<3
+aiohttp>=3.9,<4               # direct dep: finsearch_client uses aiohttp.ClientSession itself,
+                             # not only transitively via discord.py — declare it explicitly
 # dev/test
 pytest>=8
-pytest-asyncio>=0.23,<0.24   # strict mode + explicit @pytest.mark.asyncio (what the tests assume)
+pytest-asyncio>=0.23,<0.24   # auto mode (see pytest.ini); tests also carry explicit @pytest.mark.asyncio
