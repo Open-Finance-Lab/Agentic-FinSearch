@@ -45,10 +45,34 @@ async def test_other_users_not_blocked():
 
 
 @pytest.mark.asyncio
-async def test_idle_user_state_is_evicted():
-    # _users must stay bounded by ACTIVE users, not every user who ever messaged the bot.
+async def test_idle_state_evicted_after_cooldown_elapses():
+    # The real regression case: cooldown_s > 0 (production default is 3.0). An idle user's
+    # state is RETAINED while its cooldown is live (so a quick re-request is still throttled)
+    # and EVICTED on later activity once the cooldown has fully elapsed.
+    guard = InFlightGuard(cooldown_s=0.02, max_queue_per_user=5)
+    async def job(): await asyncio.sleep(0)
+    await guard.run("u1", job)
+    assert "u1" in guard._users          # within cooldown -> retained
+    await asyncio.sleep(0.03)            # let u1's cooldown elapse
+    await guard.run("u2", job)           # any later activity sweeps expired entries
+    assert "u1" not in guard._users      # u1 evicted; _users bounded by recent activity
+    assert "u2" in guard._users
+
+
+@pytest.mark.asyncio
+async def test_idle_state_evicted_zero_cooldown_on_next_activity():
     guard = InFlightGuard(cooldown_s=0.0, max_queue_per_user=5)
     async def job(): await asyncio.sleep(0)
     await guard.run("u1", job)
-    await guard.run("u2", job)
-    assert guard._users == {}     # provably-idle state dropped after completion
+    await guard.run("u2", job)           # next run sweeps u1 (idle, cooldown 0 already elapsed)
+    assert "u1" not in guard._users
+
+
+@pytest.mark.asyncio
+async def test_state_within_cooldown_is_retained_for_throttling():
+    guard = InFlightGuard(cooldown_s=10.0, max_queue_per_user=5)
+    async def job(): await asyncio.sleep(0)
+    for u in ("u1", "u2", "u3"):
+        await guard.run(u, job)
+    # all three still inside the 10s window -> retained so their cooldown can be enforced
+    assert set(guard._users) == {"u1", "u2", "u3"}
