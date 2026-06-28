@@ -24,12 +24,22 @@ def _strip_mention(content: str, bot_id: int) -> str:
 class DiscordIO:
     """Transport-thin wrapper so handlers never import discord.py types."""
 
+    _MAX_CHANNELS = 1024   # bound the cache; an evicted channel re-resolves via get_channel (O(1))
+
     def __init__(self, client: discord.Client) -> None:
         self._client = client
-        self._channels: dict = {}   # location_id -> live channel (avoids per-reply re-resolve)
+        self._channels: dict = {}   # location_id -> live channel (most-recently-used last)
+
+    def _remember(self, location_id: str, channel) -> None:
+        # Re-insert at the end (LRU) and evict the oldest, so the cache can't grow unbounded over
+        # the service lifetime; the active channel is touched every message, so it never evicts.
+        self._channels.pop(location_id, None)
+        self._channels[location_id] = channel
+        while len(self._channels) > self._MAX_CHANNELS:
+            self._channels.pop(next(iter(self._channels)))
 
     def remember_channel(self, channel) -> None:
-        self._channels[str(channel.id)] = channel
+        self._remember(str(channel.id), channel)
 
     async def _channel(self, msg: InboundMessage):
         ch = self._channels.get(msg.location_id)
@@ -37,7 +47,7 @@ class DiscordIO:
             return ch
         cid = int(msg.location_id)
         ch = self._client.get_channel(cid) or await self._client.fetch_channel(cid)
-        self._channels[msg.location_id] = ch
+        self._remember(msg.location_id, ch)
         return ch
 
     def typing(self, msg: InboundMessage):
