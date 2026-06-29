@@ -1,5 +1,6 @@
 from typing import Optional, List
 from .base import BaseSkill
+from ._catalog import READ_ONLY_DATA_TOOLS
 
 
 class WebResearchSkill(BaseSkill):
@@ -11,7 +12,10 @@ class WebResearchSkill(BaseSkill):
 
     @property
     def tools_allowed(self) -> Optional[List[str]]:
-        return None
+        # Deny-by-default: the fallback skill returns an explicit finite list of
+        # READ-ONLY data tools (never None). list() returns a fresh copy so a
+        # caller cannot mutate the shared catalog.
+        return list(READ_ONLY_DATA_TOOLS)
 
     @property
     def max_turns(self) -> int:

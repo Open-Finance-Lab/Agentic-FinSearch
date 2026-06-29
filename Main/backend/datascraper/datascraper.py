@@ -1315,7 +1315,12 @@ def create_agent_response_stream(
             )
         except Exception as planner_err:
             logging.warning(f"[Planner] Failed ({planner_err}), falling back to default plan")
-            execution_plan = ExecutionPlan(skill_name="fallback", tools_allowed=None, max_turns=10)
+            from planner.skills._catalog import READ_ONLY_DATA_TOOLS
+            execution_plan = ExecutionPlan(
+                skill_name="fallback",
+                tools_allowed=list(READ_ONLY_DATA_TOOLS),
+                max_turns=10,
+            )
 
         logging.info(
             f"[AGENT STREAM] Plan: skill={execution_plan.skill_name} "
