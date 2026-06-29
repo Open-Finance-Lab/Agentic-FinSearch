@@ -6,6 +6,7 @@ root. Force the backend dir to the front, then eagerly import the real
 `mcp_server.xbrl.parser` so it's cached before any test module imports
 `axioms.resolver`.
 """
+import os
 import sys
 from pathlib import Path
 
@@ -18,6 +19,14 @@ _BACKEND = str(BACKEND_DIR)
 while _BACKEND in sys.path:
     sys.path.remove(_BACKEND)
 sys.path.insert(0, _BACKEND)
+
+# Configure Django once so django.test.SimpleTestCase / RequestFactory / override_settings
+# work under bare pytest (this repo has no pytest-django). SimpleTestCase needs no DB
+# (settings.DATABASES is {}), so plain django.setup() is sufficient for the security suite.
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "django_config.settings")
+import django  # noqa: E402
+
+django.setup()
 
 import mcp_server.xbrl.parser  # noqa: F401,E402 — populate sys.modules
 
