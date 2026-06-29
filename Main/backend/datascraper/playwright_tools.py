@@ -10,6 +10,8 @@ from contextlib import asynccontextmanager
 
 from agents import function_tool
 
+from datascraper import ssrf_guard
+
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
@@ -82,12 +84,15 @@ async def navigate_to_url(url: str) -> str:
         JSON with page title, URL, and status
     """
     try:
+        ssrf_guard.validate_fetch_url(url)
         async with PlaywrightBrowser() as page:
+            await ssrf_guard.install_route_guard(page)
             logger.info(f"Navigating to: {url}")
 
             response = await page.goto(url, wait_until='load')
             # Brief delay for JS rendering - don't use networkidle (never completes on dynamic sites)
             await page.wait_for_timeout(2000)
+            await ssrf_guard.assert_safe_page_url(page)
 
             status = response.status if response else None
             result = {
@@ -129,11 +134,14 @@ async def click_element(url: str, selector: str) -> str:
         JSON with clicked element info and new page content
     """
     try:
+        ssrf_guard.validate_fetch_url(url)
         async with PlaywrightBrowser() as page:
+            await ssrf_guard.install_route_guard(page)
             logger.info(f"Navigating to {url} to click: {selector}")
 
             # Navigate first - use 'load' event, not networkidle
             await page.goto(url, wait_until='load')
+            await ssrf_guard.assert_safe_page_url(page)
             await page.wait_for_timeout(2000)  # Brief delay for JS rendering
 
             # Find the element with multiple strategies
@@ -192,6 +200,7 @@ async def click_element(url: str, selector: str) -> str:
                 pass  # URL didn't change - might be same-page navigation
             await page.wait_for_load_state('load', timeout=10000)
             await page.wait_for_timeout(2000)  # Brief delay for JS rendering
+            await ssrf_guard.assert_safe_page_url(page)
 
             # Extract new page content
             content = await page.inner_text('body')
@@ -232,10 +241,13 @@ async def extract_page_content(url: str, content_selector: str = "") -> str:
         JSON with extracted text content
     """
     try:
+        ssrf_guard.validate_fetch_url(url)
         async with PlaywrightBrowser() as page:
+            await ssrf_guard.install_route_guard(page)
             logger.info(f"Extracting content from: {url}")
 
             await page.goto(url, wait_until='load')
+            await ssrf_guard.assert_safe_page_url(page)
             await page.wait_for_timeout(2000)  # Brief delay for JS rendering
 
             # Determine which selector to use
