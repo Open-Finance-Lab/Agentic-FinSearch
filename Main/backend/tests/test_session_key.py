@@ -1,0 +1,92 @@
+"""Tests for the cookie-bound conversation-key derivation (P1 C-session/IDOR).
+
+The conversation/history cache key must be rooted in the SIGNED session cookie,
+not in the caller-supplied ``session_id``. A second browser (a different signed
+cookie) is modeled by a separate SessionStore instance; the SAME browser across
+turns is modeled by reusing the SAME SessionStore (its payload is what the
+signed cookie carries).
+
+SimpleTestCase, no DB. Run from Main/backend:
+    uv run python manage.py test tests.test_session_key -v 2
+"""
+import json
+from importlib import import_module
+from unittest.mock import patch
+
+from django.conf import settings
+from django.test import RequestFactory, SimpleTestCase
+
+from datascraper.session_key import derive_conversation_key
+
+_ENGINE = import_module(settings.SESSION_ENGINE)
+
+
+def _request(session_id=None, store=None, path="/api/chat/"):
+    """Build a GET request, optionally with a caller-supplied session_id and a
+    pre-existing signed-cookie SessionStore (the cookie payload)."""
+    rf = RequestFactory()
+    req = rf.get(path, {"session_id": session_id} if session_id else None)
+    if store is not None:
+        req.session = store
+    return req
+
+
+class TestDeriveConversationKey(SimpleTestCase):
+    def test_idor_same_session_id_different_cookies_yield_different_keys(self):
+        # Caller A and caller B both pass the SAME guessed session_id but have
+        # different cookies -> different keys. A cannot read B's history.
+        store_a = _ENGINE.SessionStore()
+        store_b = _ENGINE.SessionStore()
+        key_a = derive_conversation_key(_request("shared-id", store_a))
+        key_b = derive_conversation_key(_request("shared-id", store_b))
+        self.assertNotEqual(key_a, key_b)
+
+    def test_same_cookie_keeps_continuity(self):
+        # Same SessionStore (same signed cookie) across two turns -> same key.
+        store = _ENGINE.SessionStore()
+        first = derive_conversation_key(_request(None, store))
+        second = derive_conversation_key(_request(None, store))
+        self.assertEqual(first, second)
+
+    def test_caller_session_id_is_namespaced_under_cookie_root(self):
+        store = _ENGINE.SessionStore()
+        root = derive_conversation_key(_request(None, store))
+        namespaced = derive_conversation_key(_request("sub-1", store))
+        self.assertEqual(namespaced, f"{root}:sub-1")
+        self.assertTrue(namespaced.startswith(root + ":"))
+
+    def test_cross_session_clear_poison_blocked(self):
+        # Attacker passes the victim's key as their own session_id; the derived
+        # key is namespaced under the ATTACKER's cookie root, never the victim's.
+        victim_store = _ENGINE.SessionStore()
+        victim_key = derive_conversation_key(_request(None, victim_store))
+        attacker_store = _ENGINE.SessionStore()
+        attacker_key = derive_conversation_key(_request(victim_key, attacker_store))
+        self.assertNotEqual(attacker_key, victim_key)
+
+    def test_anonymous_keys_differ_across_cookies(self):
+        key_a = derive_conversation_key(_request(None, _ENGINE.SessionStore()))
+        key_b = derive_conversation_key(_request(None, _ENGINE.SessionStore()))
+        self.assertNotEqual(key_a, key_b)
+
+    def test_key_persisted_in_session_payload_and_marks_modified(self):
+        # conv_id lives in the payload (the signed cookie); assigning it marks
+        # the session modified so SessionMiddleware emits the Set-Cookie.
+        store = _ENGINE.SessionStore()
+        key = derive_conversation_key(_request(None, store))
+        self.assertEqual(store.get("conv_id"), key)
+        self.assertTrue(store.modified)
+
+    def test_signed_cookies_session_key_is_not_used(self):
+        # signed_cookies: session_key stays None; the derived key must still be
+        # a real, non-None id (the conv_id), proving session_key is not used.
+        store = _ENGINE.SessionStore()
+        self.assertIsNone(store.session_key)
+        key = derive_conversation_key(_request(None, store))
+        self.assertIsNotNone(key)
+        self.assertEqual(key, store.get("conv_id"))
+
+    def test_no_session_attached_does_not_crash(self):
+        # RequestFactory request without SessionMiddleware has no .session.
+        key = derive_conversation_key(RequestFactory().get("/api/chat/"))
+        self.assertTrue(key)
