@@ -156,6 +156,15 @@ SECURE_REDIRECT_EXEMPT = [r'^health/?$']
 
 API_RATE_LIMIT = os.getenv('API_RATE_LIMIT', '600/h')
 
+# Trusted reverse-proxy peers (P0 Root C.1). get_client_ip() only honors
+# X-Real-IP / X-Forwarded-For when REMOTE_ADDR is one of these; otherwise it
+# uses REMOTE_ADDR so a direct client cannot spoof its source IP.
+TRUSTED_PROXIES = tuple(
+    p.strip()
+    for p in os.getenv('TRUSTED_PROXIES', '127.0.0.1,::1').split(',')
+    if p.strip()
+)
+
 WHITENOISE_USE_FINDERS = True
 WHITENOISE_AUTOREFRESH = DEBUG
 WHITENOISE_MANIFEST_STRICT = False
