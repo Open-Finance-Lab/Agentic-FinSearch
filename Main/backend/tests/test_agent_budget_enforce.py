@@ -199,3 +199,61 @@ class TestStreamSlotRelease(SimpleTestCase):
             (_midstream_raise_gen(), {'final_output': ''})
         )
         self.assertTrue(reacquired, 'slot leaked: inflight did not return to 0 after mid-stream raise')
+
+    def test_release_on_client_disconnect_generatorexit(self):
+        """Regression for the v1 wedge: a client disconnect mid-stream must
+        release the slot. We start the stream, consume one chunk so the
+        generator is suspended mid-body with the slot HELD, then simulate the
+        disconnect by closing the underlying generator (injects GeneratorExit,
+        exactly what the WSGI/ASGI server does on disconnect). GeneratorExit is
+        a BaseException the inner `except Exception` cannot swallow, so only the
+        outermost generator finally releases the slot. With concurrency pinned
+        to 1, a leak here keeps inflight at 1 and wedges every later request.
+
+        GeneratorExit is injected directly into event_stream's generator via
+        resp._iterator.close(): StreamingHttpResponse.streaming_content returns
+        a fresh map() wrapper over self._iterator on each access (so closing the
+        wrapper would not reach event_stream), whereas resp._iterator IS the
+        original event_stream generator object.
+        """
+        req = _attach_session(
+            self.factory.get('/get_chat_response_stream/?question=hi&models=gpt-4o-mini')
+        )
+        identity = get_request_identity(req)
+        with patch.object(agent_budget, 'AGENT_MAX_CONCURRENCY', 1), \
+             patch('api.views.get_context_manager', return_value=self._ctx()), \
+             patch('api.views.get_context_integration', return_value=MagicMock()), \
+             patch('api.views.build_xbrl_sources', return_value=[]), \
+             patch('api.views._wrap_for_client', side_effect=lambda s, sid: s), \
+             patch('api.views.ds.create_agent_response_stream',
+                   return_value=(_one_chunk_gen(), {'final_output': 'Hello'})):
+            resp = views.chat_response_stream(req)
+            self.assertIsInstance(resp, StreamingHttpResponse)
+
+            # Begin iterating: pull one chunk so event_stream is suspended
+            # mid-body and the slot is held (inflight == 1, at the cap of 1).
+            chunks = iter(resp.streaming_content)
+            next(chunks)
+            self.assertEqual(
+                cache.get('agent:inflight'), 1,
+                'precondition: slot should be held mid-stream before disconnect',
+            )
+
+            # Simulate the client disconnect: close the ORIGINAL generator,
+            # injecting GeneratorExit into the suspended event_stream.
+            resp._iterator.close()
+
+            self.assertEqual(
+                cache.get('agent:inflight'), 0,
+                'slot leaked: inflight did not return to 0 after client disconnect',
+            )
+            reacquired = False
+            try:
+                with agent_run_slot(identity):
+                    reacquired = True
+            except ConcurrencyExceeded:
+                reacquired = False
+        self.assertTrue(
+            reacquired,
+            'slot leaked: a fresh acquire was wedged after client disconnect',
+        )
