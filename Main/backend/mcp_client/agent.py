@@ -103,8 +103,9 @@ async def create_fin_agent(model: str = "gpt-4o-mini",
         user_input: User's query
         user_timezone: User's IANA timezone (e.g., "America/New_York")
         user_time: User's current time in ISO format
-        allowed_tools: If provided, only these tool names are included.
-                       None means all tools; [] means no tools.
+        allowed_tools: Explicit allow-list of tool names. Deny-by-default:
+                       None and [] BOTH mean ZERO tools. Callers MUST pass a
+                       finite allow-list to attach any tools.
         instructions_override: If provided, skip PromptBuilder and use this
                                string as the agent's system instructions.
 

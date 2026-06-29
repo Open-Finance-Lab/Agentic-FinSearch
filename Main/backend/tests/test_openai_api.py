@@ -422,6 +422,75 @@ class TestToolSourceExtraction:
 
 
 # ---------------------------------------------------------------------------
+# Agent budget enforcement tests (P0 Root-C.3 — /v1 must not bypass the cap)
+# ---------------------------------------------------------------------------
+
+class TestBudgetEnforcement:
+    """/v1/chat/completions sync handler must honor agent_run_slot: a slot
+    rejection (concurrency or daily budget) returns an OpenAI-style 503 with a
+    Retry-After header, NOT a 500 and NOT an unbounded agent run."""
+
+    def _rejecting_slot(self, exc):
+        """Drop-in for agent_run_slot whose __enter__ raises."""
+        cm = MagicMock()
+        cm.__enter__.side_effect = exc
+        return MagicMock(return_value=cm)
+
+    def _sync_args(self):
+        from datascraper.unified_context_manager import ContextMode
+        context_mgr = MagicMock()
+        integration = MagicMock()
+        meta = MagicMock()
+        meta.current_url = ""
+        meta.user_timezone = None
+        meta.user_time = None
+        context_mgr.get_session_metadata.return_value = meta
+        context_mgr.get_session_stats.return_value = {"token_count": 10}
+        return context_mgr, integration, ContextMode.THINKING
+
+    def test_sync_handler_returns_503_on_concurrency(self):
+        from api.agent_budget import ConcurrencyExceeded
+        from api.openai_views import _handle_sync
+
+        context_mgr, integration, mode = self._sync_args()
+        with patch("api.openai_views.agent_run_slot",
+                   self._rejecting_slot(ConcurrencyExceeded())), \
+             patch("api.openai_views.get_request_identity", return_value="ip:1.2.3.4"), \
+             patch("datascraper.datascraper.create_agent_response") as mock_agent:
+            response = _handle_sync(
+                context_mgr, integration, "test_session",
+                "What is AAPL price?", [], "FinGPT", mode
+            )
+
+        assert response.status_code == 503
+        assert response["Retry-After"] == "30"
+        data = json.loads(response.content)
+        # OpenAI-style error shape (matches the other /v1 errors).
+        assert "error" in data
+        assert "message" in data["error"]
+        assert "type" in data["error"]
+        # The agent must NOT have been driven when the slot is rejected.
+        mock_agent.assert_not_called()
+
+    def test_sync_handler_returns_503_on_budget_exceeded(self):
+        from api.agent_budget import BudgetExceeded
+        from api.openai_views import _handle_sync
+
+        context_mgr, integration, mode = self._sync_args()
+        with patch("api.openai_views.agent_run_slot",
+                   self._rejecting_slot(BudgetExceeded())), \
+             patch("api.openai_views.get_request_identity", return_value="ip:1.2.3.4"), \
+             patch("datascraper.datascraper.create_agent_response"):
+            response = _handle_sync(
+                context_mgr, integration, "test_session",
+                "What is AAPL price?", [], "FinGPT", mode
+            )
+
+        assert response.status_code == 503
+        assert response["Retry-After"] == "30"
+
+
+# ---------------------------------------------------------------------------
 # Models list tests
 # ---------------------------------------------------------------------------
 
