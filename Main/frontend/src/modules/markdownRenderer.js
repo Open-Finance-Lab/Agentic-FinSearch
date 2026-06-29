@@ -33,6 +33,20 @@ function normalizeMathInput(mathText) {
     .replace(/\u2011/g, '-'); // non-breaking hyphen → regular hyphen
 }
 
+// KaTeX `trust` allow-function. KaTeX calls this for every trust-gated
+// command. Only \href / \url may ever be honored, and only for absolute
+// http(s) URLs; this rejects javascript:, data:, vbscript:, file:, and
+// protocol-relative/relative URLs. Every other trust-gated command
+// (\includegraphics, \htmlClass, \htmlId, \htmlStyle, \htmlData, ...) is denied.
+export function katexTrustHandler(context) {
+  const command = context && context.command;
+  if (command !== '\\href' && command !== '\\url') {
+    return false;
+  }
+  const url = context && context.url ? String(context.url) : '';
+  return /^https?:\/\//i.test(url);
+}
+
 const KATEX_RENDER_OPTIONS = {
   delimiters: [
     { left: '$$', right: '$$', display: true },
@@ -42,7 +56,7 @@ const KATEX_RENDER_OPTIONS = {
   throwOnError: false,
   errorColor: '#cc0000',
   strict: false,
-  trust: true,
+  trust: katexTrustHandler,
   macros: {
     '\\Δ': '\\Delta',
     '\\σ': '\\sigma',
