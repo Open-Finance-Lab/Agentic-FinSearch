@@ -32,6 +32,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          # Cache the pip download/wheel dir, keyed on the requirements hash + Python
+          # version, so each matrix leg skips re-downloading deps on a cache hit.
+          cache: pip
+          cache-dependency-path: Concierge/requirements.txt
       - run: pip install -r requirements.txt
       - run: python -m pytest -q
 
@@ -130,7 +134,6 @@ jobs:
             # Discord Gateway (a clean import can still fail to authenticate). Poll up to
             # ~30s — the Gateway handshake lands a few seconds after the process starts.
             deadline=$((restart_epoch + 30))
-            connected=false
             while [ "$(date +%s)" -lt "$deadline" ]; do
               if ! systemctl --user is-active --quiet concierge.service; then
                 echo "FAIL: concierge.service is not active after restart" >&2
@@ -142,14 +145,13 @@ jobs:
               # that 141 would mask a real match as a false-negative deploy failure.
               logs="$(journalctl --user -u concierge.service --since "@$restart_epoch" --no-pager 2>/dev/null || true)"
               case "$logs" in
-                *"connected to Gateway"*) connected=true; break ;;
+                *"connected to Gateway"*)
+                  journalctl --user -u concierge.service --since "@$restart_epoch" -n 8 --no-pager || true
+                  echo "Deployed Concierge @ $COMMIT_SHA — active and connected to the Gateway."
+                  exit 0 ;;
               esac
               sleep 2
             done
-            if [ "$connected" != true ]; then
-              echo "FAIL: service active but no Gateway connection within 30s" >&2
-              journalctl --user -u concierge.service --since "@$restart_epoch" -n 40 --no-pager || true
-              exit 1
-            fi
-            journalctl --user -u concierge.service --since "@$restart_epoch" -n 8 --no-pager || true
-            echo "Deployed Concierge @ $COMMIT_SHA — active and connected to the Gateway."
+            echo "FAIL: service active but no Gateway connection within 30s" >&2
+            journalctl --user -u concierge.service --since "@$restart_epoch" -n 40 --no-pager || true
+            exit 1
