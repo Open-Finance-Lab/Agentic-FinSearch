@@ -70,9 +70,9 @@ WSGI_APPLICATION = 'django_config.wsgi.application'
 DATABASES = {}
 
 # Cache backend: shared across all gunicorn workers.
-# FileBasedCache for now — swap to Redis later with one-line change:
-#   CACHES = {"default": {"BACKEND": "django.core.cache.backends.redis.RedisCache",
-#                          "LOCATION": "redis://redis:6379/0"}}
+# Base/dev default is FileBasedCache (no external service needed for tests).
+# Production swaps this to RedisCache in django_config/settings_prod.py so the
+# agent-budget counters and django-ratelimit get atomic, cross-worker incr/decr.
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
@@ -83,6 +83,10 @@ CACHES = {
         },
     }
 }
+
+# django-ratelimit shares the default cache, so in production its counters live
+# in Redis alongside the agent budget (atomic, shared across workers).
+RATELIMIT_USE_CACHE = 'default'
 
 SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
 SESSION_COOKIE_NAME = 'fingpt_sessionid'

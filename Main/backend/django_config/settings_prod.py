@@ -60,6 +60,19 @@ if not SECRET_KEY or 'django-insecure' in SECRET_KEY:
 
 DATABASES = {}
 
+# Counter store for the agent budget (api/agent_budget.py) and django-ratelimit.
+# RedisCache provides atomic incr/decr shared across all gunicorn workers, so the
+# agent concurrency + daily-run caps are HARD limits (no MAX_ENTRIES cull of
+# counters as a file/locmem cache would do). LOCATION comes from REDIS_URL.
+REDIS_URL = os.getenv('REDIS_URL', 'redis://redis:6379/0')
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+        "TIMEOUT": 3600,
+    }
+}
+
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 STATIC_URL = '/static/'
 

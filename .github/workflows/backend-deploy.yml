@@ -166,13 +166,23 @@ jobs:
             podman login ${{ env.REGISTRY }} -u "$GHCR_USERNAME" -p "$GHCR_TOKEN"
             podman pull "$REMOTE_IMAGE"
 
+            # Shared rootless network so the api container reaches redis by name.
+            podman network exists fingpt-net || podman network create fingpt-net
+
+            # Redis counter store (atomic incr/decr for agent budget + ratelimit).
+            # Ephemeral cache: no persistence. --replace keeps redeploys idempotent.
+            podman run -d --name fingpt-redis --replace --restart=always \
+              --network fingpt-net \
+              --health-cmd 'redis-cli ping' --health-interval 10s --health-retries 5 \
+              docker.io/library/redis:7-alpine redis-server --save '' --appendonly no
+
             # Update systemd override to run the image we just pulled
             OVERRIDE_DIR="$HOME/.config/systemd/user/${SYSTEMD_UNIT}.service.d"
             mkdir -p "$OVERRIDE_DIR"
             cat > "$OVERRIDE_DIR/override.conf" <<EOF
             [Service]
             ExecStart=
-            ExecStart=/usr/bin/podman run --name ${SYSTEMD_UNIT} --replace --rm --cgroups=split --sdnotify=conmon -d --memory=1.7g --memory-swap=2g -v /home/deploy/fingpt/runtime:/app/runtime --publish 127.0.0.1:8000:8000 --env-file /home/deploy/fingpt/envs/.env.production ${REMOTE_IMAGE}
+            ExecStart=/usr/bin/podman run --name ${SYSTEMD_UNIT} --replace --rm --cgroups=split --sdnotify=conmon -d --memory=1.7g --memory-swap=2g --network fingpt-net -v /home/deploy/fingpt/runtime:/app/runtime --publish 127.0.0.1:8000:8000 --env-file /home/deploy/fingpt/envs/.env.production --env REDIS_URL=redis://fingpt-redis:6379/0 ${REMOTE_IMAGE}
             EOF
 
             systemctl --user daemon-reload
