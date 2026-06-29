@@ -40,7 +40,7 @@ Store the final `.env.production` somewhere outside the repository (e.g. `/opt/f
 podman run -d \
   --name fingpt-api \
   --env-file /opt/fingpt/.env.production \
-  -p 8000:8000 \
+  -p 127.0.0.1:8000:8000 \
   ghcr.io/your-org/fingpt-api:latest
 ```
 
@@ -74,10 +74,34 @@ podman run -d \
 ## 5. Networking & TLS
 
 - Keep Gunicorn bound to `0.0.0.0:8000` inside the container.
+- Publish the host port to loopback only (`-p 127.0.0.1:8000:8000`) so the
+  container is reachable exclusively through the front reverse proxy, never
+  directly from the network.
 - Terminate TLS using either:
   - A reverse-proxy container in the same pod (Caddy, Nginx, Traefik), or
   - Your cloud provider’s load balancer pointing at the host’s port 8000.
 - When TLS is in place, redirect HTTP → HTTPS at the proxy layer.
+
+### Client IP / rate-limiting (P0 Root C.1)
+
+The API derives the client IP for rate limiting from `X-Real-IP` /
+`X-Forwarded-For`, but ONLY when the TCP peer is listed in `TRUSTED_PROXIES`
+(env, default `127.0.0.1,::1`). The front proxy MUST set those headers itself
+and override client-supplied copies:
+
+1. Use the provided `Deploy/podman/Caddyfile.example`, which sets
+   `header_up X-Real-IP {remote_host}` and overrides `X-Forwarded-For`.
+2. Set `TRUSTED_PROXIES` in `.env.production` to the address the proxy
+   connects from (the pod/network peer IP; `127.0.0.1,::1` for a same-pod
+   Caddy).
+3. APPLY THE CONFIG TO THE LIVE PROXY — editing the example file is not
+   enough. Copy it onto the running Caddy and reload:
+   ```
+   podman cp Deploy/podman/Caddyfile.example fingpt-caddy:/etc/caddy/Caddyfile
+   podman exec fingpt-caddy caddy reload --config /etc/caddy/Caddyfile
+   ```
+   Then `curl -s https://api.your-domain.com/health/` and confirm the backend
+   logs show the real client IP, not the proxy's.
 
 ## 6. Verifying the Deployment
 

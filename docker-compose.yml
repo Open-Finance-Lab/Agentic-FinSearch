@@ -6,7 +6,9 @@ services:
     build: ./Main/backend
 
     ports:
-      - "8000:8000"
+      # P0 Root C.1: publish only to loopback; the host reverse proxy (Caddy)
+      # is the sole public entrypoint and sets X-Real-IP.
+      - "127.0.0.1:8000:8000"
 
     env_file:
       - ./Main/backend/.env # API keys and configuration
