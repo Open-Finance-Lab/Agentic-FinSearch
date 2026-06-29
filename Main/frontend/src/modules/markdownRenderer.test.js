@@ -182,3 +182,34 @@ describe('renderStreamingPreview stabilization', () => {
         expect(div.textContent).toContain('$5 billion');
     });
 });
+
+describe('XSS sanitizer (DOMPurify)', () => {
+    test('strips a javascript: href from raw HTML in model output', () => {
+        const div = document.createElement('div');
+        renderMarkdownContent(div, '<a href="javascript:alert(1)">click</a>', { prefixLabel: '' });
+        expect(div.innerHTML).not.toContain('javascript:');
+        const link = div.querySelector('a');
+        if (link) {
+            expect(link.getAttribute('href')).not.toMatch(/^javascript:/i);
+        }
+    });
+
+    test('drops an onerror handler from an injected <img>', () => {
+        const div = document.createElement('div');
+        renderMarkdownContent(div, '<img src=x onerror="alert(1)">', { prefixLabel: '' });
+        expect(div.innerHTML).not.toContain('onerror');
+    });
+
+    test('removes a <script> tag from model output', () => {
+        const div = document.createElement('div');
+        renderMarkdownContent(div, 'hi <script>alert(1)</script> there', { prefixLabel: '' });
+        expect(div.querySelector('script')).toBeNull();
+        expect(div.innerHTML).not.toContain('<script');
+    });
+
+    test('preserves texmath <eq> wrappers through sanitization', () => {
+        const div = document.createElement('div');
+        renderMarkdownContent(div, 'where \\(x = 1\\) holds', { prefixLabel: '' });
+        expect(div.querySelector('eq')).not.toBeNull();
+    });
+});

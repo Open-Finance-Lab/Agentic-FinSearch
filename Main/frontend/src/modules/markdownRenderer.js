@@ -7,6 +7,21 @@
 
 import markdownIt from 'markdown-it';
 import texmath from 'markdown-it-texmath';
+import createDOMPurify from 'dompurify';
+
+// DOMPurify needs an explicit window in non-browser runtimes (the bun +
+// happy-dom test harness registers `window` as a global before this module
+// loads; in the webpack browser bundle `window` is the page global).
+const DOMPurify = createDOMPurify(window);
+
+// DOMPurify drops a `javascript:`/`data:` href but keeps the (now hrefless)
+// <a> shell. Remove such anchors outright so a hostile link leaves nothing
+// clickable behind — and so no anchor with a stripped scheme survives.
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.tagName === 'A' && !node.getAttribute('href')) {
+    node.parentNode?.removeChild(node);
+  }
+});
 
 // Normalize math strings so KaTeX does not choke on uncommon unicode spacing/hyphen characters
 function normalizeMathInput(mathText) {
@@ -135,30 +150,15 @@ function getMarkdownRenderer() {
 }
 
 function sanitizeHtml(html) {
-  const template = document.createElement('template');
-  template.innerHTML = html;
-
-  const forbiddenSelectors = 'script,style,iframe,object,embed,link,meta';
-  template.content.querySelectorAll(forbiddenSelectors).forEach((node) => node.remove());
-
-  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_ELEMENT, null, false);
-  while (walker.nextNode()) {
-    const element = walker.currentNode;
-    Array.from(element.attributes).forEach((attr) => {
-      if (attr.name.startsWith('on')) {
-        element.removeAttribute(attr.name);
-      }
-    });
-  }
-
-  const commentWalker = document.createTreeWalker(template.content, NodeFilter.SHOW_COMMENT, null, false);
-  const comments = [];
-  while (commentWalker.nextNode()) {
-    comments.push(commentWalker.currentNode);
-  }
-  comments.forEach((node) => node.remove());
-
-  return template.innerHTML;
+  // Allow-list sanitizer (DOMPurify) replacing the previous hand-rolled
+  // denylist. DOMPurify drops script/iframe/object/embed, on* handlers, and
+  // javascript:/data: URIs by default. `eq`/`eqn` are texmath's math wrappers
+  // and must be preserved so KaTeX auto-render can upgrade them in place
+  // after innerHTML is set.
+  return DOMPurify.sanitize(html, {
+    ADD_TAGS: ['eq', 'eqn'],
+    ALLOW_DATA_ATTR: false,
+  });
 }
 
 function applyLinkAttributes(element) {
