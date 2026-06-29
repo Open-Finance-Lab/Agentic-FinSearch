@@ -176,13 +176,17 @@ jobs:
               --health-cmd 'redis-cli ping' --health-interval 10s --health-retries 5 \
               docker.io/library/redis:7-alpine redis-server --save '' --appendonly no
 
-            # Update systemd override to run the image we just pulled
+            # Update systemd override to run the image we just pulled.
+            # The image now runs as non-root uid 1001 (Dockerfile USER fingpt), so
+            # the runtime bind mount below carries the ':U' suffix: rootless podman
+            # then recursively chowns the host dir to the in-container uid, otherwise
+            # the non-root process could not write the mount.
             OVERRIDE_DIR="$HOME/.config/systemd/user/${SYSTEMD_UNIT}.service.d"
             mkdir -p "$OVERRIDE_DIR"
             cat > "$OVERRIDE_DIR/override.conf" <<EOF
             [Service]
             ExecStart=
-            ExecStart=/usr/bin/podman run --name ${SYSTEMD_UNIT} --replace --rm --cgroups=split --sdnotify=conmon -d --memory=1.7g --memory-swap=2g --network fingpt-net -v /home/deploy/fingpt/runtime:/app/runtime --publish 127.0.0.1:8000:8000 --env-file /home/deploy/fingpt/envs/.env.production --env REDIS_URL=redis://fingpt-redis:6379/0 ${REMOTE_IMAGE}
+            ExecStart=/usr/bin/podman run --name ${SYSTEMD_UNIT} --replace --rm --cgroups=split --sdnotify=conmon -d --memory=1.7g --memory-swap=2g --network fingpt-net -v /home/deploy/fingpt/runtime:/app/runtime:U --publish 127.0.0.1:8000:8000 --env-file /home/deploy/fingpt/envs/.env.production --env REDIS_URL=redis://fingpt-redis:6379/0 ${REMOTE_IMAGE}
             EOF
 
             systemctl --user daemon-reload
