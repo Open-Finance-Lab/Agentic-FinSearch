@@ -23,6 +23,7 @@ from datascraper.playwright_tools import get_playwright_tools
 
 from .apps import get_global_mcp_manager
 from .prompt_builder import PromptBuilder
+from .tool_policy import filter_to_allowed
 
 
 _mcp_init_lock = None
@@ -89,7 +90,12 @@ async def create_fin_agent(model: str = "gpt-4o-mini",
     # filter the AVAILABLE TOOLS catalog against the actual tool registry for
     # this request. instructions_override bypasses PromptBuilder entirely.
     instructions: Optional[str] = instructions_override
-    tools_attached = allowed_tools is None or len(allowed_tools) > 0
+    # Deny-by-default: a skill/plan that declares no allow-list (None) is
+    # treated as ZERO tools, never the full registry. None must never reach
+    # the agent as "all tools" -- that was the filesystem-write escalation hole.
+    if allowed_tools is None:
+        allowed_tools = []
+    tools_attached = len(allowed_tools) > 0
 
     model_config = get_model_config(model)
     if not model_config:
@@ -187,15 +193,15 @@ async def create_fin_agent(model: str = "gpt-4o-mini",
 
                     for tool in mcp_tools:
 
-                        async def execute_mcp_tool(name, args, mgr=_mcp_manager):
+                        async def execute_mcp_tool(name, args, mgr=_mcp_manager, allowed=allowed_tools):
                             if mgr._loop:
                                 future = asyncio.run_coroutine_threadsafe(
-                                    mgr.execute_tool(name, args),
+                                    mgr.execute_tool(name, args, allowed),
                                     mgr._loop
                                 )
                                 return future.result(timeout=60)
                             else:
-                                return await mgr.execute_tool(name, args)
+                                return await mgr.execute_tool(name, args, allowed)
 
                         agent_tool = convert_mcp_tool_to_python_callable(tool, execute_mcp_tool)
                         tools.append(agent_tool)
@@ -206,14 +212,16 @@ async def create_fin_agent(model: str = "gpt-4o-mini",
             except Exception as e:
                 logging.error(f"Error fetching/adding MCP tools: {e}", exc_info=True)
 
-        # Apply tool filter if specified
-        if allowed_tools is not None:
-            pre_filter_count = len(tools)
-            tools = [t for t in tools if t.name in allowed_tools]
-            logging.info(
-                f"[AGENT] Tool filter applied: {pre_filter_count} -> {len(tools)} "
-                f"(allowed: {allowed_tools})"
-            )
+        # Apply the deny-by-default allow-list. allowed_tools is always a
+        # concrete list here (None was normalized to [] above), so this both
+        # drops tools NOT in the skill's list and drops the 14 filesystem
+        # tools via DENY_ALWAYS inside filter_to_allowed.
+        pre_filter_count = len(tools)
+        tools = filter_to_allowed(tools, allowed_tools)
+        logging.info(
+            f"[AGENT] Tool filter applied: {pre_filter_count} -> {len(tools)} "
+            f"(allowed: {allowed_tools})"
+        )
 
     # Build the system prompt now that the tool registry for this request is
     # final, so PromptBuilder can render the AVAILABLE TOOLS catalog from the
@@ -230,7 +238,7 @@ async def create_fin_agent(model: str = "gpt-4o-mini",
 
     # Output-protocol tools (e.g. report_claim) live in a separate prompt
     # section and are deliberately not in scope here.
-    if tools_attached and allowed_tools is not None:
+    if tools_attached:
         tool_names = ", ".join(allowed_tools)
         instructions += (
             f"\n\nTOOL SCOPE: For this request, the only data-gathering "
