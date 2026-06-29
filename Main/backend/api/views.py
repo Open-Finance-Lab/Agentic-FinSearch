@@ -26,6 +26,7 @@ from django.http import (
     StreamingHttpResponse,
 )
 from django.conf import settings
+from django_ratelimit import ALL
 from django_ratelimit.decorators import ratelimit
 
 from axioms.registry import get_claims
@@ -139,7 +140,7 @@ def _wrap_for_client(prose: str, session_id: str) -> str:
 
 
 @csrf_exempt
-@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def has_axiom_claims(request: HttpRequest) -> JsonResponse:
     """Lightweight check: does the current session have any ratio claims
     awaiting validation? The frontend uses this to decide whether to show
@@ -162,7 +163,7 @@ _FILINGS_DIR_RESOLVED = FILINGS_DIR.resolve()
 
 
 @csrf_exempt
-@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def xbrl_filing_download(request: HttpRequest, filename: str) -> FileResponse:
     """Serve a local SEC XBRL filing used for Layer 1 Validate.
 
@@ -188,7 +189,7 @@ def xbrl_filing_download(request: HttpRequest, filename: str) -> FileResponse:
 
 @csrf_exempt
 @require_http_methods(['POST'])
-@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def validate_claims(request: HttpRequest) -> JsonResponse:
     """Layer 1 Validate: run deterministic proof over claims recorded for a session.
 
@@ -218,7 +219,7 @@ def validate_claims(request: HttpRequest) -> JsonResponse:
  
 
 @csrf_exempt
-@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def chat_response(request: HttpRequest) -> JsonResponse:
     """
     Thinking Mode: Process user questions using LLM with available MCP tools.
@@ -309,7 +310,7 @@ def chat_response(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def adv_response(request: HttpRequest) -> JsonResponse:
     """
     Extensive Mode: Search for information ANYWHERE on the web using web_search.
@@ -429,7 +430,7 @@ def adv_response(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def agent_chat_response(request: HttpRequest) -> JsonResponse:
     """
     Process chat response via Agent with MCP tools (SEC-EDGAR, filesystem).
@@ -517,7 +518,7 @@ def agent_chat_response(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def chat_response_stream(request: HttpRequest) -> StreamingHttpResponse:
     """
     Thinking Mode Streaming: Process user questions using LLM with available MCP tools.
@@ -669,7 +670,7 @@ def chat_response_stream(request: HttpRequest) -> StreamingHttpResponse:
 
 
 @csrf_exempt
-@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def adv_response_stream(request: HttpRequest) -> StreamingHttpResponse:
     """Process streaming advanced chat response from selected models using SSE"""
     try:

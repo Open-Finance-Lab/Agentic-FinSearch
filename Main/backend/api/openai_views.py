@@ -19,6 +19,7 @@ from typing import List, Dict, Any, Optional
 from django.http import JsonResponse, HttpRequest
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
+from django_ratelimit import ALL
 from django_ratelimit.decorators import ratelimit
 
 from datascraper import datascraper as ds
@@ -122,7 +123,7 @@ def _merge_domains_into_preferred_links(
 
 
 @csrf_exempt
-@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def models_list(request: HttpRequest) -> JsonResponse:
     """
     List available models in OpenAI format.
@@ -154,7 +155,7 @@ def models_list(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def chat_completions(request: HttpRequest) -> JsonResponse:
     """
     Create chat completion.
