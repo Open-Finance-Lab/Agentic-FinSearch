@@ -90,3 +90,55 @@ class TestDeriveConversationKey(SimpleTestCase):
         # RequestFactory request without SessionMiddleware has no .session.
         key = derive_conversation_key(RequestFactory().get("/api/chat/"))
         self.assertTrue(key)
+
+
+class TestViewSessionBinding(SimpleTestCase):
+    def test_views_get_session_id_idor(self):
+        from api import views
+        store_a = _ENGINE.SessionStore()
+        store_b = _ENGINE.SessionStore()
+        key_a = views._get_session_id(_request("shared-id", store_a))
+        key_b = views._get_session_id(_request("shared-id", store_b))
+        self.assertNotEqual(key_a, key_b)
+
+    def test_context_integration_get_session_id_idor(self):
+        from datascraper.context_integration import ContextIntegration
+        ci = ContextIntegration()
+        store_a = _ENGINE.SessionStore()
+        store_b = _ENGINE.SessionStore()
+        key_a = ci._get_session_id(_request("shared-id", store_a))
+        key_b = ci._get_session_id(_request("shared-id", store_b))
+        self.assertNotEqual(key_a, key_b)
+
+    def test_both_resolvers_agree_for_same_cookie(self):
+        from api import views
+        from datascraper.context_integration import ContextIntegration
+        store = _ENGINE.SessionStore()
+        views_key = views._get_session_id(_request("sub", store))
+        ci_key = ContextIntegration()._get_session_id(_request("sub", store))
+        self.assertEqual(views_key, ci_key)
+
+    def test_has_axiom_claims_ignores_caller_session_id(self):
+        # The endpoint must IGNORE ?session_id=<guess> and use the cookie-bound
+        # key from _get_session_id (closing the IDOR on the claims surface).
+        from api import views
+        req = RequestFactory().get("/api/axioms/has_claims/?session_id=attacker-guess")
+        with patch("api.views._get_session_id", return_value="cookie:bound") as m, \
+                patch("api.views.get_claims", return_value=[]) as gc:
+            resp = views.has_axiom_claims(req)
+        m.assert_called_once_with(req)
+        gc.assert_called_once_with("cookie:bound")
+        self.assertEqual(json.loads(resp.content)["session_id"], "cookie:bound")
+
+    def test_validate_claims_ignores_caller_session_id(self):
+        from api import views
+        body = json.dumps({"session_id": "attacker-guess"}).encode()
+        req = RequestFactory().post(
+            "/api/axioms/validate/", data=body, content_type="application/json"
+        )
+        with patch("api.views._get_session_id", return_value="cookie:bound") as m, \
+                patch("axioms.validate_session", return_value={"ok": True}) as vs:
+            resp = views.validate_claims(req)
+        m.assert_called_once_with(req)
+        vs.assert_called_once_with("cookie:bound")
+        self.assertEqual(resp.status_code, 200)

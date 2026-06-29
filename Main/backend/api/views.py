@@ -48,6 +48,7 @@ from datascraper.context_integration import (
     get_context_integration
 )
 from datascraper.url_tools import _scrape_url_impl as scrape_url
+from datascraper.session_key import derive_conversation_key
 from datascraper import ssrf_guard
 
 from api.agent_budget import agent_run_slot, BudgetExceeded, ConcurrencyExceeded
@@ -100,23 +101,15 @@ def _int_env(name: str, default: int) -> int:
 
 
 def _get_session_id(request: HttpRequest) -> str:
-    """Get or create session ID for context management."""
-    custom_session_id = request.GET.get('session_id')
+    """Resolve the conversation/history key, bound to the signed session cookie.
 
-    if not custom_session_id and request.method == 'POST':
-        try:
-            body_data = json.loads(request.body)
-            custom_session_id = body_data.get('session_id')
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    if custom_session_id:
-        return custom_session_id
-
-    if not request.session.session_key:
-        request.session.create()
-
-    return request.session.session_key
+    SECURITY (P1 C-session / IDOR): the caller-supplied ``session_id`` is NEVER
+    trusted as the cache key on its own. The key is always rooted in a stable
+    per-browser id stored inside the signed-cookie session payload, and any
+    caller-supplied id is namespaced UNDER that root. See
+    ``datascraper.session_key.derive_conversation_key``.
+    """
+    return derive_conversation_key(request)
 
 
 def _busy_response() -> JsonResponse:
@@ -163,7 +156,7 @@ def has_axiom_claims(request: HttpRequest) -> JsonResponse:
     the Validate button on a response bubble.
     """
     try:
-        session_id = request.GET.get('session_id') or _get_session_id(request)
+        session_id = _get_session_id(request)
         claims = get_claims(session_id) if session_id else []
         return JsonResponse({
             'session_id': session_id,
@@ -221,7 +214,7 @@ def validate_claims(request: HttpRequest) -> JsonResponse:
     except (json.JSONDecodeError, ValueError):
         return JsonResponse({'error': 'invalid JSON body'}, status=400)
 
-    session_id = body.get('session_id') or _get_session_id(request)
+    session_id = _get_session_id(request)
     if not session_id:
         return JsonResponse({'error': 'session_id required'}, status=400)
 
