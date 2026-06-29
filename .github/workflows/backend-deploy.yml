@@ -36,13 +36,14 @@ jobs:
       sha_tag: ${{ steps.meta.outputs.sha_tag }}
       main_tag: ${{ steps.meta.outputs.main_tag }}
       latest_tag: ${{ steps.meta.outputs.latest_tag }}
+      digest: ${{ steps.digest.outputs.digest }}
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
 
       - name: Install Python ${{ env.PYTHON_VERSION }}
         run: uv python install ${{ env.PYTHON_VERSION }}
@@ -70,7 +71,7 @@ jobs:
           echo "latest_tag=${IMAGE_ID}:latest" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772  # v3.4.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -92,6 +93,12 @@ jobs:
           docker push ${{ steps.meta.outputs.main_tag }}
           docker push ${{ steps.meta.outputs.latest_tag }}
 
+      - name: Capture pushed image digest
+        id: digest
+        run: |
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ steps.meta.outputs.sha_tag }})
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
   test:
     runs-on: ubuntu-latest
     needs: build
@@ -100,7 +107,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Tests temporarily disabled
         if: ${{ env.RUN_TESTS != 'true' }}
@@ -108,7 +115,7 @@ jobs:
 
       - name: Set up uv
         if: ${{ env.RUN_TESTS == 'true' }}
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
 
       - name: Install Python ${{ env.PYTHON_VERSION }}
         if: ${{ env.RUN_TESTS == 'true' }}
@@ -151,7 +158,7 @@ jobs:
         if: ${{ steps.deploy-gate.outputs.enabled == 'true' }}
         uses: appleboy/ssh-action@334f9259f2f8eb3376d33fa4c684fff373f2c2a6  # v0.1.10, SHA-pinned (holds the prod SSH key)
         env:
-          REMOTE_IMAGE: ${{ needs.build.outputs.main_tag }}
+          REMOTE_IMAGE: ${{ needs.build.outputs.digest }}
           GHCR_USERNAME: ${{ github.repository_owner }}
           GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
         with:
