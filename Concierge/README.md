@@ -35,7 +35,46 @@ scp Concierge/systemd/concierge.service finsearch-deploy:/home/deploy/.config/sy
 ssh finsearch-deploy 'chmod 600 ~/fingpt/envs/.env.concierge && systemctl --user daemon-reload && systemctl --user enable --now concierge.service'
 ```
 
-## Discord-side config (separate session — out of scope here)
-Same application as the Heartbeat. Enable **Gateway** + the **non-privileged**
-`GUILD_MESSAGES` and `DIRECT_MESSAGES` intents. **Do not** enable the privileged
-Message Content intent — mentions & DMs deliver content without it.
+## Discord-side setup & testing
+Same Discord **application** as the News Heartbeat — one app, one token, two processes.
+The Heartbeat is REST-only (`Bot {token}`, no Gateway); Concierge is the **sole** Gateway
+consumer. A token allows only ONE live Gateway connection, so never run two Concierge
+processes against it.
+
+### 1. Developer Portal — <https://discord.com/developers/applications>
+- **Token** — reuse the Heartbeat's `DISCORD_BOT_TOKEN`. **Do not** click *Reset Token*;
+  that invalidates the Heartbeat's copy.
+- **Privileged Gateway Intents** — leave **all three OFF** (Presence, Server Members,
+  Message Content). The message intents Concierge needs (`GUILD_MESSAGES`,
+  `DIRECT_MESSAGES`) are *non-privileged*: they are requested in code via
+  `Intents.default()` and have **no Dev-Portal toggle**. Discord still delivers message
+  content for DMs and @mentions with Message Content OFF (platform exemption), which is
+  exactly the trigger surface we use.
+- **Invite the bot** — it needs, per channel it serves: *View Channel, Send Messages,
+  Embed Links, Add Reactions* (those four = integer `19520`). The recommended invite below
+  also grants *Read Message History* (optional today, used by a future history-scan
+  trigger) — scope `bot`, permissions integer `85056`:
+  `https://discord.com/oauth2/authorize?client_id=<APP_ID>&scope=bot&permissions=85056`
+
+### 2. Configure & run
+Follow **Run locally** above. `FINSEARCH_API_BASE` must be reachable from wherever
+Concierge runs (it streams from the backend's `/get_chat_response_stream/`). On the
+droplet the backend is co-located, so the default `http://localhost:8000` works; from a
+laptop, point it at a tunnel (e.g. `ssh -L 8000:localhost:8000 finsearch-deploy`).
+
+### 3. Test matrix
+Beyond the happy path in **Live smoke (manual)** above:
+
+| Input | Expected |
+|-------|----------|
+| `@Concierge what is AAPL's PE?` (server) | `💭 Thinking…` → throttled streamed answer → Sources embed |
+| `what is AAPL's PE?` (DM, no @mention) | same — DMs need no mention |
+| `@Concierge` with no text | `Ask me something 🙂` — **no** backend call |
+| 4+ rapid messages from one user | extras queue (cooldown); when the per-user queue (3) fills → `⏳ I'm still working…` |
+| bot lacks Send/Embed perms in the channel | ❌ reaction on your message |
+
+### 4. Refresh the SSE fixture (optional)
+`tests/fixtures/sse_chat_stream.txt` is the recorded byte stream the client tests replay.
+To re-capture from a live backend (e.g. after a backend frame-format change), save the raw
+`/get_chat_response_stream/` response body verbatim — including `event:`/`data:` lines and
+the terminal `{"done": true, ...}` frame — over that file, then re-run `pytest -q`.
