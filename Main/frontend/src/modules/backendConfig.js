@@ -4,6 +4,33 @@
 const DEFAULT_BACKEND_BASE_URL = 'https://agenticfinsearch.org';
 let cachedBaseUrl = null;
 
+// Hosts the extension is permitted to talk to. Overrides come from
+// window.AGENTIC_BACKEND_URL or localStorage['agenticBackendUrl']; because
+// requests are sent with credentials:'include', an unconstrained override
+// would let an attacker repoint the credentialed session at an exfil host.
+const ALLOWED_LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+function isAllowedBackendUrl(parsed) {
+    const hostname = parsed.hostname.toLowerCase();
+    const isLocal = ALLOWED_LOCAL_HOSTS.has(hostname);
+
+    // Require https in production; permit http only for local dev hosts.
+    if (parsed.protocol === 'https:') {
+        // allowed
+    } else if (parsed.protocol === 'http:' && isLocal) {
+        // allowed for local development
+    } else {
+        return false;
+    }
+
+    if (isLocal) {
+        return true;
+    }
+
+    // Production: the canonical host or any of its subdomains.
+    return hostname === 'agenticfinsearch.org' || hostname.endsWith('.agenticfinsearch.org');
+}
+
 function normalizeBaseUrl(url) {
     if (!url) {
         return null;
@@ -16,6 +43,10 @@ function normalizeBaseUrl(url) {
         }
 
         const parsed = new URL(trimmed);
+        if (!isAllowedBackendUrl(parsed)) {
+            console.warn('Ignoring backend URL outside the allow-list:', url);
+            return null;
+        }
         const pathname = parsed.pathname === '/' ? '' : parsed.pathname.replace(/\/$/, '');
         return `${parsed.protocol}//${parsed.host}${pathname}`;
     } catch (error) {
@@ -65,4 +96,4 @@ function buildBackendUrl(path = '/') {
     return `${baseUrl}${sanitizedPath}`;
 }
 
-export { getBackendBaseUrl, buildBackendUrl };
+export { getBackendBaseUrl, buildBackendUrl, normalizeBaseUrl };
