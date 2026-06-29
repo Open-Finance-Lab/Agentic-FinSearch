@@ -47,6 +47,7 @@ from datascraper.context_integration import (
     get_context_integration
 )
 from datascraper.url_tools import _scrape_url_impl as scrape_url
+from datascraper import ssrf_guard
 
 logger = logging.getLogger(__name__)
 
@@ -843,7 +844,13 @@ def auto_scrape(request: HttpRequest) -> JsonResponse:
         
         if not current_url:
             return JsonResponse({'error': 'No URL provided'}, status=400)
-            
+
+        try:
+            ssrf_guard.validate_fetch_url(current_url)
+        except ssrf_guard.UnsafeURLError as exc:
+            logger.warning(f"[SSRF] Refused auto_scrape target {current_url}: {exc}")
+            return JsonResponse({'error': 'URL refused by security policy'}, status=400)
+
         session_id = _get_session_id(request)
         
         integration = get_context_integration()

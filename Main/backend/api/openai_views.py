@@ -247,6 +247,10 @@ def chat_completions(request: HttpRequest) -> JsonResponse:
     if target_url:
         try:
             logger.info(f"API initializing with URL: {target_url}")
+            # SSRF: scrape_url is _scrape_url_impl, which validates + IP-pins the
+            # fetch via datascraper.ssrf_guard (validate_fetch_url + safe_get).
+            # This url-param sink is therefore covered transitively — no extra
+            # guard is needed here.
             scrape_result_json = scrape_url(target_url)
             scrape_result = json.loads(scrape_result_json)
 
