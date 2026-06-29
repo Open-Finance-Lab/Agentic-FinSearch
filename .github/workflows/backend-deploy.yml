@@ -23,7 +23,7 @@ env:
   DROPLET_HOST: ${{ vars.DROPLET_HOST }}
   DROPLET_USER: ${{ vars.DROPLET_USER }}
   SYSTEMD_UNIT: fingpt-api
-  RUN_TESTS: "false" # Toggle to "true" to re-enable backend tests
+  RUN_TESTS: "true" # Backend TDD suite gates deploy (P0 F-gate)
 
 jobs:
   build:
@@ -122,10 +122,11 @@ jobs:
       - name: Run backend tests
         if: ${{ env.RUN_TESTS == 'true' }}
         working-directory: ${{ env.BACKEND_DIR }}
-        run: uv run python manage.py test
+        run: uv run pytest tests -q
 
   deploy:
     runs-on: ubuntu-latest
+    if: ${{ github.ref == 'refs/heads/main' }}
     needs:
       - build
       - test
