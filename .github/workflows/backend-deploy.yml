@@ -4,21 +4,24 @@ on:
   push:
     branches:
       - main
-    # Heartbeat and docs changes don't feed the backend image, so skip the
-    # rebuild/restart for them. Heartbeat merges run heartbeat-tests.yml
-    # (tests + script deploy) instead; docs-only merges run nothing.
-    paths-ignore:
-      - "Heartbeat/**"
-      - "Docs/**"
-      - ".github/workflows/heartbeat-tests.yml"
+    # Allowlist the backend image's actual inputs so unrelated changes (heartbeat, docs,
+    # the other deploy workflows) can't rebuild/restart the backend. The image is built
+    # solely from Main/backend/ (Dockerfile + that build context); the workflow file is
+    # included so its own edits still ship. Previously a broad paths-ignore let any
+    # non-heartbeat/docs change (e.g. a concierge workflow edit) bounce the backend.
+    paths:
+      - "Main/backend/**"
+      - ".github/workflows/backend-deploy.yml"
   workflow_dispatch:
 
 env:
   BACKEND_DIR: Main/backend
   PYTHON_VERSION: "3.12"
   REGISTRY: ghcr.io
-  DROPLET_HOST: agenticfinsearch.org
-  DROPLET_USER: deploy
+  # Shared droplet coordinates as repo-level Actions variables (see heartbeat/concierge),
+  # so a host/user change is one repo setting, not an edit across three workflows.
+  DROPLET_HOST: ${{ vars.DROPLET_HOST }}
+  DROPLET_USER: ${{ vars.DROPLET_USER }}
   SYSTEMD_UNIT: fingpt-api
   RUN_TESTS: "false" # Toggle to "true" to re-enable backend tests
 
@@ -145,7 +148,7 @@ jobs:
 
       - name: Deploy to Fedora droplet
         if: ${{ steps.deploy-gate.outputs.enabled == 'true' }}
-        uses: appleboy/ssh-action@v0.1.10
+        uses: appleboy/ssh-action@334f9259f2f8eb3376d33fa4c684fff373f2c2a6  # v0.1.10, SHA-pinned (holds the prod SSH key)
         env:
           REMOTE_IMAGE: ${{ needs.build.outputs.main_tag }}
           GHCR_USERNAME: ${{ github.repository_owner }}
@@ -177,7 +180,7 @@ jobs:
 
       - name: Verify deployment health
         if: ${{ steps.deploy-gate.outputs.enabled == 'true' }}
-        uses: appleboy/ssh-action@v0.1.10
+        uses: appleboy/ssh-action@334f9259f2f8eb3376d33fa4c684fff373f2c2a6  # v0.1.10, SHA-pinned (holds the prod SSH key)
         with:
           host: ${{ env.DROPLET_HOST }}
           username: ${{ env.DROPLET_USER }}

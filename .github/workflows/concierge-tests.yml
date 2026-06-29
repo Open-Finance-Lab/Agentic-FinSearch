@@ -7,8 +7,10 @@ on:
   workflow_dispatch:
 
 env:
-  DROPLET_HOST: agenticfinsearch.org
-  DROPLET_USER: deploy
+  # Shared droplet coordinates as repo-level Actions variables (see heartbeat/backend),
+  # so a host/user change is one repo setting, not an edit across three workflows.
+  DROPLET_HOST: ${{ vars.DROPLET_HOST }}
+  DROPLET_USER: ${{ vars.DROPLET_USER }}
   CONCIERGE_HOME: /home/deploy/fingpt/concierge
 
 jobs:
