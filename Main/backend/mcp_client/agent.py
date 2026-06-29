@@ -3,8 +3,9 @@ import os
 import json as _json
 from typing import Optional, List
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from dotenv import load_dotenv
-from agents import Agent, AsyncOpenAI, OpenAIChatCompletionsModel
+from agents import Agent, AsyncOpenAI, OpenAIChatCompletionsModel, FunctionTool
 from agents.model_settings import ModelSettings
 from openai.types.shared import Reasoning
 import httpx
@@ -22,12 +23,36 @@ from datascraper.url_tools import get_url_tools
 from datascraper.playwright_tools import get_playwright_tools
 
 from .apps import get_global_mcp_manager
-from .prompt_builder import PromptBuilder
+from .prompt_builder import PromptBuilder, wrap_untrusted_tool_output
 from .tool_policy import filter_to_allowed
 
 
 _mcp_init_lock = None
 _prompt_builder = PromptBuilder()
+
+# Tools whose output is trusted compute/logging, not external data, and so are
+# NOT wrapped in the untrusted-data envelope: calculate (safe arithmetic),
+# report_claim (session-bound claim-logging confirmation), resolve_url (formats
+# a URL from the local site_map). Every other tool (scrape/browser/MCP) returns
+# attacker-influenceable external text.
+_TRUSTED_TOOLS = {"calculate", "report_claim", "resolve_url"}
+
+
+def _envelope_tool_output(tool: FunctionTool) -> FunctionTool:
+    """Return a fresh FunctionTool whose on_invoke_tool wraps the result string
+    in the untrusted-data boundary via prompt_builder.wrap_untrusted_tool_output.
+
+    Uses dataclasses.replace (FunctionTool is a dataclass) to build a NEW
+    instance per request; get_url_tools()/get_playwright_tools()/
+    get_calculator_tools() return module-level singletons reused across
+    requests, so in-place mutation of on_invoke_tool would double-wrap on the
+    next request. A fresh copy keeps the operation idempotent."""
+    inner = tool.on_invoke_tool
+
+    async def wrapped(ctx, args):
+        return wrap_untrusted_tool_output(await inner(ctx, args), tool.name)
+
+    return replace(tool, on_invoke_tool=wrapped)
 
 USER_ONLY_MODELS = {"o3-mini", "o1-mini", "o1-preview", "gpt-5-mini", "gpt-5.1-chat-latest"}
 
@@ -252,6 +277,19 @@ async def create_fin_agent(model: str = "gpt-4o-mini",
     if session_id and tools_attached:
         from axioms.tool import get_axiom_tools
         tools.extend(get_axiom_tools(session_id))
+
+    # Root D: wrap every external-data tool's output in the untrusted-data
+    # boundary so prompt-injection text in scraped/browser/MCP results is
+    # treated as DATA, not instructions (prompts/_security.md rule 5). Trusted
+    # compute/logging tools (calculate/report_claim/resolve_url) are skipped so
+    # the model still trusts its own arithmetic and claim-logging confirmation.
+    # When tools_attached is False, tools is [] and this is a no-op.
+    tools = [
+        _envelope_tool_output(t)
+        if isinstance(t, FunctionTool) and t.name not in _TRUSTED_TOOLS
+        else t
+        for t in tools
+    ]
 
     try:
         # Handle foundation models that don't support "system" roles
