@@ -103,9 +103,15 @@ def test_reject_variable_names():
 
 
 def test_reject_import():
-    """Verify that import attempts are blocked by the AST walker."""
+    """Verify that import attempts are blocked by the AST walker.
+
+    ``__import__('os').system('ls')`` parses to a method call (an ast.Attribute
+    func), which the walker rejects before ever resolving ``__import__``. The
+    rejection message is "Only named function calls allowed (no methods)" rather
+    than "not allowed" — both are correct rejections; assert on the actual one.
+    """
     from datascraper.calculator_tool import safe_compute
-    with pytest.raises(ValueError, match="not allowed"):
+    with pytest.raises(ValueError, match="no methods"):
         safe_compute("__import__('os').system('ls')")
 
 

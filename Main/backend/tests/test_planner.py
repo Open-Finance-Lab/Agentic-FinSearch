@@ -39,13 +39,18 @@ class TestPlanner:
         assert plan.instructions is None
 
     def test_fallback_plan(self):
+        from planner.skills._catalog import READ_ONLY_DATA_TOOLS
+
         plan = self.planner.plan(
             user_query="find me biotech investment ideas",
             system_prompt=None,
             domain=None,
         )
         assert plan.skill_name == "web_research"
-        assert plan.tools_allowed is None
+        # SECURITY (deny-by-default): the planner-failure / fallback plan must
+        # carry the finite read-only allow-list, never None ("all tools").
+        assert plan.tools_allowed is not None
+        assert plan.tools_allowed == list(READ_ONLY_DATA_TOOLS)
         assert plan.max_turns == 10
 
     def test_prescraped_detection(self):
