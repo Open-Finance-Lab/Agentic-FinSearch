@@ -86,7 +86,8 @@ class _FakeContent:
 
 
 class _FakeResp:
-    def __init__(self, content): self.content = content
+    def __init__(self, content, status=200, headers=None):
+        self.content = content; self.status = status; self.headers = headers or {}
     def raise_for_status(self): pass
 
 
@@ -98,7 +99,7 @@ class _FakeGetCtx:
 
 class _FakeSession:
     def __init__(self, resp): self._resp = resp; self.closed = False
-    def get(self, url): return _FakeGetCtx(self._resp)
+    def get(self, url, **kwargs): return _FakeGetCtx(self._resp)
     async def close(self): self.closed = True
 
 
@@ -171,3 +172,30 @@ async def test_stream_chat_unwraps_span_markup_in_fallback():
     assert isinstance(out[-1], ChatResult)
     assert "<span" not in out[-1].text
     assert out[-1].text == "Net margin 12.3%"
+
+
+@pytest.mark.asyncio
+async def test_session_presents_x_forwarded_proto_header():
+    # The co-located backend force-redirects HTTP->HTTPS unless the request looks already-secure,
+    # so the client must present X-Forwarded-Proto: https on its plain-HTTP loopback call. The
+    # optional Bearer key, when set, must still be sent alongside it.
+    client = FinSearchClient("http://x", "k", 1.0, "m")
+    try:
+        session = await client._ensure_session()
+        assert session.headers.get("X-Forwarded-Proto") == "https"
+        assert session.headers.get("Authorization") == "Bearer k"
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_refuses_redirect_and_reraises():
+    # With allow_redirects=False a 3xx (e.g. Django's SSL redirect to https on our plain-HTTP
+    # loopback call) must fail fast as a ClientError — never be followed into a hanging TLS
+    # handshake. Nothing streamed, so it re-raises and the handler shows the friendly error.
+    resp = _FakeResp(_FakeContent([]), status=301,
+                     headers={"Location": "https://localhost:8000/x"})
+    client = FinSearchClient("http://x", None, 1.0, "m")
+    client._session = _FakeSession(resp)
+    with pytest.raises(aiohttp.ClientError):
+        await _drain(client)

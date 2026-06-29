@@ -93,7 +93,14 @@ class FinSearchClient:
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
-            headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+            # FINSEARCH_API_BASE points at the co-located backend over a plain-HTTP loopback, but
+            # the backend (Django SECURE_SSL_REDIRECT) 301-redirects any request it doesn't deem
+            # secure. The edge proxy stamps X-Forwarded-Proto for browser traffic; we present it
+            # too so this direct loopback call is treated as already-HTTPS and served — not bounced
+            # into an https:// redirect that would strand us in a doomed TLS handshake.
+            headers = {"X-Forwarded-Proto": "https"}
+            if self._api_key:
+                headers["Authorization"] = f"Bearer {self._api_key}"
             self._session = aiohttp.ClientSession(timeout=self._timeout, headers=headers)
         return self._session
 
@@ -110,8 +117,15 @@ class FinSearchClient:
         session = await self._ensure_session()
         acc, done, final = [], False, {}
         try:
-            async with session.get(url) as resp:
+            # allow_redirects=False: we already assert HTTPS via the X-Forwarded-Proto header, so a
+            # 3xx here means the backend is misrouting this client. Following it (e.g. http->https on
+            # a plain-HTTP port) strands us in a ~60s TLS handshake before it aborts — refuse it and
+            # fail fast into the friendly error instead.
+            async with session.get(url, allow_redirects=False) as resp:
                 resp.raise_for_status()
+                if resp.status >= 300:
+                    raise aiohttp.ClientError(
+                        f"unexpected {resp.status} redirect to {resp.headers.get('Location')!r}")
                 # INVARIANT: resp.content yields ONE line per iteration (aiohttp readline),
                 # so each iter_sse_data() sees a single SSE event and the break-on-done below
                 # cannot strand a sibling content frame. Do NOT switch to iter_chunked()/iter_any()
