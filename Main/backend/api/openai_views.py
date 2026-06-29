@@ -72,6 +72,15 @@ def _authenticate_request(request: HttpRequest) -> Optional[JsonResponse]:
     """
     api_key = os.getenv('FINGPT_API_KEY')
     if not api_key:
+        if getattr(settings, 'REQUIRE_FINGPT_API_KEY', False):
+            logger.error(
+                "FINGPT_API_KEY is not set but REQUIRE_FINGPT_API_KEY is True; "
+                "refusing /v1/* requests (fail closed)."
+            )
+            return JsonResponse(
+                {'error': {'message': 'Server authentication is misconfigured.', 'type': 'server_error'}},
+                status=503
+            )
         # No API key configured — authentication disabled (dev mode)
         return None
 

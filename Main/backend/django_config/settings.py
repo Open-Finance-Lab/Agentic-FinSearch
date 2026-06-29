@@ -156,6 +156,15 @@ SECURE_REDIRECT_EXEMPT = [r'^health/?$']
 
 API_RATE_LIMIT = os.getenv('API_RATE_LIMIT', '600/h')
 
+# FinGPT API authentication.
+# When FINGPT_API_KEY is set, all /v1/* endpoints require:
+#     Authorization: Bearer <FINGPT_API_KEY>
+# REQUIRE_FINGPT_API_KEY makes auth fail closed: when True, a MISSING key returns
+# HTTP 503 instead of silently disabling authentication. False for local dev;
+# settings_prod forces it to True.
+FINGPT_API_KEY = os.getenv('FINGPT_API_KEY', '')
+REQUIRE_FINGPT_API_KEY = os.getenv('REQUIRE_FINGPT_API_KEY', 'False').strip().lower() in ('true', '1', 't')
+
 # Trusted reverse-proxy peers (P0 Root C.1). get_client_ip() only honors
 # X-Real-IP / X-Forwarded-For when REMOTE_ADDR is one of these; otherwise it
 # uses REMOTE_ADDR so a direct client cannot spoof its source IP.

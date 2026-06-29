@@ -5,11 +5,12 @@ bind = f"0.0.0.0:{os.getenv('PORT', '8000')}"
 
 workers = int(os.getenv('GUNICORN_WORKERS', '2'))
 worker_class = 'gthread'
+threads = int(os.getenv('GUNICORN_THREADS', '4'))
 worker_connections = int(os.getenv('GUNICORN_WORKER_CONNECTIONS', '5'))
 max_requests = int(os.getenv('GUNICORN_MAX_REQUESTS', '200'))
 max_requests_jitter = 50
 
-timeout = int(os.getenv('GUNICORN_TIMEOUT', '600'))
+timeout = int(os.getenv('GUNICORN_TIMEOUT', '120'))
 graceful_timeout = 30
 keepalive = 5
 

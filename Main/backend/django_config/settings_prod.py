@@ -58,6 +58,20 @@ if not SECRET_KEY or 'django-insecure' in SECRET_KEY:
         "Generate one with: python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())'"
     )
 
+# Authentication must be enforced in production. Fail closed: refuse to boot
+# without a key rather than silently serving the LLM unauthenticated.
+# DEPLOY PRECONDITION: FINGPT_API_KEY MUST already be present in the live
+# environment (.env.production / secrets store) BEFORE this release ships, or
+# gunicorn will exit on startup with ImproperlyConfigured.
+REQUIRE_FINGPT_API_KEY = True
+FINGPT_API_KEY = os.getenv('FINGPT_API_KEY')
+if not FINGPT_API_KEY:
+    raise ImproperlyConfigured(
+        "FINGPT_API_KEY must be set in production so /v1/* endpoints require "
+        "'Authorization: Bearer <key>'. Generate a strong random value and set "
+        "it in the deployment environment BEFORE deploying this release."
+    )
+
 DATABASES = {}
 
 # Counter store for the agent budget (api/agent_budget.py) and django-ratelimit.
