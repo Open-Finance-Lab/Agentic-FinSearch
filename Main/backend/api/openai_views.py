@@ -122,7 +122,7 @@ def _merge_domains_into_preferred_links(
 
 
 @csrf_exempt
-@ratelimit(key='ip', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
 def models_list(request: HttpRequest) -> JsonResponse:
     """
     List available models in OpenAI format.
@@ -154,7 +154,7 @@ def models_list(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@ratelimit(key='ip', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
 def chat_completions(request: HttpRequest) -> JsonResponse:
     """
     Create chat completion.
