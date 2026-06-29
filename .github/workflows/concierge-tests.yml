@@ -4,6 +4,12 @@ on:
     paths: ["Concierge/**", ".github/workflows/concierge-tests.yml"]
   pull_request:
     paths: ["Concierge/**", ".github/workflows/concierge-tests.yml"]
+  workflow_dispatch:
+
+env:
+  DROPLET_HOST: agenticfinsearch.org
+  DROPLET_USER: deploy
+  CONCIERGE_HOME: /home/deploy/fingpt/concierge
 
 jobs:
   test:
@@ -12,6 +18,12 @@ jobs:
     # the sibling heartbeat-tests.yml. This job only checks out + runs tests — no writes.
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.13 matches the droplet (Fedora 42 ships it — prod parity); 3.12 keeps the
+        # dev box covered. Both legs must pass before deploy runs (deploy needs: test).
+        python-version: ["3.12", "3.13"]
     defaults:
       run:
         working-directory: Concierge
@@ -19,6 +31,127 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
+          # Cache the pip download/wheel dir, keyed on the requirements hash + Python
+          # version, so each matrix leg skips re-downloading deps on a cache hit.
+          cache: pip
+          cache-dependency-path: Concierge/requirements.txt
       - run: pip install -r requirements.txt
       - run: python -m pytest -q
+
+  deploy:
+    # Runs only for commits ON main: a normal push/merge to main, or a manual
+    # workflow_dispatch targeting main (which intentionally re-deploys main HEAD and
+    # briefly restarts the live bot). PR runs (ref refs/pull/N/merge) and dispatches on
+    # any non-main branch are skipped — non-main code can never reach the droplet.
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    needs: test
+    # Serialize deploys so two merges in quick succession can't land out of order and
+    # leave the droplet on the older commit.
+    concurrency:
+      group: concierge-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+
+    steps:
+      - name: Determine deploy eligibility
+        id: deploy-gate
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${DEPLOY_SSH_KEY:-}" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Unlike the heartbeat (a single stdlib script), Concierge is a package + a
+      # long-lived systemd --user service. The droplet fetches the whole repo tree at
+      # this exact commit (public repo; the immutable commit SHA is the integrity
+      # anchor), refreshes the code in place while preserving the venv (.venv/) and the
+      # durable identity store (data/), reinstalls deps idempotently, byte-compiles as a
+      # gate, re-installs the unit (so unit edits ship too), then restarts the service.
+      # The env file (.env.concierge, holds the bot token) is droplet config and stays
+      # manually managed — see "Deploy" in Concierge/README.md.
+      - name: Deploy Concierge to droplet
+        if: ${{ steps.deploy-gate.outputs.enabled == 'true' }}
+        # SHA-pinned (supply-chain): this action receives the prod SSH deploy key, so a
+        # moved/compromised tag must not be able to redirect it. 334f925 == v0.1.10.
+        uses: appleboy/ssh-action@334f9259f2f8eb3376d33fa4c684fff373f2c2a6
+        env:
+          REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        with:
+          host: ${{ env.DROPLET_HOST }}
+          username: ${{ env.DROPLET_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: 22
+          envs: REPO,COMMIT_SHA,CONCIERGE_HOME
+          script: |
+            set -euo pipefail
+            # systemctl --user needs the session bus addressable from this non-login shell.
+            export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+            tmp="$(mktemp -d)"
+            trap 'rm -rf "$tmp"' EXIT
+            curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
+              "https://codeload.github.com/$REPO/tar.gz/$COMMIT_SHA" -o "$tmp/src.tgz"
+            tar -xzf "$tmp/src.tgz" -C "$tmp"
+            src="$(echo "$tmp"/*/Concierge)"
+            test -f "$src/concierge/__main__.py"   # sanity: package present at this commit
+            # BUILD GATE — validate the STAGED tree before touching the live dir, so a
+            # broken commit can never replace the running code. pip installs the new
+            # requirements into the persistent venv; compileall recurses every module (a
+            # py_compile glob would skip subpackages). Both run against $src and, under
+            # set -e, abort here — with the live tree still intact — if either fails.
+            "$CONCIERGE_HOME/.venv/bin/python" -m pip install -q -r "$src/requirements.txt"
+            "$CONCIERGE_HOME/.venv/bin/python" -m compileall -q "$src/concierge"
+            # Refresh code: clear the deploy dir EXCEPT runtime state (.venv/ = interpreter
+            # + deps, data/ = durable identity store), then lay down the validated tree.
+            # Wiping the whole dir — not just the three code subdirs — means upstream file
+            # renames and deletions are reflected, not left as stragglers. The env file
+            # lives outside this dir (/home/deploy/fingpt/envs/.env.concierge), untouched.
+            find "$CONCIERGE_HOME" -mindepth 1 -maxdepth 1 \
+              ! -name .venv ! -name data -exec rm -rf {} +
+            cp -a "$src/." "$CONCIERGE_HOME/"
+            find "$CONCIERGE_HOME" \( -path "$CONCIERGE_HOME/.venv" -o -path "$CONCIERGE_HOME/data" \) -prune \
+              -o -type d -exec chmod 755 {} +
+            find "$CONCIERGE_HOME" \( -path "$CONCIERGE_HOME/.venv" -o -path "$CONCIERGE_HOME/data" \) -prune \
+              -o -type f -exec chmod 644 {} +
+            # -D creates the unit dir on a fresh droplet; enable is idempotent and marks the
+            # unit wanted at user-systemd startup (reboot survival also needs linger, which
+            # is already enabled for the deploy user on this droplet).
+            install -D -m 644 "$CONCIERGE_HOME/systemd/concierge.service" "$HOME/.config/systemd/user/concierge.service"
+            systemctl --user daemon-reload
+            systemctl --user enable concierge.service
+            # Stamp the cutover instant so the smoke test reads only THIS run's logs, never
+            # a prior run's stale "connected to Gateway" line (epoch math = POSIX-portable).
+            restart_epoch="$(date +%s)"
+            systemctl --user restart concierge.service
+            # Smoke test: the unit must stay active AND the bot must actually reach the
+            # Discord Gateway (a clean import can still fail to authenticate). Poll up to
+            # ~30s — the Gateway handshake lands a few seconds after the process starts.
+            deadline=$((restart_epoch + 30))
+            while [ "$(date +%s)" -lt "$deadline" ]; do
+              if ! systemctl --user is-active --quiet concierge.service; then
+                echo "FAIL: concierge.service is not active after restart" >&2
+                journalctl --user -u concierge.service --since "@$restart_epoch" -n 40 --no-pager || true
+                exit 1
+              fi
+              # Capture then match with a pipe-free `case`: piping journalctl into grep -q
+              # would hand journalctl a SIGPIPE the moment grep matches, and under pipefail
+              # that 141 would mask a real match as a false-negative deploy failure.
+              logs="$(journalctl --user -u concierge.service --since "@$restart_epoch" --no-pager 2>/dev/null || true)"
+              case "$logs" in
+                *"connected to Gateway"*)
+                  journalctl --user -u concierge.service --since "@$restart_epoch" -n 8 --no-pager || true
+                  echo "Deployed Concierge @ $COMMIT_SHA — active and connected to the Gateway."
+                  exit 0 ;;
+              esac
+              sleep 2
+            done
+            echo "FAIL: service active but no Gateway connection within 30s" >&2
+            journalctl --user -u concierge.service --since "@$restart_epoch" -n 40 --no-pager || true
+            exit 1
