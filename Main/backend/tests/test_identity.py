@@ -9,7 +9,12 @@ from django.test import RequestFactory, SimpleTestCase, override_settings
 from django_ratelimit import ALL
 from django_ratelimit.decorators import ratelimit
 
-from api.identity import get_client_ip, get_request_identity, ratelimit_key
+from api.identity import (
+    _trusted_networks,
+    get_client_ip,
+    get_request_identity,
+    ratelimit_key,
+)
 
 
 class GetClientIpTests(SimpleTestCase):
@@ -50,6 +55,18 @@ class TrustedProxyCidrTests(SimpleTestCase):
 
     def setUp(self):
         self.factory = RequestFactory()
+        # _trusted_networks is lru_cache'd and emits the default-route (/0)
+        # warning only on a cache MISS. That cache persists across tests in the
+        # same process, so if any earlier test parsed the same TRUSTED_PROXIES
+        # tuple first, the warm entry would suppress the warning and make the
+        # assertLogs cases below fail in a way that depends on suite ordering.
+        # Clear it so every test starts from a cold, deterministic cache, and
+        # register a cleanup so we also leave it cold on EXIT -- the warn-once
+        # test below ends with a warm ('0.0.0.0/0',) entry, and addCleanup keeps
+        # this class from leaking that suppression to any later cross-module test
+        # even if an assertion raises mid-test.
+        _trusted_networks.cache_clear()
+        self.addCleanup(_trusted_networks.cache_clear)
 
     def _req(self, remote_addr, real_ip="198.51.100.7"):
         req = self.factory.get("/x")
@@ -128,6 +145,21 @@ class TrustedProxyCidrTests(SimpleTestCase):
             self.assertEqual(get_client_ip(self._req("203.0.113.5")), "203.0.113.5")
         self.assertFalse(any("10.0.0.0/0" in m for m in logs.output))
 
+    def test_default_route_warning_is_warn_once_until_cache_cleared(self):
+        # Documents the lru_cache warn-once contract that setUp's cache_clear()
+        # depends on: the /0 warning fires on the first parse of a tuple, is
+        # SUPPRESSED on the cached re-parse, and fires again after a clear. This
+        # is exactly why a warm cache from another test could otherwise swallow
+        # the assertLogs warnings above -- guards against someone making the
+        # warning unconditional or removing the warn-once behavior.
+        with self.assertLogs("api.identity", level="WARNING"):
+            _trusted_networks(("0.0.0.0/0",))            # cold miss -> warns
+        with self.assertNoLogs("api.identity", level="WARNING"):
+            _trusted_networks(("0.0.0.0/0",))            # cache hit -> silent
+        _trusted_networks.cache_clear()
+        with self.assertLogs("api.identity", level="WARNING"):
+            _trusted_networks(("0.0.0.0/0",))            # cold again -> warns
+
     @override_settings(TRUSTED_PROXIES=("127.0.0.1",))
     def test_non_ip_x_real_ip_falls_back_to_remote_addr(self):
         # A trusted proxy that forwards a non-IP X-Real-IP must not have that
@@ -170,6 +202,11 @@ class RatelimitKeyBucketTests(SimpleTestCase):
 
     def setUp(self):
         cache.clear()
+        # Reset the module's other process-global cache for symmetry with
+        # cache.clear() above. This class asserts no logs and uses the default
+        # (/32, /128) TRUSTED_PROXIES, so warm vs cold is observationally
+        # identical here -- isolation hygiene, not load-bearing.
+        _trusted_networks.cache_clear()
         self.factory = RequestFactory()
 
     def _proxied(self, real_ip):

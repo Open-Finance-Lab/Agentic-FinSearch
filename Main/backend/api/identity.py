@@ -53,7 +53,9 @@ def _trusted_networks(trusted: tuple) -> tuple:
         if net.prefixlen == 0:
             # Do NOT interpolate the entry value -- logging a settings-derived
             # value trips CodeQL py/clear-text-logging-sensitive-data, and a
-            # /0 is unambiguous anyway.
+            # /0 is unambiguous anyway. lru_cache means this fires once per
+            # unique config (on the miss), not per request -- a deliberate
+            # warn-once so a misconfig surfaces without flooding the log.
             logger.warning(
                 "Ignoring a default-route TRUSTED_PROXIES entry (0.0.0.0/0 or "
                 "::/0): it would trust every peer. Use the narrowest covering "
@@ -64,7 +66,7 @@ def _trusted_networks(trusted: tuple) -> tuple:
     return tuple(networks)
 
 
-def _is_trusted_proxy(remote_addr: str, trusted) -> bool:
+def _is_trusted_proxy(remote_addr: str, trusted: tuple) -> bool:
     """True when remote_addr falls inside any trusted-proxy network.
 
     A blank or non-IP remote_addr is never trusted, so a peer we cannot place
@@ -81,6 +83,10 @@ def _is_trusted_proxy(remote_addr: str, trusted) -> bool:
     # the unwrapped IPv4 too so a v4 CIDR still matches it. (ip_address-in-
     # ip_network is False across families, so without this the SNAT proxy would
     # read as untrusted and collapse every caller into one rate-limit bucket.)
+    # Only the standard IPv4-mapped form is unwrapped; exotic embeddings
+    # (6to4 2002::/16, Teredo, the deprecated IPv4-compatible ::a.b.c.d) are
+    # intentionally NOT auto-unwrapped -- they should never be a proxy peer, so
+    # they fail closed against a v4 CIDR rather than silently gaining trust.
     candidates = [addr]
     mapped = getattr(addr, "ipv4_mapped", None)
     if mapped is not None:

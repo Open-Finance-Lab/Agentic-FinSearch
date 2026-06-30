@@ -183,6 +183,12 @@ REQUIRE_FINGPT_API_KEY = os.getenv('REQUIRE_FINGPT_API_KEY', 'False').strip().lo
 # reaches the backend through a rootless-Podman SNAT address rather than a
 # fixed peer IP. Use the NARROWEST covering CIDR: a public or default-route
 # range (0.0.0.0/0, ::/0) would trust every peer and is refused by identity.py.
+# A /24 also trusts every OTHER container on that network -- pin the proxy/api
+# --ip and trust its /32 to admit only the proxy hop (see production_setup.md
+# §6). With a host-service proxy (Variant A) the loopback-only publish is the
+# trust boundary (the published-port hop is SNAT'd to the api's own bridge IP);
+# with a containerized proxy (Variant B) REMOTE_ADDR is the proxy's real bridge
+# IP, so keep this narrow.
 TRUSTED_PROXIES = tuple(
     p.strip()
     for p in os.getenv('TRUSTED_PROXIES', '127.0.0.1,::1').split(',')

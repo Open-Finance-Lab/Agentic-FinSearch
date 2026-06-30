@@ -138,7 +138,9 @@ podman run -d \
 - Keep Gunicorn bound to `0.0.0.0:8000` inside the container.
 - Publish the host port to loopback only (`-p 127.0.0.1:8000:8000`) so the
   container is reachable exclusively through the front reverse proxy, never
-  directly from the network.
+  directly from the network. Under rootless-Podman SNAT this loopback bind is
+  the actual trust boundary behind `TRUSTED_PROXIES` (see the Client IP section
+  below), so do not relax it to `0.0.0.0`.
 - Terminate TLS using either:
   - A reverse proxy (Caddy, Nginx, Traefik) — either a **host system service**
     or a **container in the same Podman network**, or
@@ -174,6 +176,43 @@ any client-supplied copies.
 > fingpt-api` for the logged client/remote address, and set `TRUSTED_PROXIES` to
 > the covering CIDR (`podman network inspect fingpt-net`). CIDR matching is what
 > makes this robust to the dynamic SNAT address.
+
+**Where the trust boundary sits depends on the variant.** In **Variant A**
+(host-service Caddy — this droplet's topology) every request reaches the backend
+through the loopback-published port and is SNAT'd to the API container's *own*
+(dynamic) bridge IP, so the in-container `REMOTE_ADDR` cannot tell the proxy from
+any other loopback caller. There the load-bearing control is publishing the API
+to **loopback only** (`-p 127.0.0.1:8000:8000`, §4): nothing but the local front
+proxy can reach the published port, and `TRUSTED_PROXIES` is only as strong as
+that bind. Were the API ever published on `0.0.0.0`, an external caller's SNAT'd
+source would also land inside the trusted subnet and could forge `X-Real-IP` to
+evade rate limiting and poison request logs — so treat the loopback bind as
+security, not hygiene. In **Variant B** (containerized Caddy) the proxy reaches
+`fingpt-api:8000` *directly* over `fingpt-net` and is **not** SNAT'd, so its
+`REMOTE_ADDR` is Caddy's own distinct bridge IP — a real discriminator that
+`TRUSTED_PROXIES` gates. There that filtering *is* the control on the peer→API
+path (the loopback publish still keeps *external* clients off the published port,
+but it does not gate other containers already on `fingpt-net`); keep
+`TRUSTED_PROXIES` narrow and never treat it as a no-op.
+
+**Tightening the trust set (optional, more rigid).** A `/24` trusts the whole
+podman network, so any *other* container on `fingpt-net` (a sidecar, an MCP
+server) could forge forwarding headers if compromised — container-to-container
+traffic is **not** SNAT'd, so such a peer presents its own bridge IP, which the
+`/24` still covers. To admit only the proxy hop, pin the relevant container's
+address with `--ip` and trust that single `/32`:
+
+- **Variant A (host-service Caddy):** the loopback hop is SNAT'd to the *API*
+  container's own bridge IP, so pin the API container (`podman run … --ip
+  10.89.0.10`) and set `TRUSTED_PROXIES=10.89.0.10/32`.
+- **Variant B (container Caddy):** Caddy reaches the backend directly over the
+  network, so *Caddy's* own bridge IP is the peer — pin Caddy (`--ip`) and trust
+  that `/32`.
+
+The `/24` is the robust-to-dynamic-IP convenience (no `--ip` pinning needed); the
+`/32` is the tighter posture that excludes same-network peers. Both are safe
+behind the loopback publish above — choose based on how much you trust the other
+containers sharing `fingpt-net`.
 
 Pick the variant that matches how Caddy runs:
 
