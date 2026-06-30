@@ -119,6 +119,15 @@ class TrustedProxyCidrTests(SimpleTestCase):
             self.assertEqual(get_client_ip(self._req("2001:db8::1")), "2001:db8::1")
         self.assertTrue(any("::/0" in m for m in logs.output))
 
+    @override_settings(TRUSTED_PROXIES=("10.0.0.0/0",))  # normalizes to 0.0.0.0/0
+    def test_default_route_warning_does_not_echo_raw_entry(self):
+        # The /0 refusal must NOT log the raw config value (CodeQL
+        # py/clear-text-logging-sensitive-data taints settings reads). A static
+        # message is enough -- here the entry "10.0.0.0/0" must not appear.
+        with self.assertLogs("api.identity", level="WARNING") as logs:
+            self.assertEqual(get_client_ip(self._req("203.0.113.5")), "203.0.113.5")
+        self.assertFalse(any("10.0.0.0/0" in m for m in logs.output))
+
     @override_settings(TRUSTED_PROXIES=("127.0.0.1",))
     def test_non_ip_x_real_ip_falls_back_to_remote_addr(self):
         # A trusted proxy that forwards a non-IP X-Real-IP must not have that

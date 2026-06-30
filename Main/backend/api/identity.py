@@ -51,11 +51,13 @@ def _trusted_networks(trusted: tuple) -> tuple:
         except ValueError:
             continue
         if net.prefixlen == 0:
+            # Do NOT interpolate the entry value -- logging a settings-derived
+            # value trips CodeQL py/clear-text-logging-sensitive-data, and a
+            # /0 is unambiguous anyway.
             logger.warning(
-                "Ignoring TRUSTED_PROXIES entry %r: a default route would trust "
-                "every peer. Use the narrowest covering CIDR (e.g. the podman "
-                "network subnet), never 0.0.0.0/0 or ::/0.",
-                entry,
+                "Ignoring a default-route TRUSTED_PROXIES entry (0.0.0.0/0 or "
+                "::/0): it would trust every peer. Use the narrowest covering "
+                "CIDR, e.g. the podman network subnet."
             )
             continue
         networks.append(net)
