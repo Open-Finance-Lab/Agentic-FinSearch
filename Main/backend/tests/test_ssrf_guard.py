@@ -40,6 +40,12 @@ class _FakeResp:
         for chunk in self._chunks:
             yield chunk
 
+    @property
+    def content(self):
+        if self._content is not None:
+            return self._content
+        return b"".join(self._chunks)
+
     def close(self):
         self.closed = True
 
@@ -163,6 +169,10 @@ class SafeGetTests(SimpleTestCase):
 
 
 class RouteGuardTests(SimpleTestCase):
+    """The async Playwright route guard must fulfill in-browser requests from
+    the SSRF-pinned ``safe_get`` (never ``route.continue_()``), so Chromium
+    never opens its own DNS-rebind-vulnerable socket."""
+
     def _make_page(self, captured):
         async def fake_route(pattern, handler):
             captured["handler"] = handler
@@ -170,13 +180,24 @@ class RouteGuardTests(SimpleTestCase):
         page.route = fake_route
         return page
 
-    @patch("datascraper.ssrf_guard.socket.getaddrinfo")
-    def test_route_guard_aborts_blocked_request(self, m_gai):
-        m_gai.return_value = _gai("127.0.0.1")
+    _BROWSER_HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "Host": "example.com",
+    }
+
+    def _route(self, url, method="GET"):
         route = MagicMock()
-        route.request.url = "http://evil.example.test/x"
+        route.request.url = url
+        route.request.method = method
+        route.request.headers = dict(self._BROWSER_HEADERS)
         route.abort = AsyncMock()
+        route.fulfill = AsyncMock()
         route.continue_ = AsyncMock()
+        return route
+
+    def _drive(self, route):
         captured = {}
         page = self._make_page(captured)
 
@@ -185,26 +206,141 @@ class RouteGuardTests(SimpleTestCase):
             await captured["handler"](route)
 
         asyncio.run(run())
+
+    @patch("datascraper.ssrf_guard.safe_get")
+    def test_route_guard_aborts_blocked_request(self, m_get):
+        m_get.side_effect = UnsafeURLError("blocked")
+        route = self._route("http://evil.example.test/x")
+        self._drive(route)
         route.abort.assert_awaited_once()
+        route.fulfill.assert_not_awaited()
+        # Never delegate the fetch back to Chromium (would re-resolve DNS).
         route.continue_.assert_not_awaited()
 
-    @patch("datascraper.ssrf_guard.socket.getaddrinfo")
-    def test_route_guard_allows_public_request(self, m_gai):
-        m_gai.return_value = _gai("93.184.216.34")
-        route = MagicMock()
-        route.request.url = "http://example.com/x"
-        route.abort = AsyncMock()
-        route.continue_ = AsyncMock()
-        captured = {}
-        page = self._make_page(captured)
-
-        async def run():
-            await ssrf_guard.install_route_guard(page)
-            await captured["handler"](route)
-
-        asyncio.run(run())
-        route.continue_.assert_awaited_once()
+    @patch("datascraper.ssrf_guard.safe_get")
+    def test_route_guard_fulfills_public_request_from_pinned_fetch(self, m_get):
+        resp = _FakeResp(
+            status_code=200,
+            headers={"Content-Type": "text/html", "Content-Encoding": "gzip"},
+        )
+        resp._content = b"<html>ok</html>"
+        m_get.return_value = resp
+        route = self._route("http://example.com/x")
+        self._drive(route)
+        route.fulfill.assert_awaited_once()
+        kwargs = route.fulfill.await_args.kwargs
+        self.assertEqual(kwargs["status"], 200)
+        self.assertEqual(kwargs["body"], b"<html>ok</html>")
+        # requests already decoded the body, so the encoding header must be
+        # stripped or Chromium would try to gunzip plaintext.
+        lowered = {k.lower() for k in kwargs["headers"]}
+        self.assertNotIn("content-encoding", lowered)
+        self.assertIn("content-type", lowered)
         route.abort.assert_not_awaited()
+        route.continue_.assert_not_awaited()
+        m_get.assert_called_once()
+        self.assertEqual(m_get.call_args.args[0], "http://example.com/x")
+
+    @patch("datascraper.ssrf_guard.safe_get")
+    def test_route_guard_forwards_browser_headers_to_pinned_fetch(self, m_get):
+        # The pinned fetch must present the browser's own User-Agent (the
+        # context deliberately sets a Chrome UA to avoid bot-gating); SSRF
+        # safety comes from IP-pinning, not from hiding the UA. Framing/encoding
+        # headers (Host, Accept-Encoding) are stripped so requests can
+        # re-derive Host and only negotiate encodings it decodes.
+        resp = _FakeResp(status_code=200, headers={"Content-Type": "text/html"})
+        resp._content = b"<html>ok</html>"
+        m_get.return_value = resp
+        route = self._route("http://example.com/x")
+        self._drive(route)
+        m_get.assert_called_once()
+        sent = m_get.call_args.kwargs.get("headers")
+        self.assertIsNotNone(sent, "safe_get must be called with forwarded headers")
+        lowered = {k.lower(): v for k, v in sent.items()}
+        self.assertIn("user-agent", lowered)
+        self.assertIn("Chrome", lowered["user-agent"])
+        self.assertNotIn("host", lowered)
+        self.assertNotIn("accept-encoding", lowered)
+
+    @patch("datascraper.ssrf_guard.safe_get")
+    def test_route_guard_aborts_non_get(self, m_get):
+        # safe_get is GET-only; non-GET in-browser requests fail closed.
+        route = self._route("http://example.com/api", method="POST")
+        self._drive(route)
+        route.abort.assert_awaited_once()
+        route.fulfill.assert_not_awaited()
+        m_get.assert_not_called()
+
+
+class SyncRouteGuardTests(SimpleTestCase):
+    """install_route_guard_sync mirrors the async guard for the sync
+    Playwright fallback (scrape_with_playwright)."""
+
+    def _page(self, captured):
+        page = MagicMock()
+
+        def route(pattern, handler):
+            captured["handler"] = handler
+
+        page.route = route
+        return page
+
+    def _route(self, url, method="GET"):
+        route = MagicMock()
+        route.request.url = url
+        route.request.method = method
+        route.request.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Host": "example.com",
+        }
+        return route
+
+    def _drive(self, route):
+        captured = {}
+        page = self._page(captured)
+        ssrf_guard.install_route_guard_sync(page)
+        captured["handler"](route)
+
+    @patch("datascraper.ssrf_guard.safe_get")
+    def test_sync_guard_aborts_blocked_request(self, m_get):
+        m_get.side_effect = UnsafeURLError("blocked")
+        route = self._route("http://evil.example.test/x")
+        self._drive(route)
+        route.abort.assert_called_once()
+        route.fulfill.assert_not_called()
+
+    @patch("datascraper.ssrf_guard.safe_get")
+    def test_sync_guard_fulfills_public_request(self, m_get):
+        resp = _FakeResp(status_code=200, headers={"Content-Type": "text/html"})
+        resp._content = b"hi"
+        m_get.return_value = resp
+        route = self._route("http://example.com/x")
+        self._drive(route)
+        route.fulfill.assert_called_once()
+        self.assertEqual(route.fulfill.call_args.kwargs["body"], b"hi")
+        route.abort.assert_not_called()
+
+    @patch("datascraper.ssrf_guard.safe_get")
+    def test_sync_guard_forwards_browser_user_agent(self, m_get):
+        resp = _FakeResp(status_code=200, headers={"Content-Type": "text/html"})
+        resp._content = b"hi"
+        m_get.return_value = resp
+        route = self._route("http://example.com/x")
+        self._drive(route)
+        sent = m_get.call_args.kwargs.get("headers")
+        self.assertIsNotNone(sent)
+        lowered = {k.lower(): v for k, v in sent.items()}
+        self.assertIn("Chrome", lowered.get("user-agent", ""))
+        self.assertNotIn("host", lowered)
+        self.assertNotIn("accept-encoding", lowered)
+
+    @patch("datascraper.ssrf_guard.safe_get")
+    def test_sync_guard_aborts_non_get(self, m_get):
+        route = self._route("http://example.com/api", method="POST")
+        self._drive(route)
+        route.abort.assert_called_once()
+        m_get.assert_not_called()
 
 
 class AssertSafePageUrlTests(SimpleTestCase):

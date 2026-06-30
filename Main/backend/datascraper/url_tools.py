@@ -210,6 +210,11 @@ def scrape_with_playwright(url: str) -> str:
                 )
 
                 page = context.new_page()
+                # Pin EVERY in-browser request (navigation + subresources) to a
+                # validated IP via safe_get, closing the DNS-rebinding hole the
+                # seed-only validate_fetch_url checks leave open. Must precede
+                # the first navigation.
+                ssrf_guard.install_route_guard_sync(page)
 
                 logger.info(f"Playwright scraping: {url}")
                 page.goto(url, timeout=30000, wait_until="domcontentloaded")

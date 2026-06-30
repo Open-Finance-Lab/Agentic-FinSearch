@@ -7,14 +7,26 @@ IPs. The connection is pinned to the validated IP so a DNS-rebinding answer
 between validation and connect cannot redirect us to a private address, and the
 response body is byte-capped to defeat huge-response resource exhaustion.
 
+The Playwright route guards close the same DNS-rebinding hole IN-BROWSER: rather
+than re-validate and then hand the request back to Chromium (which would resolve
+DNS a SECOND time on its own socket — the rebinding window), they fetch the
+request through ``safe_get`` (IP-pinned, byte-capped) and ``route.fulfill`` the
+buffered response, so Chromium never opens its own connection for the HTTP(S)
+requests ``page.route`` intercepts. Non-GET and non-http(s) in-browser requests
+fail closed (aborted), as ``safe_get`` only serves pinned GETs. (WebSocket /
+WebRTC are NOT intercepted by ``page.route`` and remain a separate, pre-existing
+gap — out of scope here.)
+
 Public contract (do not rename):
     UnsafeURLError
     validate_fetch_url(url) -> str
     safe_get(url, headers=None, timeout=15, max_bytes=MAX_FETCH_BYTES,
              max_redirects=MAX_REDIRECTS) -> requests.Response
     install_route_guard(page)      (async, Playwright)
+    install_route_guard_sync(page) (sync, Playwright)
     assert_safe_page_url(page)     (async, Playwright)
 """
+import asyncio
 import ipaddress
 import logging
 import os
@@ -35,6 +47,26 @@ MAX_REDIRECTS = int(os.getenv("SCRAPE_MAX_REDIRECTS", "3"))
 _ALLOWED_SCHEMES = ("http", "https")
 _REDIRECT_STATUSES = (301, 302, 303, 307, 308)
 _STREAM_CHUNK_BYTES = 65536
+
+# Response headers that must NOT be forwarded when fulfilling a Playwright route
+# from a safe_get response: requests has already decoded the body (so a stale
+# Content-Encoding would make Chromium try to gunzip plaintext), and the framing
+# headers no longer match the buffered body we hand back.
+_NON_FORWARDABLE_HEADERS = frozenset(
+    {"content-encoding", "content-length", "transfer-encoding", "connection"}
+)
+
+# Request headers we do NOT forward from Chromium into the pinned safe_get:
+# host/content-length/connection/transfer-encoding are re-derived by requests,
+# and accept-encoding is dropped so requests only negotiates encodings it can
+# decode (br/zstd would otherwise come back compressed but be handed to Chromium
+# with the Content-Encoding header stripped -> garbage). The browser's
+# User-Agent / Accept / Accept-Language / Referer / Cookie ARE forwarded so the
+# pinned fetch is indistinguishable to the origin (bot-gated pages keep working).
+_NON_FORWARDABLE_REQUEST_HEADERS = frozenset(
+    {"host", "content-length", "content-encoding", "transfer-encoding",
+     "connection", "accept-encoding"}
+)
 
 
 class UnsafeURLError(ValueError):
@@ -221,17 +253,70 @@ def safe_get(
     )
 
 
+def _fulfill_headers(response: requests.Response) -> dict:
+    """Headers to forward when fulfilling a Playwright route from a ``safe_get``
+    response, dropping the encoding/framing headers that no longer match the
+    already-decoded, re-buffered body (see ``_NON_FORWARDABLE_HEADERS``)."""
+    return {
+        k: v
+        for k, v in response.headers.items()
+        if k.lower() not in _NON_FORWARDABLE_HEADERS
+    }
+
+
+def _should_proxy(route) -> bool:
+    """True only for GET http(s) requests, which ``safe_get`` can serve pinned.
+    Everything else (POST/PUT/..., ws://, data:, blob:) fails closed."""
+    request = route.request
+    if request.method != "GET":
+        return False
+    return urlparse(request.url).scheme in _ALLOWED_SCHEMES
+
+
+def _forward_headers(route) -> dict:
+    """The browser request's headers to replay through ``safe_get``, minus the
+    framing/encoding headers requests must control (see
+    ``_NON_FORWARDABLE_REQUEST_HEADERS``). Forwarding the browser's own
+    User-Agent/Accept/etc. keeps the IP-pinned fetch indistinguishable to the
+    origin, so bot-gated pages behave as they did before fulfill-based pinning."""
+    try:
+        headers = dict(route.request.headers)
+    except Exception:
+        return {}
+    return {
+        k: v
+        for k, v in headers.items()
+        if k.lower() not in _NON_FORWARDABLE_REQUEST_HEADERS
+    }
+
+
 async def install_route_guard(page) -> None:
-    """Register a Playwright route handler on ALL URLs that aborts any request
-    (top-level navigation OR subresource) whose host resolves to a blocked IP.
+    """Register an async Playwright route handler on ALL URLs that fetches each
+    intercepted in-browser request (top-level navigation OR subresource) through
+    the IP-pinned, byte-capped ``safe_get`` and fulfills Chromium with the
+    buffered response. For these HTTP(S) requests Chromium therefore never opens
+    its own socket and cannot be redirected to a private address by a
+    DNS-rebinding answer.
+
     MUST be called BEFORE the first ``page.goto`` in every Playwright entrypoint
-    so EVERY in-browser navigation/subresource is re-validated, not just the
-    seed URL."""
+    so EVERY navigation/subresource is pinned, not just the seed URL. Non-GET and
+    non-http(s) requests fail closed (aborted). WebSocket/WebRTC are not routed
+    through ``page.route`` and are out of scope (see module docstring)."""
 
     async def _handler(route):
         request_url = route.request.url
+        if not _should_proxy(route):
+            await route.abort()
+            return
         try:
-            validate_fetch_url(request_url)
+            # safe_get is blocking; run it off the event loop. It validates,
+            # pins to the resolved IP, follows redirects re-validating each, and
+            # byte-caps the body — raising UnsafeURLError on any violation. The
+            # browser's headers (UA/Accept/...) are forwarded so the origin sees
+            # the same request Chromium would have made.
+            response = await asyncio.to_thread(
+                safe_get, request_url, headers=_forward_headers(route)
+            )
         except UnsafeURLError as exc:
             logger.warning(
                 "[ssrf_guard] aborting in-browser request to %s: %s",
@@ -240,9 +325,61 @@ async def install_route_guard(page) -> None:
             )
             await route.abort()
             return
-        await route.continue_()
+        except Exception as exc:  # network error, timeout, etc. — fail closed.
+            logger.warning(
+                "[ssrf_guard] fetch failed for in-browser request %s: %s",
+                request_url,
+                exc,
+            )
+            await route.abort()
+            return
+        await route.fulfill(
+            status=response.status_code,
+            headers=_fulfill_headers(response),
+            body=response.content,
+        )
 
     await page.route("**/*", _handler)
+
+
+def install_route_guard_sync(page) -> None:
+    """Synchronous twin of :func:`install_route_guard` for the sync Playwright
+    fallback (``url_tools.scrape_with_playwright``). Same guarantee: every
+    in-browser GET is fulfilled from the IP-pinned ``safe_get`` so Chromium never
+    re-resolves DNS on its own socket; non-GET / non-http(s) fail closed.
+
+    MUST be called BEFORE the first ``page.goto``."""
+
+    def _handler(route):
+        request_url = route.request.url
+        if not _should_proxy(route):
+            route.abort()
+            return
+        try:
+            response = safe_get(request_url, headers=_forward_headers(route))
+        except UnsafeURLError as exc:
+            logger.warning(
+                "[ssrf_guard] aborting in-browser request to %s: %s",
+                request_url,
+                exc,
+            )
+            route.abort()
+            return
+        except Exception as exc:  # network error, timeout, etc. — fail closed.
+            logger.warning(
+                "[ssrf_guard] fetch failed for in-browser request %s: %s",
+                request_url,
+                exc,
+            )
+            route.abort()
+            return
+        route.fulfill(
+            status=response.status_code,
+            headers=_fulfill_headers(response),
+            body=response.content,
+        )
+
+    page.route("**/*", _handler)
 
 
 async def assert_safe_page_url(page) -> None:

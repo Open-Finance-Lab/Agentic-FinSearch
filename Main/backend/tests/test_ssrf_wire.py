@@ -82,6 +82,50 @@ class PlaywrightFallbackSinkTests(SimpleTestCase):
         mock_sync_playwright.assert_not_called()
 
 
+class PlaywrightFallbackRouteGuardTests(SimpleTestCase):
+    """bug_004: scrape_with_playwright must install the SSRF route guard so
+    Chromium subresources are pinned, not only the seed + post-nav URL."""
+
+    def test_scrape_with_playwright_installs_sync_route_guard(self):
+        page = MagicMock()
+        page.url = "http://example.com/x"
+        ctx = MagicMock()
+        ctx.new_page.return_value = page
+        browser = MagicMock()
+        browser.new_context.return_value = ctx
+        p = MagicMock()
+        p.chromium.launch.return_value = browser
+        sp_cm = MagicMock()
+        sp_cm.__enter__.return_value = p
+
+        # Record whether the navigation had already happened at the instant the
+        # guard is installed. The guard MUST precede page.goto, else the seed
+        # navigation (and its initial-load subresources) go out on Chromium's
+        # own unpinned socket — re-opening the rebinding hole bug_004 closes.
+        # (scrape_with_playwright swallows exceptions, so we record-then-assert
+        # rather than raise inside the side_effect.)
+        order = {}
+
+        def _record_install(p):
+            order["goto_called_at_install"] = page.goto.called
+
+        with patch("datascraper.ssrf_guard.validate_fetch_url", side_effect=lambda u: u), \
+             patch("datascraper.ssrf_guard.install_route_guard_sync",
+                   side_effect=_record_install) as mock_guard, \
+             patch("datascraper.url_tools._extract_article_text", return_value="hello world"), \
+             patch("datascraper.url_tools._dismiss_cookie_consent"), \
+             patch("playwright.sync_api.sync_playwright", return_value=sp_cm):
+            scrape_with_playwright("http://example.com/x")
+
+        mock_guard.assert_called_once_with(page)
+        page.goto.assert_called_once()
+        self.assertIn("goto_called_at_install", order)
+        self.assertFalse(
+            order["goto_called_at_install"],
+            "install_route_guard_sync must be called BEFORE page.goto",
+        )
+
+
 class PlaywrightNavigateSinkTests(SimpleTestCase):
     """playwright_tools.navigate_to_url must refuse before launching a browser."""
 
