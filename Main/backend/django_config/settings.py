@@ -46,6 +46,10 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Innermost (last): catches @ratelimit(block=True)'s Ratelimited from the view and renders
+    # it via RATELIMIT_VIEW (-> 429), so the synthetic response still propagates back out through
+    # every outer middleware's response phase (CORS + security headers land on the 429).
+    'django_ratelimit.middleware.RatelimitMiddleware',
 ]
 
 ROOT_URLCONF = 'django_config.urls'
@@ -87,6 +91,11 @@ CACHES = {
 # django-ratelimit shares the default cache, so in production its counters live
 # in Redis alongside the agent budget (atomic, shared across workers).
 RATELIMIT_USE_CACHE = 'default'
+
+# When a request is rate-limited (block=True), RatelimitMiddleware routes the Ratelimited
+# exception to this view so the caller gets 429 Too Many Requests + Retry-After, not Django's
+# default 403 Forbidden.
+RATELIMIT_VIEW = 'api.views.ratelimited'
 
 SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
 SESSION_COOKIE_NAME = 'fingpt_sessionid'

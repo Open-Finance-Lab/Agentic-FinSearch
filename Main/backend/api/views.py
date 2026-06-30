@@ -125,6 +125,30 @@ def _busy_response() -> JsonResponse:
     return resp
 
 
+def _rate_limit_period_seconds() -> int:
+    """Worst-case seconds until the fixed-window limiter resets, parsed from API_RATE_LIMIT
+    ('<count>/<period>', e.g. '600/h' or '30/5m'), so Retry-After is an honest upper bound.
+    Falls back to 60 on any malformed value."""
+    units = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
+    try:
+        period = settings.API_RATE_LIMIT.split('/', 1)[1].strip()
+        return units[period[-1].lower()] * (int(period[:-1]) if period[:-1] else 1)
+    except (AttributeError, IndexError, KeyError, ValueError):
+        return 60
+
+
+def ratelimited(request: HttpRequest, exception=None) -> JsonResponse:
+    """RATELIMIT_VIEW target: render a per-identity rate-limit rejection as 429 Too Many
+    Requests + Retry-After, instead of django-ratelimit's default 403. ``@ratelimit(block=True)``
+    raises ``Ratelimited`` (a ``PermissionDenied`` subclass) which Django would otherwise turn
+    into a 403 Forbidden — the wrong semantic for "slow down". Wired via the settings pair
+    RATELIMIT_VIEW + RatelimitMiddleware, which catches the exception and calls this view.
+    """
+    resp = JsonResponse({'error': 'rate_limited'}, status=429)
+    resp['Retry-After'] = str(_rate_limit_period_seconds())
+    return resp
+
+
 def _build_status_frame(label: str, detail: Optional[str] = None, url: Optional[str] = None) -> bytes:
     """Create an SSE frame containing only status data."""
     status_payload = {"status": {"label": label}}
