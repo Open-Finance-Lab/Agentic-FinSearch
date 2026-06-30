@@ -290,6 +290,41 @@ def _forward_headers(route) -> dict:
     }
 
 
+def _proxied_response_kwargs(request_url: str, headers: dict):
+    """Fetch an intercepted in-browser GET through the IP-pinned, byte-capped
+    ``safe_get`` and return the kwargs to fulfill the Playwright route with, or
+    ``None`` to fail closed (abort). Blocking — the async guard dispatches it via
+    ``asyncio.to_thread``. Both route guards share this one fail-closed policy
+    (which exceptions abort, what gets logged, which headers fulfill) so the sync
+    and async paths cannot drift. ``headers`` are the browser's own request
+    headers (UA/Accept/...) so the IP-pinned fetch stays indistinguishable to the
+    origin."""
+    try:
+        # safe_get validates, pins to the resolved IP, follows redirects
+        # re-validating each, and byte-caps the body — raising UnsafeURLError on
+        # any violation.
+        response = safe_get(request_url, headers=headers)
+    except UnsafeURLError as exc:
+        logger.warning(
+            "[ssrf_guard] aborting in-browser request to %s: %s",
+            request_url,
+            exc,
+        )
+        return None
+    except Exception as exc:  # network error, timeout, etc. — fail closed.
+        logger.warning(
+            "[ssrf_guard] fetch failed for in-browser request %s: %s",
+            request_url,
+            exc,
+        )
+        return None
+    return {
+        "status": response.status_code,
+        "headers": _fulfill_headers(response),
+        "body": response.content,
+    }
+
+
 async def install_route_guard(page) -> None:
     """Register an async Playwright route handler on ALL URLs that fetches each
     intercepted in-browser request (top-level navigation OR subresource) through
@@ -304,40 +339,18 @@ async def install_route_guard(page) -> None:
     through ``page.route`` and are out of scope (see module docstring)."""
 
     async def _handler(route):
-        request_url = route.request.url
         if not _should_proxy(route):
             await route.abort()
             return
-        try:
-            # safe_get is blocking; run it off the event loop. It validates,
-            # pins to the resolved IP, follows redirects re-validating each, and
-            # byte-caps the body — raising UnsafeURLError on any violation. The
-            # browser's headers (UA/Accept/...) are forwarded so the origin sees
-            # the same request Chromium would have made.
-            response = await asyncio.to_thread(
-                safe_get, request_url, headers=_forward_headers(route)
-            )
-        except UnsafeURLError as exc:
-            logger.warning(
-                "[ssrf_guard] aborting in-browser request to %s: %s",
-                request_url,
-                exc,
-            )
-            await route.abort()
-            return
-        except Exception as exc:  # network error, timeout, etc. — fail closed.
-            logger.warning(
-                "[ssrf_guard] fetch failed for in-browser request %s: %s",
-                request_url,
-                exc,
-            )
-            await route.abort()
-            return
-        await route.fulfill(
-            status=response.status_code,
-            headers=_fulfill_headers(response),
-            body=response.content,
+        # _proxied_response_kwargs is blocking (it calls safe_get); run it off the
+        # event loop. route.request.* is read here on the loop before dispatch.
+        kwargs = await asyncio.to_thread(
+            _proxied_response_kwargs, route.request.url, _forward_headers(route)
         )
+        if kwargs is None:  # fetch was unsafe or failed — fail closed.
+            await route.abort()
+            return
+        await route.fulfill(**kwargs)
 
     await page.route("**/*", _handler)
 
@@ -351,33 +364,14 @@ def install_route_guard_sync(page) -> None:
     MUST be called BEFORE the first ``page.goto``."""
 
     def _handler(route):
-        request_url = route.request.url
         if not _should_proxy(route):
             route.abort()
             return
-        try:
-            response = safe_get(request_url, headers=_forward_headers(route))
-        except UnsafeURLError as exc:
-            logger.warning(
-                "[ssrf_guard] aborting in-browser request to %s: %s",
-                request_url,
-                exc,
-            )
+        kwargs = _proxied_response_kwargs(route.request.url, _forward_headers(route))
+        if kwargs is None:  # fetch was unsafe or failed — fail closed.
             route.abort()
             return
-        except Exception as exc:  # network error, timeout, etc. — fail closed.
-            logger.warning(
-                "[ssrf_guard] fetch failed for in-browser request %s: %s",
-                request_url,
-                exc,
-            )
-            route.abort()
-            return
-        route.fulfill(
-            status=response.status_code,
-            headers=_fulfill_headers(response),
-            body=response.content,
-        )
+        route.fulfill(**kwargs)
 
     page.route("**/*", _handler)
 

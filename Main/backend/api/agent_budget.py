@@ -97,6 +97,17 @@ def _safe_decr(key: str):
         return None
 
 
+def _release_on_daily_reject(global_key: str):
+    """Roll back a run rejected by a daily ceiling: release its global tick and
+    its in-flight slot. The per-identity counter is intentionally NOT rolled
+    back — it counts this identity's own (already over-budget) attempts. Naming
+    the rollback set once keeps the global-ceiling and per-identity-budget
+    rejection paths from drifting (a rejected run must never burn the shared
+    ceiling, or one identity could DoS-amplify the community-wide cap)."""
+    _safe_decr(global_key)
+    _safe_decr(_INFLIGHT_KEY)
+
+
 @contextmanager
 def agent_run_slot(identity: str):
     """Reserve one agent run slot for ``identity`` or raise.
@@ -134,8 +145,7 @@ def agent_run_slot(identity: str):
     if global_runs > AGENT_GLOBAL_DAILY_CEILING:
         # Roll back this rejected run's own global tick so the counter sits AT
         # the ceiling instead of inflating past it on every rejected attempt.
-        _safe_decr(global_key)
-        _safe_decr(_INFLIGHT_KEY)
+        _release_on_daily_reject(global_key)
         logger.warning(
             "agent_run_slot: global daily ceiling hit (%s, max %s)",
             global_runs, AGENT_GLOBAL_DAILY_CEILING,
@@ -149,11 +159,9 @@ def agent_run_slot(identity: str):
     if identity_runs > AGENT_DAILY_RUN_BUDGET:
         # A rejected run must NOT burn the shared global ceiling — otherwise one
         # identity over its own budget could exhaust the community-wide ceiling
-        # via rejected attempts (DoS amplification). Roll the global tick back.
-        # The per-identity counter is intentionally left incremented: it counts
-        # this identity's own attempts, which are already over budget.
-        _safe_decr(global_key)
-        _safe_decr(_INFLIGHT_KEY)
+        # via rejected attempts (DoS amplification). The per-identity counter is
+        # intentionally left incremented: it counts this identity's attempts.
+        _release_on_daily_reject(global_key)
         logger.warning(
             "agent_run_slot: daily budget hit for %s (%s, max %s)",
             identity, identity_runs, AGENT_DAILY_RUN_BUDGET,
