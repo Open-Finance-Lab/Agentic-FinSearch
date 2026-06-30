@@ -14,9 +14,11 @@ default cache.
 Three independent ceilings are enforced per run, in a fixed order so a
 *rejected* run can never burn daily budget:
 
-  1. concurrency  — in-flight runs across the whole community. Stored under a
-     short TTL (``_INFLIGHT_TTL``) so a release that is skipped (crash, missed
-     finally) self-heals in minutes instead of wedging the slot for ~26h.
+  1. concurrency  — in-flight runs across the whole community. Stored under
+     ``_INFLIGHT_TTL`` and refreshed on every acquire, so the counter never
+     expires mid-stream (which would reseed it at 0 and drift the cap); a
+     release that is skipped (crash, missed finally) still self-heals within
+     the TTL instead of wedging the slot for ~26h.
   2. global daily — total runs community-wide for the current UTC day.
   3. per-identity — runs for one identity (``ip:<addr>`` today) for the day.
 """
@@ -44,7 +46,11 @@ AGENT_DAILY_RUN_BUDGET = int(os.getenv("AGENT_DAILY_RUN_BUDGET", "100"))
 AGENT_GLOBAL_DAILY_CEILING = int(os.getenv("AGENT_GLOBAL_DAILY_CEILING", "2000"))
 
 _INFLIGHT_KEY = "agent:inflight"
-_INFLIGHT_TTL = 300  # seconds — short, so a skipped release self-heals
+# Comfortably longer than any single agent run / SSE stream. Refreshed on every
+# acquire (see agent_run_slot), so under load the in-flight counter never
+# expires and reseeds mid-stream; a genuinely skipped release still self-heals
+# within this window rather than wedging the slot for ~26h.
+_INFLIGHT_TTL = 1800  # seconds (30 min)
 _DAILY_TTL = 60 * 60 * 26  # ~26h, so a UTC-day counter outlives its day
 
 
@@ -77,6 +83,20 @@ def _incr(key: str, ttl: int) -> int:
         return cache.incr(key)
 
 
+def _safe_decr(key: str):
+    """Atomically decrement ``key`` and return the new value, swallowing the
+    ``ValueError`` ``cache.decr`` raises when the key has expired/been evicted.
+
+    Returns ``None`` when the key was already gone (nothing to release). Used on
+    EVERY release/rollback path so a vanished counter degrades to a clean no-op
+    instead of a 500 — e.g. a stream that outlived ``_INFLIGHT_TTL``, or a daily
+    counter evicted between increment and rollback."""
+    try:
+        return cache.decr(key)
+    except ValueError:
+        return None
+
+
 @contextmanager
 def agent_run_slot(identity: str):
     """Reserve one agent run slot for ``identity`` or raise.
@@ -92,10 +112,14 @@ def agent_run_slot(identity: str):
     global_key = f"agent:runs:{date}"
     identity_key = f"agent:runs:{date}:{identity}"
 
-    # (1) concurrency — checked before any daily counter is touched.
+    # (1) concurrency — checked before any daily counter is touched. Refresh
+    # the key's TTL on every acquire so an active server never lets the
+    # in-flight counter expire and reseed at 0 mid-stream (which would drift
+    # the concurrency cap).
     inflight = _incr(_INFLIGHT_KEY, _INFLIGHT_TTL)
+    cache.touch(_INFLIGHT_KEY, _INFLIGHT_TTL)
     if inflight > AGENT_MAX_CONCURRENCY:
-        cache.decr(_INFLIGHT_KEY)
+        _safe_decr(_INFLIGHT_KEY)
         logger.warning(
             "agent_run_slot: concurrency limit hit (%s in flight, max %s)",
             inflight, AGENT_MAX_CONCURRENCY,
@@ -108,7 +132,10 @@ def agent_run_slot(identity: str):
     # (2) global daily ceiling.
     global_runs = _incr(global_key, _DAILY_TTL)
     if global_runs > AGENT_GLOBAL_DAILY_CEILING:
-        cache.decr(_INFLIGHT_KEY)
+        # Roll back this rejected run's own global tick so the counter sits AT
+        # the ceiling instead of inflating past it on every rejected attempt.
+        _safe_decr(global_key)
+        _safe_decr(_INFLIGHT_KEY)
         logger.warning(
             "agent_run_slot: global daily ceiling hit (%s, max %s)",
             global_runs, AGENT_GLOBAL_DAILY_CEILING,
@@ -120,7 +147,13 @@ def agent_run_slot(identity: str):
     # (3) per-identity daily budget.
     identity_runs = _incr(identity_key, _DAILY_TTL)
     if identity_runs > AGENT_DAILY_RUN_BUDGET:
-        cache.decr(_INFLIGHT_KEY)
+        # A rejected run must NOT burn the shared global ceiling — otherwise one
+        # identity over its own budget could exhaust the community-wide ceiling
+        # via rejected attempts (DoS amplification). Roll the global tick back.
+        # The per-identity counter is intentionally left incremented: it counts
+        # this identity's own attempts, which are already over budget.
+        _safe_decr(global_key)
+        _safe_decr(_INFLIGHT_KEY)
         logger.warning(
             "agent_run_slot: daily budget hit for %s (%s, max %s)",
             identity, identity_runs, AGENT_DAILY_RUN_BUDGET,
@@ -133,10 +166,6 @@ def agent_run_slot(identity: str):
     try:
         yield
     finally:
-        # Guarded: with a 300s in-flight TTL a long stream may outlive the
-        # key; decr then raises ValueError on a vanished key. Nothing to
-        # release in that case — the short TTL already self-healed the slot.
-        try:
-            cache.decr(_INFLIGHT_KEY)
-        except ValueError:
-            pass
+        # Release the in-flight slot. _safe_decr is a no-op if the key already
+        # expired (a stream that outlived the TTL) — nothing to release then.
+        _safe_decr(_INFLIGHT_KEY)
