@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import json
 import re
 from dataclasses import dataclass
@@ -7,6 +8,11 @@ from urllib.parse import urlencode
 
 import aiohttp
 from aiohttp.http_exceptions import LineTooLong
+
+# Backend SESSION_COOKIE_NAME. The backend roots the conversation/history cache key in this
+# SIGNED cookie (P1 C-session / IDOR fix), so the same cookie must come back on every turn of
+# a conversation for `use_memory` history to persist.
+_SESSION_COOKIE_NAME = "fingpt_sessionid"
 
 # The backend's final-frame `wrapped_content` carries claim values wrapped in literal HTML
 # (<span data-claim-id="...">value</span>) meant for the web client. Discord has no HTML, so
@@ -84,12 +90,19 @@ def reduce_events(events: Iterable[dict]):
 
 class FinSearchClient:
     def __init__(self, base_url: str, api_key: Optional[str],
-                 timeout_s: float, default_model: str) -> None:
+                 timeout_s: float, default_model: str,
+                 max_tracked_cookies: int = 10000) -> None:
         self._base = base_url.rstrip("/")
         self._api_key = api_key
         self._timeout = aiohttp.ClientTimeout(total=timeout_s)
         self._model = default_model
         self._session: Optional[aiohttp.ClientSession] = None
+        # Per-conversation `fingpt_sessionid` store, keyed by session_id (one Discord
+        # conversation = one root). Bounded LRU so a long-lived public bot can't leak a cookie
+        # per conversation forever; evicting one only costs that conversation its continuity on
+        # its next turn (a fresh root) and never crosses to another conversation.
+        self._cookies: "collections.OrderedDict[str, str]" = collections.OrderedDict()
+        self._max_tracked_cookies = max_tracked_cookies
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -101,8 +114,40 @@ class FinSearchClient:
             headers = {"X-Forwarded-Proto": "https"}
             if self._api_key:
                 headers["Authorization"] = f"Bearer {self._api_key}"
-            self._session = aiohttp.ClientSession(timeout=self._timeout, headers=headers)
+            # DummyCookieJar: aiohttp's default jar would (a) DROP the backend's Secure
+            # `fingpt_sessionid` cookie because this loopback hop is plain HTTP, and (b) share
+            # ONE jar across every conversation. We disable automatic cookie handling and resend
+            # the right cookie per conversation by hand (see _cookie_header / _remember_cookie).
+            self._session = aiohttp.ClientSession(
+                timeout=self._timeout, headers=headers,
+                cookie_jar=aiohttp.DummyCookieJar(),
+            )
         return self._session
+
+    def _cookie_header(self, session_id: str) -> dict:
+        """Manual Cookie header carrying this conversation's stored `fingpt_sessionid`, or {}
+        on the first turn (nothing captured yet). Reading also marks the entry recently-used."""
+        value = self._cookies.get(session_id)
+        if not value:
+            return {}
+        self._cookies.move_to_end(session_id)
+        return {"Cookie": f"{_SESSION_COOKIE_NAME}={value}"}
+
+    def _remember_cookie(self, session_id: str, resp) -> None:
+        """Capture a `fingpt_sessionid` Set-Cookie from the response, if present, and store it
+        for this conversation (bounded LRU). The backend only re-emits it when the session is
+        modified (first turn), so a turn with no Set-Cookie keeps the existing value."""
+        cookies = getattr(resp, "cookies", None)
+        if not cookies:
+            return
+        morsel = cookies.get(_SESSION_COOKIE_NAME)
+        value = getattr(morsel, "value", None)
+        if not value:
+            return
+        self._cookies[session_id] = value
+        self._cookies.move_to_end(session_id)
+        while len(self._cookies) > self._max_tracked_cookies:
+            self._cookies.popitem(last=False)   # evict least-recently-used
 
     async def stream_chat(self, *, question: str, session_id: str,
                           user_timezone: str, user_time: str
@@ -121,7 +166,11 @@ class FinSearchClient:
             # 3xx here means the backend is misrouting this client. Following it (e.g. http->https on
             # a plain-HTTP port) strands us in a ~60s TLS handshake before it aborts — refuse it and
             # fail fast into the friendly error instead.
-            async with session.get(url, allow_redirects=False) as resp:
+            async with session.get(url, allow_redirects=False,
+                                   headers=self._cookie_header(session_id) or None) as resp:
+                # Capture the conversation root cookie as soon as headers arrive (before the
+                # body streams), so we still remember it even if the stream later drops.
+                self._remember_cookie(session_id, resp)
                 resp.raise_for_status()
                 if resp.status >= 300:
                     raise aiohttp.ClientError(
