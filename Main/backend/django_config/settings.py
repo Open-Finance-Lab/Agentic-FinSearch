@@ -175,8 +175,14 @@ FINGPT_API_KEY = os.getenv('FINGPT_API_KEY', '')
 REQUIRE_FINGPT_API_KEY = os.getenv('REQUIRE_FINGPT_API_KEY', 'False').strip().lower() in ('true', '1', 't')
 
 # Trusted reverse-proxy peers (P0 Root C.1). get_client_ip() only honors
-# X-Real-IP / X-Forwarded-For when REMOTE_ADDR is one of these; otherwise it
-# uses REMOTE_ADDR so a direct client cannot spoof its source IP.
+# X-Real-IP / X-Forwarded-For when REMOTE_ADDR falls inside one of these;
+# otherwise it uses REMOTE_ADDR so a direct client cannot spoof its source IP.
+# Entries are matched as IP networks: a bare IP is a /32 (or /128) host route
+# and a CIDR trusts the whole range -- e.g. set TRUSTED_PROXIES to the podman
+# network subnet ('podman network inspect <net>') when a containerized proxy
+# reaches the backend through a rootless-Podman SNAT address rather than a
+# fixed peer IP. Use the NARROWEST covering CIDR: a public or default-route
+# range (0.0.0.0/0, ::/0) would trust every peer and is refused by identity.py.
 TRUSTED_PROXIES = tuple(
     p.strip()
     for p in os.getenv('TRUSTED_PROXIES', '127.0.0.1,::1').split(',')

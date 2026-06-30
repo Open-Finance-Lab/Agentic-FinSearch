@@ -5,7 +5,7 @@ Run: uv run python manage.py test tests.test_identity -v 2
 """
 from django.core.cache import cache
 from django.http import HttpResponse
-from django.test import RequestFactory, SimpleTestCase
+from django.test import RequestFactory, SimpleTestCase, override_settings
 from django_ratelimit import ALL
 from django_ratelimit.decorators import ratelimit
 
@@ -35,6 +35,107 @@ class GetClientIpTests(SimpleTestCase):
         req.META["REMOTE_ADDR"] = "127.0.0.1"
         req.META["HTTP_X_FORWARDED_FOR"] = "198.51.100.8, 10.0.0.1, 127.0.0.1"
         self.assertEqual(get_client_ip(req), "198.51.100.8")
+
+
+class TrustedProxyCidrTests(SimpleTestCase):
+    """P0 Root C.1 hardening: TRUSTED_PROXIES entries are matched as IP networks,
+    not exact strings.
+
+    Rootless Podman SNATs the host->container hop, so REMOTE_ADDR inside the
+    container is the (dynamic) podman-network address, NOT the literal proxy IP.
+    Exact-string membership therefore never matches a /24, collapsing every
+    caller into one rate-limit bucket and silently ignoring X-Real-IP. Matching
+    by ip_network fixes that while staying backward-compatible with bare IPs.
+    """
+
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def _req(self, remote_addr, real_ip="198.51.100.7"):
+        req = self.factory.get("/x")
+        req.META["REMOTE_ADDR"] = remote_addr
+        req.META["HTTP_X_REAL_IP"] = real_ip
+        return req
+
+    @override_settings(TRUSTED_PROXIES=("10.89.0.0/24",))
+    def test_cidr_proxy_inside_range_is_trusted(self):
+        # The SNAT address 10.89.0.37 lies inside the configured /24, so the
+        # real client (X-Real-IP) must be honored even though 10.89.0.37 is not
+        # a literal TRUSTED_PROXIES entry. (Driver for the fix.)
+        self.assertEqual(get_client_ip(self._req("10.89.0.37")), "198.51.100.7")
+
+    @override_settings(TRUSTED_PROXIES=("10.89.0.0/24",))
+    def test_address_outside_cidr_is_not_trusted(self):
+        # 10.90.0.1 is OUTSIDE the /24 -> headers ignored, REMOTE_ADDR returned.
+        self.assertEqual(get_client_ip(self._req("10.90.0.1")), "10.90.0.1")
+
+    @override_settings(TRUSTED_PROXIES=("127.0.0.1",))
+    def test_bare_ip_still_matches_exactly(self):
+        # Backward compat: a bare IP behaves like a /32 host route.
+        self.assertEqual(get_client_ip(self._req("127.0.0.1")), "198.51.100.7")
+        self.assertEqual(get_client_ip(self._req("127.0.0.2")), "127.0.0.2")
+
+    @override_settings(TRUSTED_PROXIES=("10.89.0.0/24",))
+    def test_malformed_remote_addr_is_not_trusted(self):
+        # A non-IP REMOTE_ADDR must never raise and must be treated as untrusted.
+        self.assertEqual(get_client_ip(self._req("not-an-ip")), "not-an-ip")
+
+    @override_settings(TRUSTED_PROXIES=("::1/128",))
+    def test_family_mismatch_is_not_trusted(self):
+        # An IPv4 peer cannot match an IPv6-only trusted network (and no crash).
+        self.assertEqual(get_client_ip(self._req("203.0.113.9")), "203.0.113.9")
+
+    @override_settings(TRUSTED_PROXIES=("10.89.0.0/24", "::1"))
+    def test_mixed_v4_cidr_and_v6_host(self):
+        # A v4 address inside the CIDR is trusted...
+        self.assertEqual(get_client_ip(self._req("10.89.0.5")), "198.51.100.7")
+        # ...and so is the v6 loopback host route.
+        self.assertEqual(get_client_ip(self._req("::1")), "198.51.100.7")
+
+    @override_settings(TRUSTED_PROXIES=("garbage", "10.89.0.0/24"))
+    def test_unparseable_entry_is_skipped_not_fatal(self):
+        # A malformed TRUSTED_PROXIES entry must not poison the whole list: the
+        # valid CIDR alongside it still works.
+        self.assertEqual(get_client_ip(self._req("10.89.0.9")), "198.51.100.7")
+
+    @override_settings(TRUSTED_PROXIES=("10.89.0.0/24",))
+    def test_ipv4_mapped_ipv6_peer_matches_v4_cidr(self):
+        # A dual-stack listener may report the SNAT peer as ::ffff:10.89.0.37.
+        # It must still be recognized as the in-range proxy, else per-client
+        # rate limiting silently collapses back into one bucket.
+        self.assertEqual(get_client_ip(self._req("::ffff:10.89.0.37")), "198.51.100.7")
+
+    @override_settings(TRUSTED_PROXIES=("0.0.0.0/0",))
+    def test_ipv4_default_route_is_never_trusted(self):
+        # Trusting the whole internet would let ANY direct client forge
+        # X-Real-IP -> a /0 entry must be refused (and the refusal logged).
+        with self.assertLogs("api.identity", level="WARNING") as logs:
+            self.assertEqual(get_client_ip(self._req("203.0.113.5")), "203.0.113.5")
+        self.assertTrue(any("0.0.0.0/0" in m for m in logs.output))
+
+    @override_settings(TRUSTED_PROXIES=("::/0",))
+    def test_ipv6_default_route_is_never_trusted(self):
+        with self.assertLogs("api.identity", level="WARNING") as logs:
+            self.assertEqual(get_client_ip(self._req("2001:db8::1")), "2001:db8::1")
+        self.assertTrue(any("::/0" in m for m in logs.output))
+
+    @override_settings(TRUSTED_PROXIES=("127.0.0.1",))
+    def test_non_ip_x_real_ip_falls_back_to_remote_addr(self):
+        # A trusted proxy that forwards a non-IP X-Real-IP must not have that
+        # arbitrary string become the rate-limit key; fall back to the peer.
+        req = self.factory.get("/x")
+        req.META["REMOTE_ADDR"] = "127.0.0.1"
+        req.META["HTTP_X_REAL_IP"] = "not-an-ip"
+        self.assertEqual(get_client_ip(req), "127.0.0.1")
+
+    @override_settings(TRUSTED_PROXIES=("127.0.0.1",))
+    def test_forged_non_ip_leftmost_xff_falls_back(self):
+        # A garbage leftmost X-Forwarded-For token (e.g. an append-not-replace
+        # proxy or a forged value) must not become an arbitrary bucket key.
+        req = self.factory.get("/x")
+        req.META["REMOTE_ADDR"] = "127.0.0.1"
+        req.META["HTTP_X_FORWARDED_FOR"] = "garbage, 203.0.113.1"
+        self.assertEqual(get_client_ip(req), "127.0.0.1")
 
 
 class IdentityFormatTests(SimpleTestCase):
@@ -72,9 +173,11 @@ class RatelimitKeyBucketTests(SimpleTestCase):
         # NOTE: use the django_ratelimit.ALL sentinel (the tuple ``(None,)``),
         # NOT the string "ALL". In django-ratelimit 4.x, _method_match compares
         # ``method == ALL`` against that sentinel; passing the string "ALL"
-        # matches NO HTTP method, so the limiter silently never engages. (The
-        # production decorators still pass method='ALL' — see the concern raised
-        # for this task; that is a separate, out-of-scope fix.)
+        # matches NO HTTP method, so the limiter silently never engages.
+        # Production gets this right: api/views.py and api/openai_views.py both
+        # `from django_ratelimit import ALL` and pass `method=ALL` (the sentinel,
+        # unquoted), so the live decorators DO engage -- this test just guards
+        # against a future regression to the string form.
         @ratelimit(
             key="api.identity.ratelimit_key",
             rate="1/m",
