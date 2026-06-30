@@ -91,6 +91,27 @@ class TestDeriveConversationKey(SimpleTestCase):
         key = derive_conversation_key(RequestFactory().get("/api/chat/"))
         self.assertTrue(key)
 
+    def test_caller_session_id_non_dict_json_body_returns_none(self):
+        # bug_005: a POST body that is valid JSON but NOT an object (null, a
+        # list, a number, a bool, a bare string) must not crash with
+        # AttributeError on body_data.get(...). It simply yields no caller id.
+        from datascraper.session_key import _caller_session_id
+        for raw in (b"null", b"[]", b"123", b"true", b'"hi"'):
+            req = RequestFactory().post(
+                "/api/chat/", data=raw, content_type="application/json"
+            )
+            self.assertIsNone(_caller_session_id(req), raw)
+
+    def test_non_dict_json_body_still_derives_a_key(self):
+        # End-to-end: an anonymous POST with a non-object JSON body must not
+        # raise (which would be an anonymous 500 on validate_claims) and must
+        # still return a usable cookie-rooted key.
+        for raw in (b"null", b"[]", b"123", b"true"):
+            req = RequestFactory().post(
+                "/api/chat/", data=raw, content_type="application/json"
+            )
+            self.assertTrue(derive_conversation_key(req), raw)
+
 
 class TestViewSessionBinding(SimpleTestCase):
     def test_views_get_session_id_idor(self):

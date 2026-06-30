@@ -37,7 +37,11 @@ def _caller_session_id(request: HttpRequest) -> Optional[str]:
     if not custom and request.method == "POST":
         try:
             body_data = json.loads(request.body)
-            custom = body_data.get("session_id")
+            # A body of ``null``/``[]``/``123``/``true``/``"str"`` is valid JSON
+            # but not an object; ``.get`` on it would raise AttributeError
+            # (outside the except tuple) -> anonymous 500. Only dicts carry a
+            # caller-supplied session_id.
+            custom = body_data.get("session_id") if isinstance(body_data, dict) else None
         except (json.JSONDecodeError, ValueError, UnicodeDecodeError):
             pass
     return custom or None
