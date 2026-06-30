@@ -15,7 +15,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "dompurify": "3.2.7",
+    "dompurify": "3.4.11",
     "katex": "^0.16.10",
     "markdown-it": "^14.1.0",
     "markdown-it-texmath": "^1.0.0",
