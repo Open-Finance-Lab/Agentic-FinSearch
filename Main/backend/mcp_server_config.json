@@ -6,7 +6,7 @@
         "@modelcontextprotocol/server-filesystem",
         "/app"
       ],
-      "disabled": false
+      "disabled": true
     },
     "sec-edgar": {
       "command": "python",

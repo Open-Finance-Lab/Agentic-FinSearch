@@ -16,6 +16,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from agents import function_tool
 
+from datascraper import ssrf_guard
+
 logger = logging.getLogger(__name__)
 
 backend_dir = Path(__file__).resolve().parent.parent
@@ -187,6 +189,12 @@ def _extract_article_text(page) -> str:
 def scrape_with_playwright(url: str) -> str:
     """Fallback scraping using Playwright for SPAs."""
     try:
+        ssrf_guard.validate_fetch_url(url)
+    except ssrf_guard.UnsafeURLError as exc:
+        logger.warning(f"[SSRF] Refused playwright fallback scrape {url}: {exc}")
+        return ""
+
+    try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         logger.warning("Playwright not installed, skipping fallback")
@@ -202,9 +210,20 @@ def scrape_with_playwright(url: str) -> str:
                 )
 
                 page = context.new_page()
+                # Pin EVERY in-browser request (navigation + subresources) to a
+                # validated IP via safe_get, closing the DNS-rebinding hole the
+                # seed-only validate_fetch_url checks leave open. Must precede
+                # the first navigation.
+                ssrf_guard.install_route_guard_sync(page)
 
                 logger.info(f"Playwright scraping: {url}")
                 page.goto(url, timeout=30000, wait_until="domcontentloaded")
+
+                try:
+                    ssrf_guard.validate_fetch_url(page.url)
+                except ssrf_guard.UnsafeURLError as exc:
+                    logger.warning(f"[SSRF] Playwright fallback landed on unsafe URL {page.url}: {exc}")
+                    return ""
 
                 try:
                     page.wait_for_load_state("networkidle", timeout=5000)
@@ -230,11 +249,17 @@ def _scrape_url_impl(url: str) -> str:
     if not url.startswith(('http://', 'https://')):
         return json.dumps({"error": "Invalid URL"})
 
+    try:
+        ssrf_guard.validate_fetch_url(url)
+    except ssrf_guard.UnsafeURLError as exc:
+        logger.warning(f"[SSRF] Refused scrape target {url}: {exc}")
+        return json.dumps({"error": "URL refused by security policy", "url": url})
+
     text = ""
     used_method = "requests"
 
     try:
-        response = requests.get(url, headers=HEADERS, timeout=15)
+        response = ssrf_guard.safe_get(url, headers=HEADERS, timeout=15)
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -272,6 +297,9 @@ def _scrape_url_impl(url: str) -> str:
                 used_method = "playwright"
                 logger.info(f"Playwright fallback successful (len={len(text)})")
 
+    except ssrf_guard.UnsafeURLError as exc:
+        logger.warning(f"[SSRF] Aborted unsafe fetch of {url}: {exc}")
+        return json.dumps({"error": "URL refused by security policy", "url": url})
     except Exception as e:
         logger.warning(f"Requests scraping failed for {url}: {e}. Attempting Playwright fallback.")
         text = scrape_with_playwright(url)

@@ -3,8 +3,9 @@ import os
 import json as _json
 from typing import Optional, List
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from dotenv import load_dotenv
-from agents import Agent, AsyncOpenAI, OpenAIChatCompletionsModel
+from agents import Agent, AsyncOpenAI, OpenAIChatCompletionsModel, FunctionTool
 from agents.model_settings import ModelSettings
 from openai.types.shared import Reasoning
 import httpx
@@ -22,11 +23,36 @@ from datascraper.url_tools import get_url_tools
 from datascraper.playwright_tools import get_playwright_tools
 
 from .apps import get_global_mcp_manager
-from .prompt_builder import PromptBuilder
+from .prompt_builder import PromptBuilder, wrap_untrusted_tool_output
+from .tool_policy import filter_to_allowed
 
 
 _mcp_init_lock = None
 _prompt_builder = PromptBuilder()
+
+# Tools whose output is trusted compute/logging, not external data, and so are
+# NOT wrapped in the untrusted-data envelope: calculate (safe arithmetic),
+# report_claim (session-bound claim-logging confirmation), resolve_url (formats
+# a URL from the local site_map). Every other tool (scrape/browser/MCP) returns
+# attacker-influenceable external text.
+_TRUSTED_TOOLS = {"calculate", "report_claim", "resolve_url"}
+
+
+def _envelope_tool_output(tool: FunctionTool) -> FunctionTool:
+    """Return a fresh FunctionTool whose on_invoke_tool wraps the result string
+    in the untrusted-data boundary via prompt_builder.wrap_untrusted_tool_output.
+
+    Uses dataclasses.replace (FunctionTool is a dataclass) to build a NEW
+    instance per request; get_url_tools()/get_playwright_tools()/
+    get_calculator_tools() return module-level singletons reused across
+    requests, so in-place mutation of on_invoke_tool would double-wrap on the
+    next request. A fresh copy keeps the operation idempotent."""
+    inner = tool.on_invoke_tool
+
+    async def wrapped(ctx, args):
+        return wrap_untrusted_tool_output(await inner(ctx, args), tool.name)
+
+    return replace(tool, on_invoke_tool=wrapped)
 
 USER_ONLY_MODELS = {"o3-mini", "o1-mini", "o1-preview", "gpt-5-mini", "gpt-5.1-chat-latest"}
 
@@ -77,8 +103,9 @@ async def create_fin_agent(model: str = "gpt-4o-mini",
         user_input: User's query
         user_timezone: User's IANA timezone (e.g., "America/New_York")
         user_time: User's current time in ISO format
-        allowed_tools: If provided, only these tool names are included.
-                       None means all tools; [] means no tools.
+        allowed_tools: Explicit allow-list of tool names. Deny-by-default:
+                       None and [] BOTH mean ZERO tools. Callers MUST pass a
+                       finite allow-list to attach any tools.
         instructions_override: If provided, skip PromptBuilder and use this
                                string as the agent's system instructions.
 
@@ -89,7 +116,12 @@ async def create_fin_agent(model: str = "gpt-4o-mini",
     # filter the AVAILABLE TOOLS catalog against the actual tool registry for
     # this request. instructions_override bypasses PromptBuilder entirely.
     instructions: Optional[str] = instructions_override
-    tools_attached = allowed_tools is None or len(allowed_tools) > 0
+    # Deny-by-default: a skill/plan that declares no allow-list (None) is
+    # treated as ZERO tools, never the full registry. None must never reach
+    # the agent as "all tools" -- that was the filesystem-write escalation hole.
+    if allowed_tools is None:
+        allowed_tools = []
+    tools_attached = len(allowed_tools) > 0
 
     model_config = get_model_config(model)
     if not model_config:
@@ -187,15 +219,15 @@ async def create_fin_agent(model: str = "gpt-4o-mini",
 
                     for tool in mcp_tools:
 
-                        async def execute_mcp_tool(name, args, mgr=_mcp_manager):
+                        async def execute_mcp_tool(name, args, mgr=_mcp_manager, allowed=allowed_tools):
                             if mgr._loop:
                                 future = asyncio.run_coroutine_threadsafe(
-                                    mgr.execute_tool(name, args),
+                                    mgr.execute_tool(name, args, allowed),
                                     mgr._loop
                                 )
                                 return future.result(timeout=60)
                             else:
-                                return await mgr.execute_tool(name, args)
+                                return await mgr.execute_tool(name, args, allowed)
 
                         agent_tool = convert_mcp_tool_to_python_callable(tool, execute_mcp_tool)
                         tools.append(agent_tool)
@@ -206,14 +238,16 @@ async def create_fin_agent(model: str = "gpt-4o-mini",
             except Exception as e:
                 logging.error(f"Error fetching/adding MCP tools: {e}", exc_info=True)
 
-        # Apply tool filter if specified
-        if allowed_tools is not None:
-            pre_filter_count = len(tools)
-            tools = [t for t in tools if t.name in allowed_tools]
-            logging.info(
-                f"[AGENT] Tool filter applied: {pre_filter_count} -> {len(tools)} "
-                f"(allowed: {allowed_tools})"
-            )
+        # Apply the deny-by-default allow-list. allowed_tools is always a
+        # concrete list here (None was normalized to [] above), so this both
+        # drops tools NOT in the skill's list and drops the 14 filesystem
+        # tools via DENY_ALWAYS inside filter_to_allowed.
+        pre_filter_count = len(tools)
+        tools = filter_to_allowed(tools, allowed_tools)
+        logging.info(
+            f"[AGENT] Tool filter applied: {pre_filter_count} -> {len(tools)} "
+            f"(allowed: {allowed_tools})"
+        )
 
     # Build the system prompt now that the tool registry for this request is
     # final, so PromptBuilder can render the AVAILABLE TOOLS catalog from the
@@ -230,7 +264,7 @@ async def create_fin_agent(model: str = "gpt-4o-mini",
 
     # Output-protocol tools (e.g. report_claim) live in a separate prompt
     # section and are deliberately not in scope here.
-    if tools_attached and allowed_tools is not None:
+    if tools_attached:
         tool_names = ", ".join(allowed_tools)
         instructions += (
             f"\n\nTOOL SCOPE: For this request, the only data-gathering "
@@ -244,6 +278,19 @@ async def create_fin_agent(model: str = "gpt-4o-mini",
     if session_id and tools_attached:
         from axioms.tool import get_axiom_tools
         tools.extend(get_axiom_tools(session_id))
+
+    # Root D: wrap every external-data tool's output in the untrusted-data
+    # boundary so prompt-injection text in scraped/browser/MCP results is
+    # treated as DATA, not instructions (prompts/_security.md rule 5). Trusted
+    # compute/logging tools (calculate/report_claim/resolve_url) are skipped so
+    # the model still trusts its own arithmetic and claim-logging confirmation.
+    # When tools_attached is False, tools is [] and this is a no-op.
+    tools = [
+        _envelope_tool_output(t)
+        if isinstance(t, FunctionTool) and t.name not in _TRUSTED_TOOLS
+        else t
+        for t in tools
+    ]
 
     try:
         # Handle foundation models that don't support "system" roles

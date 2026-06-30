@@ -199,3 +199,112 @@ async def test_stream_chat_refuses_redirect_and_reraises():
     client._session = _FakeSession(resp)
     with pytest.raises(aiohttp.ClientError):
         await _drain(client)
+
+
+# --- Per-conversation session-cookie capture/resend (Root C-session continuity) ----------
+# The backend now roots the conversation/history key in the SIGNED `fingpt_sessionid` cookie
+# (P1 IDOR fix). aiohttp's jar will NOT resend that cookie — it is marked Secure and our
+# loopback call is plain HTTP — so the client must capture it from the response and resend it
+# MANUALLY, keyed per conversation, or every Discord turn starts a fresh root and `use_memory`
+# history is lost.
+from http.cookies import SimpleCookie
+
+
+class _RecordingResp:
+    """Fake aiohttp response that exposes Set-Cookie via .cookies (a real SimpleCookie, as
+    aiohttp does) and streams the given byte lines."""
+    def __init__(self, lines, set_cookie=None, status=200):
+        self.content = _FakeContent(list(lines))
+        self.status = status
+        self.headers = {}
+        self.cookies = SimpleCookie()
+        if set_cookie is not None:
+            self.cookies["fingpt_sessionid"] = set_cookie
+    def raise_for_status(self): pass
+
+
+class _RecordingSession:
+    """Records the headers of every .get() and replays one queued response per call, so a
+    test can assert exactly what Cookie header the client sent on each request."""
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.sent_headers = []
+        self.closed = False
+    def get(self, url, **kwargs):
+        self.sent_headers.append(kwargs.get("headers") or {})
+        return _FakeGetCtx(self._responses.pop(0))
+    async def close(self): self.closed = True
+
+
+async def _drain_conv(client, session_id):
+    return [item async for item in client.stream_chat(
+        question="q", session_id=session_id, user_timezone="UTC", user_time="t")]
+
+
+@pytest.mark.asyncio
+async def test_first_turn_sends_no_cookie_and_captures_set_cookie():
+    # First turn of a conversation: nothing to resend yet; capture the backend's Set-Cookie.
+    sess = _RecordingSession([_RecordingResp([b'data: {"content":"hi","done":true}\n'],
+                                             set_cookie="ROOT_A")])
+    client = FinSearchClient("http://x", None, 1.0, "m")
+    client._session = sess
+    await _drain_conv(client, "discord:1:1")
+    assert "Cookie" not in sess.sent_headers[0]
+    assert client._cookies.get("discord:1:1") == "ROOT_A"
+
+
+@pytest.mark.asyncio
+async def test_second_turn_resends_captured_cookie_for_same_conversation():
+    # Second turn of the SAME conversation must resend the captured cookie as a manual Cookie
+    # header so the backend re-derives the SAME root and history persists.
+    r1 = _RecordingResp([b'data: {"content":"a","done":true}\n'], set_cookie="ROOT_A")
+    r2 = _RecordingResp([b'data: {"content":"b","done":true}\n'], set_cookie=None)
+    sess = _RecordingSession([r1, r2])
+    client = FinSearchClient("http://x", None, 1.0, "m")
+    client._session = sess
+    await _drain_conv(client, "discord:1:1")
+    await _drain_conv(client, "discord:1:1")
+    assert sess.sent_headers[1].get("Cookie") == "fingpt_sessionid=ROOT_A"
+
+
+@pytest.mark.asyncio
+async def test_distinct_conversations_do_not_share_cookies():
+    # Two conversations must never reuse each other's cookie root — that would re-open the
+    # IDOR the cookie binding closed. Conversation B sends no Cookie even though A captured one.
+    rA = _RecordingResp([b'data: {"content":"a","done":true}\n'], set_cookie="ROOT_A")
+    rB = _RecordingResp([b'data: {"content":"b","done":true}\n'], set_cookie="ROOT_B")
+    sess = _RecordingSession([rA, rB])
+    client = FinSearchClient("http://x", None, 1.0, "m")
+    client._session = sess
+    await _drain_conv(client, "discord:1:1")
+    await _drain_conv(client, "discord:2:2")
+    assert "Cookie" not in sess.sent_headers[1]
+    assert client._cookies.get("discord:1:1") == "ROOT_A"
+    assert client._cookies.get("discord:2:2") == "ROOT_B"
+
+
+@pytest.mark.asyncio
+async def test_cookie_store_is_bounded_lru():
+    # A long-lived public bot must not leak one cookie per conversation forever: the store is a
+    # bounded LRU. Once full, the least-recently-used conversation is evicted (it just loses
+    # continuity on its next turn — never crosses to another conversation).
+    client = FinSearchClient("http://x", None, 1.0, "m", max_tracked_cookies=2)
+    responses = [_RecordingResp([b'data: {"done":true}\n'], set_cookie=f"R{i}") for i in range(3)]
+    client._session = _RecordingSession(responses)
+    await _drain_conv(client, "c1")
+    await _drain_conv(client, "c2")
+    await _drain_conv(client, "c3")     # evicts c1 (LRU)
+    assert "c1" not in client._cookies
+    assert set(client._cookies) == {"c2", "c3"}
+
+
+@pytest.mark.asyncio
+async def test_session_uses_dummy_cookie_jar():
+    # aiohttp's default jar would (a) DROP the Secure cookie over plain-HTTP loopback and
+    # (b) share one jar across all conversations. We disable it and manage cookies ourselves.
+    client = FinSearchClient("http://x", None, 1.0, "m")
+    try:
+        session = await client._ensure_session()
+        assert isinstance(session.cookie_jar, aiohttp.DummyCookieJar)
+    finally:
+        await client.aclose()

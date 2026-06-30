@@ -26,8 +26,8 @@ class TestToolFiltering:
         with patch("mcp_client.agent.get_global_mcp_manager", return_value=None):
             yield
 
-    def test_all_tools_when_none(self, mock_env, mock_mcp):
-        """allowed_tools=None gives all direct tools (default behavior)."""
+    def test_none_means_deny_all(self, mock_env, mock_mcp):
+        """Deny-by-default: allowed_tools=None now attaches ZERO tools."""
         from mcp_client.agent import create_fin_agent
 
         async def run():
@@ -35,12 +35,7 @@ class TestToolFiltering:
                 model="gpt-4o-mini",
                 allowed_tools=None,
             ) as agent:
-                # Without MCP, we get 6 direct tools: 2 url + 3 playwright + 1 calculator
-                assert len(agent.tools) == 6
-                names = {t.name for t in agent.tools}
-                assert "scrape_url" in names
-                assert "navigate_to_url" in names
-                assert "calculate" in names
+                assert agent.tools == []
 
         asyncio.run(run())
 
@@ -96,7 +91,10 @@ class TestToolFiltering:
             async with create_fin_agent(
                 model="gpt-4o-mini",
             ) as agent:
-                # Should contain core.md content
-                assert "FinGPT" in agent.instructions
+                # Should contain core.md content. core.md is always rendered
+                # (it opens with "You are FinSearch ..."), even under the
+                # deny-by-default model where no allowed_tools => zero tools
+                # attached, so PromptBuilder still produces the core prompt.
+                assert "FinSearch" in agent.instructions
 
         asyncio.run(run())

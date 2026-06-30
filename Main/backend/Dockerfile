@@ -51,6 +51,14 @@ RUN echo "Verifying Playwright browsers..." && \
     test -d /ms-playwright/chromium_headless_shell-* && \
     echo "✓ Chromium browser found at /ms-playwright"
 
+# Create a non-root runtime user and own ONLY the writable runtime dirs.
+# The application source under /app stays root-owned so a compromised
+# process cannot rewrite code at runtime (P0 Root A.3: no-write-under-/app).
+RUN groupadd --system --gid 1001 fingpt \
+    && useradd --system --uid 1001 --gid fingpt --no-create-home fingpt \
+    && chown -R fingpt:fingpt /app/staticfiles /app/media /app/logs /tmp/fingpt_cache
+
+USER fingpt
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 

@@ -58,7 +58,34 @@ if not SECRET_KEY or 'django-insecure' in SECRET_KEY:
         "Generate one with: python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())'"
     )
 
+# Authentication must be enforced in production. Fail closed: refuse to boot
+# without a key rather than silently serving the LLM unauthenticated.
+# DEPLOY PRECONDITION: FINGPT_API_KEY MUST already be present in the live
+# environment (.env.production / secrets store) BEFORE this release ships, or
+# gunicorn will exit on startup with ImproperlyConfigured.
+REQUIRE_FINGPT_API_KEY = True
+FINGPT_API_KEY = os.getenv('FINGPT_API_KEY')
+if not FINGPT_API_KEY:
+    raise ImproperlyConfigured(
+        "FINGPT_API_KEY must be set in production so /v1/* endpoints require "
+        "'Authorization: Bearer <key>'. Generate a strong random value and set "
+        "it in the deployment environment BEFORE deploying this release."
+    )
+
 DATABASES = {}
+
+# Counter store for the agent budget (api/agent_budget.py) and django-ratelimit.
+# RedisCache provides atomic incr/decr shared across all gunicorn workers, so the
+# agent concurrency + daily-run caps are HARD limits (no MAX_ENTRIES cull of
+# counters as a file/locmem cache would do). LOCATION comes from REDIS_URL.
+REDIS_URL = os.getenv('REDIS_URL', 'redis://redis:6379/0')
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+        "TIMEOUT": 3600,
+    }
+}
 
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 STATIC_URL = '/static/'

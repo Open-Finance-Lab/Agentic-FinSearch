@@ -36,9 +36,15 @@ class TestPlannerIntegration:
         assert plan.instructions is not None
         assert "Earnings report for Q4" in plan.instructions
 
-    def test_fallback_uses_all_tools(self, mock_deps):
-        """Complex queries with no skill match get full tool access."""
+    def test_fallback_uses_readonly_allowlist(self, mock_deps):
+        """Complex queries with no skill match get the finite read-only allow-list.
+
+        SECURITY (deny-by-default): the fallback used to grant "all tools" via
+        tools_allowed=None. It must now carry the explicit 46-name read-only
+        catalog and expose no filesystem/write tools.
+        """
         from planner.planner import Planner
+        from planner.skills._catalog import READ_ONLY_DATA_TOOLS
 
         planner = Planner()
         plan = planner.plan(
@@ -48,7 +54,10 @@ class TestPlannerIntegration:
         )
 
         assert plan.skill_name == "web_research"
-        assert plan.tools_allowed is None
+        assert plan.tools_allowed is not None
+        assert plan.tools_allowed == list(READ_ONLY_DATA_TOOLS)
+        for forbidden in ("write_file", "read_file", "edit_file"):
+            assert forbidden not in plan.tools_allowed
         assert plan.max_turns == 10
 
     def test_stock_query_gets_filtered_tools(self, mock_deps):

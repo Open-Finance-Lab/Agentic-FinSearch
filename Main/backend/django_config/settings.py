@@ -46,6 +46,10 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Innermost (last): catches @ratelimit(block=True)'s Ratelimited from the view and renders
+    # it via RATELIMIT_VIEW (-> 429), so the synthetic response still propagates back out through
+    # every outer middleware's response phase (CORS + security headers land on the 429).
+    'django_ratelimit.middleware.RatelimitMiddleware',
 ]
 
 ROOT_URLCONF = 'django_config.urls'
@@ -70,9 +74,9 @@ WSGI_APPLICATION = 'django_config.wsgi.application'
 DATABASES = {}
 
 # Cache backend: shared across all gunicorn workers.
-# FileBasedCache for now — swap to Redis later with one-line change:
-#   CACHES = {"default": {"BACKEND": "django.core.cache.backends.redis.RedisCache",
-#                          "LOCATION": "redis://redis:6379/0"}}
+# Base/dev default is FileBasedCache (no external service needed for tests).
+# Production swaps this to RedisCache in django_config/settings_prod.py so the
+# agent-budget counters and django-ratelimit get atomic, cross-worker incr/decr.
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
@@ -83,6 +87,15 @@ CACHES = {
         },
     }
 }
+
+# django-ratelimit shares the default cache, so in production its counters live
+# in Redis alongside the agent budget (atomic, shared across workers).
+RATELIMIT_USE_CACHE = 'default'
+
+# When a request is rate-limited (block=True), RatelimitMiddleware routes the Ratelimited
+# exception to this view so the caller gets 429 Too Many Requests + Retry-After, not Django's
+# default 403 Forbidden.
+RATELIMIT_VIEW = 'api.views.ratelimited'
 
 SESSION_ENGINE = 'django.contrib.sessions.backends.signed_cookies'
 SESSION_COOKIE_NAME = 'fingpt_sessionid'
@@ -151,6 +164,24 @@ else:
 SECURE_REDIRECT_EXEMPT = [r'^health/?$']
 
 API_RATE_LIMIT = os.getenv('API_RATE_LIMIT', '600/h')
+
+# FinGPT API authentication.
+# When FINGPT_API_KEY is set, all /v1/* endpoints require:
+#     Authorization: Bearer <FINGPT_API_KEY>
+# REQUIRE_FINGPT_API_KEY makes auth fail closed: when True, a MISSING key returns
+# HTTP 503 instead of silently disabling authentication. False for local dev;
+# settings_prod forces it to True.
+FINGPT_API_KEY = os.getenv('FINGPT_API_KEY', '')
+REQUIRE_FINGPT_API_KEY = os.getenv('REQUIRE_FINGPT_API_KEY', 'False').strip().lower() in ('true', '1', 't')
+
+# Trusted reverse-proxy peers (P0 Root C.1). get_client_ip() only honors
+# X-Real-IP / X-Forwarded-For when REMOTE_ADDR is one of these; otherwise it
+# uses REMOTE_ADDR so a direct client cannot spoof its source IP.
+TRUSTED_PROXIES = tuple(
+    p.strip()
+    for p in os.getenv('TRUSTED_PROXIES', '127.0.0.1,::1').split(',')
+    if p.strip()
+)
 
 WHITENOISE_USE_FINDERS = True
 WHITENOISE_AUTOREFRESH = DEBUG

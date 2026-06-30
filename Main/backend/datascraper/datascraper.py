@@ -1064,6 +1064,7 @@ async def _create_agent_response_async(
     """
     from mcp_client.agent import create_fin_agent
     from agents import Runner, set_tracing_disabled
+    from planner.skills._catalog import READ_ONLY_DATA_TOOLS
 
     # Respect per-model tracing config (env override > model config > default True)
     _model_config = get_model_config(model)
@@ -1106,6 +1107,11 @@ async def _create_agent_response_async(
         current_url=current_url,
         user_timezone=user_timezone,
         user_time=user_time,
+        # Deny-by-default: create_fin_agent treats None/[] as ZERO tools, so the
+        # non-streaming thinking path must pass an explicit allow-list. The full
+        # read-only catalog restores the prior "all non-filesystem tools"
+        # behavior (filesystem MCP stays disabled).
+        allowed_tools=list(READ_ONLY_DATA_TOOLS),
         session_id=session_id,
     ) as agent:
         logging.info(f"[AGENT] Running agent with MCP tools")
@@ -1315,7 +1321,12 @@ def create_agent_response_stream(
             )
         except Exception as planner_err:
             logging.warning(f"[Planner] Failed ({planner_err}), falling back to default plan")
-            execution_plan = ExecutionPlan(skill_name="fallback", tools_allowed=None, max_turns=10)
+            from planner.skills._catalog import READ_ONLY_DATA_TOOLS
+            execution_plan = ExecutionPlan(
+                skill_name="fallback",
+                tools_allowed=list(READ_ONLY_DATA_TOOLS),
+                max_turns=10,
+            )
 
         logging.info(
             f"[AGENT STREAM] Plan: skill={execution_plan.skill_name} "

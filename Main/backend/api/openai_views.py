@@ -19,8 +19,11 @@ from typing import List, Dict, Any, Optional
 from django.http import JsonResponse, HttpRequest
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
+from django_ratelimit import ALL
 from django_ratelimit.decorators import ratelimit
 
+from api.agent_budget import agent_run_slot, BudgetExceeded, ConcurrencyExceeded
+from api.identity import get_request_identity
 from datascraper import datascraper as ds
 from datascraper.url_tools import _scrape_url_impl as scrape_url
 from datascraper.models_config import MODELS_CONFIG
@@ -50,6 +53,24 @@ def _safe_error_message(exception: Exception, context: str = "") -> str:
     return "An error occurred while processing your request. Please check server logs for details."
 
 
+def _busy_response() -> JsonResponse:
+    """OpenAI-style 503 for an agent concurrency/daily-budget rejection.
+
+    P0 Root-C.3: /v1 drives a full agent run and must honor the SAME global
+    concurrency + daily caps the other agent views enforce via agent_run_slot.
+    On rejection we RETURN (never raise) this 503 + Retry-After so the slot
+    rejection is not masked by the view's generic 500 handler, matching the
+    OpenAI error JSON shape used by the other /v1 errors.
+    """
+    resp = JsonResponse(
+        {'error': {'message': 'Server is busy; too many concurrent agent runs. Retry shortly.',
+                   'type': 'server_error'}},
+        status=503,
+    )
+    resp['Retry-After'] = '30'
+    return resp
+
+
 def _get_api_session_id(request: HttpRequest, user_id: Optional[str] = None) -> str:
     """
     Get a session ID.
@@ -71,6 +92,15 @@ def _authenticate_request(request: HttpRequest) -> Optional[JsonResponse]:
     """
     api_key = os.getenv('FINGPT_API_KEY')
     if not api_key:
+        if getattr(settings, 'REQUIRE_FINGPT_API_KEY', False):
+            logger.error(
+                "FINGPT_API_KEY is not set but REQUIRE_FINGPT_API_KEY is True; "
+                "refusing /v1/* requests (fail closed)."
+            )
+            return JsonResponse(
+                {'error': {'message': 'Server authentication is misconfigured.', 'type': 'server_error'}},
+                status=503
+            )
         # No API key configured — authentication disabled (dev mode)
         return None
 
@@ -122,7 +152,7 @@ def _merge_domains_into_preferred_links(
 
 
 @csrf_exempt
-@ratelimit(key='ip', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def models_list(request: HttpRequest) -> JsonResponse:
     """
     List available models in OpenAI format.
@@ -154,7 +184,7 @@ def models_list(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@ratelimit(key='ip', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def chat_completions(request: HttpRequest) -> JsonResponse:
     """
     Create chat completion.
@@ -247,6 +277,10 @@ def chat_completions(request: HttpRequest) -> JsonResponse:
     if target_url:
         try:
             logger.info(f"API initializing with URL: {target_url}")
+            # SSRF: scrape_url is _scrape_url_impl, which validates + IP-pins the
+            # fetch via datascraper.ssrf_guard (validate_fetch_url + safe_get).
+            # This url-param sink is therefore covered transitively — no extra
+            # guard is needed here.
             scrape_result_json = scrape_url(target_url)
             scrape_result = json.loads(scrape_result_json)
 
@@ -308,11 +342,12 @@ def chat_completions(request: HttpRequest) -> JsonResponse:
     return _handle_sync(
         context_mgr, integration, session_id,
         last_user_content, formatted_messages,
-        model, context_mode, preferred_links
+        model, context_mode, preferred_links,
+        request=request,
     )
 
 
-def _handle_sync(context_mgr, integration, session_id, question, messages, model, mode, preferred_links=None):
+def _handle_sync(context_mgr, integration, session_id, question, messages, model, mode, preferred_links=None, request=None):
     """Handle synchronous (non-streaming) API responses."""
     try:
         start_time = time.time()
@@ -321,28 +356,38 @@ def _handle_sync(context_mgr, integration, session_id, question, messages, model
         current_url = meta.current_url
         sources = []
 
-        if mode == ContextMode.RESEARCH:
-            response_content, sources = ds.create_advanced_response(
-                user_input=question,
-                message_list=messages,
-                model=model,
-                preferred_links=preferred_links or [],
-                user_timezone=meta.user_timezone,
-                user_time=meta.user_time
-            )
-            # Store research sources in context
-            if sources:
-                integration.add_search_results(session_id, sources)
-        else:
-            # Thinking mode
-            response_content, sources = ds.create_agent_response(
-                user_input=question,
-                message_list=messages,
-                model=model,
-                current_url=current_url,
-                user_timezone=meta.user_timezone,
-                user_time=meta.user_time
-            )
+        # P0 Root-C.3: this drives a full agent run, so it must take a global
+        # agent slot exactly like the 5 main agent views. Without it, /v1
+        # callers escape the concurrency (3) + daily caps entirely. The slot is
+        # entered synchronously around the actual agent execution and released
+        # on exit; a rejection returns an OpenAI-style 503 (never a 500).
+        identity = get_request_identity(request) if request is not None else "ip:unknown"
+        try:
+            with agent_run_slot(identity):
+                if mode == ContextMode.RESEARCH:
+                    response_content, sources = ds.create_advanced_response(
+                        user_input=question,
+                        message_list=messages,
+                        model=model,
+                        preferred_links=preferred_links or [],
+                        user_timezone=meta.user_timezone,
+                        user_time=meta.user_time
+                    )
+                    # Store research sources in context
+                    if sources:
+                        integration.add_search_results(session_id, sources)
+                else:
+                    # Thinking mode
+                    response_content, sources = ds.create_agent_response(
+                        user_input=question,
+                        message_list=messages,
+                        model=model,
+                        current_url=current_url,
+                        user_timezone=meta.user_timezone,
+                        user_time=meta.user_time
+                    )
+        except (ConcurrencyExceeded, BudgetExceeded):
+            return _busy_response()
 
         # Record response in context
         response_time_ms = int((time.time() - start_time) * 1000)

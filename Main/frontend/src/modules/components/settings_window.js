@@ -8,6 +8,24 @@ import { createLinkManager } from './link_manager.js';
 // import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@2.11.338/es5/build/pdf.js";
 // import { mammoth } from 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.2/mammoth.browser.min.js';
 
+// Build a model list row WITHOUT innerHTML so a hostile backend-supplied
+// `description` is rendered as inert text, not parsed as HTML (XSS sink fix).
+export function buildModelListItem(model, details) {
+    const item = document.createElement('div');
+    item.className = 'model-selection-item';
+    if (details && details.description) {
+        const strong = document.createElement('strong');
+        strong.textContent = model;
+        const small = document.createElement('small');
+        small.style.color = '#888';
+        small.textContent = details.description;
+        item.append(strong, document.createElement('br'), small);
+    } else {
+        item.textContent = model;
+    }
+    return item;
+}
+
 function createSettingsWindow(isFixedModeRef, settingsButton, positionModeButton) {
     const settings_window = document.createElement('div');
     settings_window.style.display = "none";
@@ -65,16 +83,8 @@ function createSettingsWindow(isFixedModeRef, settingsButton, positionModeButton
             modelHeader.appendChild(modelToggleIcon);
 
             models.forEach(model => {
-                const item = document.createElement('div');
-                item.className = 'model-selection-item';
-
-                // Use description if available, otherwise just the model ID
                 const details = modelDetails[model];
-                if (details && details.description) {
-                    item.innerHTML = `<strong>${model}</strong><br><small style="color: #888;">${details.description}</small>`;
-                } else {
-                    item.innerText = model;
-                }
+                const item = buildModelListItem(model, details);
 
                 if (model === currentSelectedModel) item.classList.add('selected-model');
                 item.onclick = () => handleModelSelection(item, model);
