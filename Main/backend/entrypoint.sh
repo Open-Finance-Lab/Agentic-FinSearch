@@ -28,7 +28,7 @@ mkdir -p "${CACHE_FILE_PATH:-/tmp/fingpt_cache}"
 # the /app/runtime volume from a previous start); otherwise it builds into a private
 # temp file and atomically renames it into place, so a build killed mid-write can never
 # leave a corrupt store on the persistent volume. Its _store_is_current gate also rebuilds
-# an image-baked store from an older recipe/registry version rather than trusting it.
+# a volume-persisted store from an older recipe/registry version rather than trusting it.
 # Single source of truth with the request-path builder.
 echo "Ensuring XBRL truth-layer store is present..."
 python -c "from truthlayer import retrieve; retrieve._ensure_built()" || {

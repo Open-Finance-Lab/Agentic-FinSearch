@@ -23,5 +23,8 @@ def test_entrypoint_builds_store_via_ensure_built():
 
 def test_entrypoint_does_not_build_store_directly():
     text = _read()
-    # The old direct build wrote straight into DB_PATH — unsafe on the persistent volume.
-    assert "build_from_vendored()" not in text
+    # The entrypoint must not call build_from_vendored in ANY form: it writes straight
+    # into DB_PATH (no temp-file + atomic rename) and is unsafe on the persistent volume.
+    # Match the bare name so the arg-passing form build_from_vendored(store.DB_PATH) is
+    # caught too — not just the zero-arg build_from_vendored() the old entrypoint used.
+    assert "build_from_vendored" not in text

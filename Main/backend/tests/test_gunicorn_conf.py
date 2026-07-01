@@ -22,3 +22,14 @@ def _load_gunicorn_conf():
 def test_control_socket_disabled():
     mod = _load_gunicorn_conf()
     assert mod.control_socket_disable is True
+
+
+def test_control_socket_disable_is_a_real_gunicorn_setting():
+    # The check above passes even if gunicorn never recognizes the name (a typo, or a
+    # future rename/removal): gunicorn silently ignores unknown config attributes, so the
+    # socket would stay enabled and the "Permission denied" warning would return while the
+    # test above stayed green. Assert the name is an actual gunicorn setting so a version
+    # bump that drops it fails loudly here instead of silently in production.
+    from gunicorn.config import KNOWN_SETTINGS
+
+    assert "control_socket_disable" in {s.name for s in KNOWN_SETTINGS}
