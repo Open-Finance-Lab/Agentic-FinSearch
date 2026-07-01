@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 import duckdb
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
-DB_PATH = DATA_DIR / "truthlayer.duckdb"
+# The built store is a writable, regenerable artifact; its path is env-overridable so
+# production can place it on the mounted /app/runtime volume (persisted across restarts)
+# while dev/tests/offline checkouts default to the in-package data/ dir. DATA_DIR itself
+# stays in-package: ingest reads the committed companyfacts/ snapshots from it (the
+# read-only build *source*), which must not move onto the initially-empty volume.
+DB_PATH = Path(os.environ.get("TRUTHLAYER_DB_PATH", DATA_DIR / "truthlayer.duckdb"))
 
 # Bump whenever make_fact_id's serialization changes. A built store bakes its
 # fact_ids at ingest time, so retrieve._store_is_current() rebuilds any store stamped
