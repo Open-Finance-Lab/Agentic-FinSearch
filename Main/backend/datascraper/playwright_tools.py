@@ -46,6 +46,10 @@ async def PlaywrightBrowser(timeout: int = 30000):
         context.set_default_timeout(timeout)
 
         page = await context.new_page()
+        # Every page is born guarded: install the SSRF route guard here so all
+        # async entrypoints (and any future one) are pinned without each having
+        # to remember the call. See datascraper.ssrf_guard.install_route_guard.
+        await ssrf_guard.install_route_guard(page)
 
         yield page
 
@@ -86,7 +90,6 @@ async def navigate_to_url(url: str) -> str:
     try:
         ssrf_guard.validate_fetch_url(url)
         async with PlaywrightBrowser() as page:
-            await ssrf_guard.install_route_guard(page)
             logger.info(f"Navigating to: {url}")
 
             response = await page.goto(url, wait_until='load')
@@ -136,7 +139,6 @@ async def click_element(url: str, selector: str) -> str:
     try:
         ssrf_guard.validate_fetch_url(url)
         async with PlaywrightBrowser() as page:
-            await ssrf_guard.install_route_guard(page)
             logger.info(f"Navigating to {url} to click: {selector}")
 
             # Navigate first - use 'load' event, not networkidle
@@ -243,7 +245,6 @@ async def extract_page_content(url: str, content_selector: str = "") -> str:
     try:
         ssrf_guard.validate_fetch_url(url)
         async with PlaywrightBrowser() as page:
-            await ssrf_guard.install_route_guard(page)
             logger.info(f"Extracting content from: {url}")
 
             await page.goto(url, wait_until='load')

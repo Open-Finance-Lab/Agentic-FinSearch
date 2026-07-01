@@ -938,6 +938,12 @@ def auto_scrape(request: HttpRequest) -> JsonResponse:
             return JsonResponse({'error': 'No URL provided'}, status=400)
 
         try:
+            # Intentional fail-fast (kept, not redundant): refuse a blocked URL
+            # with a 400 before any scrape/session work. scrape_url validates
+            # transitively too, but dropping this would surface the refusal as a
+            # 500 and run session work first (pinned by test_ssrf_wire
+            # AutoScrapeSinkTests). The openai_views url-init path differs — it
+            # silently continues on a scrape error, so its precedent doesn't apply.
             ssrf_guard.validate_fetch_url(current_url)
         except ssrf_guard.UnsafeURLError as exc:
             logger.warning(f"[SSRF] Refused auto_scrape target {current_url}: {exc}")
