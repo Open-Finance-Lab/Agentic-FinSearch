@@ -59,9 +59,11 @@ def test_full_flow_three_verified_claims():
 
     assert len(results) == 3
     assert [r["status"] for r in results] == ["VERIFIED", "VERIFIED", "VERIFIED"]
-    # Each result carries the XBRL source path
+    # Each result carries XBRL provenance — now a SEC accession (e.g.
+    # '0000320193-23-000106') rather than a local filing path.
     for r in results:
-        assert "xbrl" in r["xbrl_source"].lower()
+        src = r["xbrl_source"]
+        assert src and "-" in src
     # Each result carries a backend-generated claim_id so the in-text
     # marking layer can join validation status back to the prose span.
     claim_ids = [r.get("claim_id") for r in results]

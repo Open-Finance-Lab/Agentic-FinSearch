@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XBRL Truth Benchmark — Product Requirements Document</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e5e5e4;
+    --text: #1c1917;
+    --text-secondary: #57534e;
+    --accent: #c2410c;
+    --accent-bg: #fff7ed;
+    --accent-border: #fed7aa;
+    --green: #15803d;
+    --green-bg: #f0fdf4;
+    --green-border: #bbf7d0;
+    --blue: #1d4ed8;
+    --blue-bg: #eff6ff;
+    --blue-border: #bfdbfe;
+    --purple: #7c3aed;
+    --purple-bg: #f5f3ff;
+    --purple-border: #ddd6fe;
+    --yellow-bg: #fefce8;
+    --yellow-border: #fef08a;
+    --mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 15px;
+    padding: 0;
+  }
+
+  .page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 3rem 2rem 6rem;
+  }
+
+  /* ── Header ────────────────────────────────── */
+  .doc-header {
+    border-bottom: 2px solid var(--text);
+    padding-bottom: 2rem;
+    margin-bottom: 3rem;
+  }
+
+  .doc-header h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+    margin-bottom: 0.5rem;
+  }
+
+  .doc-header .subtitle {
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+
+  .meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    font-size: 0.85rem;
+  }
+
+  .meta-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+  }
+
+  .meta-item .label {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    display: block;
+    margin-bottom: 0.15rem;
+  }
+
+  /* ── Sections ──────────────────────────────── */
+  section {
+    margin-bottom: 3rem;
+  }
+
+  h2 {
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 1rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+  }
+
+  h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  p, li {
+    color: var(--text);
+  }
+
+  p + p { margin-top: 0.75rem; }
+
+  ul, ol {
+    margin: 0.75rem 0;
+    padding-left: 1.5rem;
+  }
+
+  li { margin-bottom: 0.35rem; }
+
+  strong { font-weight: 600; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: #f5f5f4;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+  }
+
+  /* ── Callout boxes ─────────────────────────── */
+  .callout {
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    margin: 1.25rem 0;
+    border: 1px solid;
+  }
+
+  .callout-title {
+    font-weight: 700;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .callout.thesis {
+    background: var(--accent-bg);
+    border-color: var(--accent-border);
+  }
+  .callout.thesis .callout-title { color: var(--accent); }
+
+  .callout.shipped {
+    background: var(--green-bg);
+    border-color: var(--green-border);
+  }
+  .callout.shipped .callout-title { color: var(--green); }
+
+  .callout.decision {
+    background: var(--blue-bg);
+    border-color: var(--blue-border);
+  }
+  .callout.decision .callout-title { color: var(--blue); }
+
+  .callout.warning {
+    background: var(--yellow-bg);
+    border-color: var(--yellow-border);
+  }
+  .callout.warning .callout-title { color: #a16207; }
+
+  .callout.note {
+    background: var(--purple-bg);
+    border-color: var(--purple-border);
+  }
+  .callout.note .callout-title { color: var(--purple); }
+
+  /* ── Tables ────────────────────────────────── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+
+  th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    padding: 0.65rem 0.75rem;
+    border-bottom: 2px solid var(--text);
+  }
+
+  td {
+    padding: 0.65rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  /* ── Phase cards ───────────────────────────── */
+  .phase-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .phase-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+  }
+
+  .phase-card.p0::before { background: var(--accent); }
+  .phase-card.p1::before { background: var(--blue); }
+  .phase-card.p2::before { background: var(--purple); }
+  .phase-card.p3::before { background: var(--green); }
+
+  .phase-card .phase-label {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.25rem;
+  }
+
+  .phase-card.p0 .phase-label { color: var(--accent); }
+  .phase-card.p1 .phase-label { color: var(--blue); }
+  .phase-card.p2 .phase-label { color: var(--purple); }
+  .phase-card.p3 .phase-label { color: var(--green); }
+
+  .phase-card h3 {
+    margin-top: 0;
+    font-size: 1.1rem;
+  }
+
+  .deliverables {
+    background: #f5f5f4;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    margin-top: 0.75rem;
+    font-size: 0.9rem;
+  }
+
+  .deliverables-title {
+    font-weight: 700;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    margin-bottom: 0.35rem;
+  }
+
+  .gate {
+    display: inline-block;
+    background: var(--accent-bg);
+    border: 1px solid var(--accent-border);
+    color: var(--accent);
+    border-radius: 6px;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-top: 0.75rem;
+  }
+
+  /* ── Code blocks ───────────────────────────── */
+  pre {
+    background: #1c1917;
+    color: #e7e5e4;
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    line-height: 1.6;
+    margin: 1rem 0;
+  }
+
+  pre .comment { color: #78716c; }
+  pre .keyword { color: #fb923c; }
+  pre .string { color: #86efac; }
+  pre .type { color: #93c5fd; }
+
+  /* ── Diagram ───────────────────────────────── */
+  .diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2rem;
+    margin: 1.5rem 0;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    line-height: 1.4;
+    overflow-x: auto;
+  }
+
+  .diagram pre {
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    display: inline-block;
+    padding: 0;
+    margin: 0;
+  }
+
+  /* ── Status badges ─────────────────────────── */
+  .badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+  }
+
+  .badge.shipped {
+    background: var(--green-bg);
+    color: var(--green);
+    border: 1px solid var(--green-border);
+  }
+
+  .badge.build {
+    background: var(--accent-bg);
+    color: var(--accent);
+    border: 1px solid var(--accent-border);
+  }
+
+  .badge.stretch {
+    background: var(--purple-bg);
+    color: var(--purple);
+    border: 1px solid var(--purple-border);
+  }
+
+  /* ── Collapsible sections ──────────────────── */
+  details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin: 1rem 0;
+    overflow: hidden;
+  }
+
+  details summary {
+    padding: 1rem 1.25rem;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  details summary::before {
+    content: '▸';
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    transition: transform 0.15s;
+  }
+
+  details[open] summary::before {
+    transform: rotate(90deg);
+  }
+
+  details summary::-webkit-details-marker { display: none; }
+
+  details .details-body {
+    padding: 0 1.25rem 1.25rem;
+  }
+
+  /* ── Metric tiles ──────────────────────────── */
+  .metric-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+
+  .metric-tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    text-align: center;
+  }
+
+  .metric-tile .number {
+    font-size: 1.75rem;
+    font-weight: 700;
+    font-family: var(--mono);
+    letter-spacing: -0.03em;
+  }
+
+  .metric-tile .label {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-top: 0.2rem;
+  }
+
+  /* ── Footer ────────────────────────────────── */
+  .doc-footer {
+    border-top: 1px solid var(--border);
+    padding-top: 1.5rem;
+    margin-top: 3rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
+
+  /* ── Print ─────────────────────────────────── */
+  @media print {
+    body { background: white; font-size: 11pt; }
+    .page { max-width: 100%; padding: 0; }
+    details { break-inside: avoid; }
+    details[open] summary ~ * { display: block !important; }
+    pre { white-space: pre-wrap; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ════════════════════════════════════════════ HEADER -->
+<header class="doc-header">
+  <h1>XBRL Truth Benchmark</h1>
+  <div class="subtitle">Product Requirements Document &mdash; Benchmark Construction Track</div>
+  <div class="meta-grid">
+    <div class="meta-item">
+      <span class="label">Date</span>
+      2026-05-28
+    </div>
+    <div class="meta-item">
+      <span class="label">Status</span>
+      Construction shipped (v0) &middot; now QA + grading
+    </div>
+    <div class="meta-item">
+      <span class="label">Project</span>
+      Agentic FinSearch &mdash; SecureFinAI Lab
+    </div>
+    <div class="meta-item">
+      <span class="label">Scope</span>
+      Benchmark only (Phases 0&ndash;2 of the truth infra)
+    </div>
+    <div class="meta-item">
+      <span class="label">Parent Docs</span>
+      <a href="2026-05-26-xbrl-truth-benchmark-bridge-design.md" style="color: var(--accent); text-decoration: none;">Bridge Design</a> &middot;
+      <a href="2026-05-26-xbrl-truth-infrastructure-tech-stack.md" style="color: var(--accent); text-decoration: none;">Tech Stack</a>
+    </div>
+    <div class="meta-item">
+      <span class="label">Repo</span>
+      <code style="font-size: 0.82em;">Open-Finance-Lab/Agentic-FinSearch</code>
+    </div>
+  </div>
+</header>
+
+<!-- ════════════════════════════════════════════ STATUS UPDATE -->
+<div class="callout decision" style="margin-bottom: 2.5rem;">
+  <div class="callout-title">&#9670; Status update &mdash; 2026-06-09</div>
+  <p>
+    Since this PRD was written, the <strong>300-case pilot has been generated</strong>: the canonical fact store was built
+    (~246 large-cap companies, ~488K facts) and the construction engine produced <strong>v0</strong> of the benchmark
+    (<code>cases.json</code> &mdash; 300 cases, both tracks). Phases 0&ndash;1 below are <strong>built to v0</strong>; the project has
+    moved to <strong>QA-hardening and grading</strong>.
+  </p>
+  <p>
+    The detailed QA and grading plans now live in two companion guides that supersede the Phase&nbsp;1&ndash;2 sketches here:
+    <strong>Benchmark QA &amp; Expansion Playbook</strong> (<code>2026-06-09-benchmark-qa-expansion-playbook.html</code>)
+    and <strong>Acceptance Gates &amp; Grading</strong>
+    (<code>2026-06-09-benchmark-gates-grading.html</code>). This PRD remains the canonical reference for the
+    data layer, tracks, and architecture.
+  </p>
+</div>
+
+<!-- ════════════════════════════════════════════ TL;DR -->
+<section>
+  <h2>TL;DR &mdash; What We're Building</h2>
+  <p>
+    We're building a <strong>benchmark that measures how well AI agents retrieve and compute financial facts from SEC filings</strong>.
+    Unlike existing benchmarks that rely on human-curated answer keys or LLM-as-judge, ours generates questions
+    <em>directly from authoritative XBRL data</em> &mdash; so every gold answer and gold solution-path exists by construction,
+    no manual labeling needed.
+  </p>
+
+  <div class="callout thesis">
+    <div class="callout-title">&#9670; Core Thesis</div>
+    <p>
+      Questions generated <strong>from</strong> grounded XBRL facts carry their gold answer and gold fact-path automatically.
+      This means <strong>verifiability is the generative principle of the benchmark, not a bolt-on</strong> &mdash;
+      no human answer-keys, no LLM-as-judge ambiguity.
+    </p>
+  </div>
+
+  <div class="metric-row">
+    <div class="metric-tile">
+      <div class="number">~300</div>
+      <div class="label">Pilot benchmark cases</div>
+    </div>
+    <div class="metric-tile">
+      <div class="number">S&amp;P 500</div>
+      <div class="label">Company universe</div>
+    </div>
+    <div class="metric-tile">
+      <div class="number">2 tracks</div>
+      <div class="label">Retrieval + Computation</div>
+    </div>
+    <div class="metric-tile">
+      <div class="number">0 LLMs</div>
+      <div class="label">In the grading path</div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ WHY THIS MATTERS -->
+<section>
+  <h2>Why This Matters</h2>
+  <p>Existing benchmarks have measured the capability gap. We're not guessing &mdash; the numbers are published:</p>
+  <table>
+    <thead>
+      <tr><th>Benchmark</th><th>Finding</th><th>Implication</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>&#21516;&#33457;&#39034; (THS)</strong></td>
+        <td>Single-hop &lt;80%, two-hop <strong>&lt;50%</strong></td>
+        <td>Multi-hop retrieval is the cliff &mdash; not single-fact lookup</td>
+      </tr>
+      <tr>
+        <td><strong>FinSearchComp</strong></td>
+        <td>Best model (Grok-4) 68.9% vs human 75.0%; monotonic T1&rarr;T3 decline</td>
+        <td>Agents degrade on harder financial tasks</td>
+      </tr>
+      <tr>
+        <td><strong>FinTagging</strong></td>
+        <td>Extracts numbers reasonably, but fine-grained concept tagging peaks <strong>&lt;19%</strong> &mdash; <strong>~0% full-taxonomy</strong> as single-step classification</td>
+        <td>Agents cannot self-ground in XBRL &mdash; they need external truth</td>
+      </tr>
+      <tr>
+        <td><strong>QuantEval</strong></td>
+        <td>GPT-5 ~55% quantitative reasoning vs human experts 89%</td>
+        <td>Computation correctness must be <em>executed</em>, not inspected</td>
+      </tr>
+      <tr>
+        <td><strong>FinAgentBench</strong></td>
+        <td>Sharp degradation at fine-grained fact-pinpointing</td>
+        <td>Evidence sparsity breaks agents &mdash; need richer truth layer</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    <strong>Regulatory deadline:</strong> EU AI Act high-risk finance obligations (risk management, auditability, data provenance)
+    apply <strong>August 2, 2026</strong>. Gartner predicts &gt;40% of agentic-AI projects will be canceled by end-2027
+    due to inadequate risk controls.
+  </p>
+</section>
+
+<!-- ════════════════════════════════════════════ WHAT'S SHIPPED -->
+<section>
+  <h2>What's Already Shipped</h2>
+  <p>We're not starting from scratch. The FinSearch backend already has a 3-stage XBRL validation pipeline:</p>
+
+  <div class="callout shipped">
+    <div class="callout-title">&#10003; Already in the codebase</div>
+    <table>
+      <thead>
+        <tr><th>Component</th><th>What It Does</th><th>Code Location</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>XBRL Tag Lookup</strong></td>
+          <td>Retrieval-then-select over FASB 2026 US-GAAP taxonomy; anti-hallucination for tag names</td>
+          <td><code>mcp_server/xbrl/server.py</code></td>
+        </tr>
+        <tr>
+          <td><strong>iXBRL Parser</strong></td>
+          <td>Local parser; resolves <code>(company, tag) &rarr; value</code> with period/unit/context</td>
+          <td><code>mcp_server/xbrl/parser.py</code></td>
+        </tr>
+        <tr>
+          <td><strong>Axiom Engine</strong></td>
+          <td>Deterministic <code>A = L + E</code> check &mdash; code-enforced, no LLM in validation</td>
+          <td><code>axioms/engine.py</code></td>
+        </tr>
+        <tr>
+          <td><strong>Numbers &amp; Ratios (L1)</strong></td>
+          <td>3 ratios (accounting identity, gross margin, current ratio) validated against local XBRL; 91.7% accuracy vs Perplexity's 41.7%</td>
+          <td><code>axioms/{engine,resolver,registry}.py</code></td>
+        </tr>
+        <tr>
+          <td><strong>Validate API</strong></td>
+          <td>Django REST endpoint + Chrome extension Validate button</td>
+          <td><code>/api/axioms/validate/</code></td>
+        </tr>
+        <tr>
+          <td><strong>L1 Benchmark</strong></td>
+          <td>3 demo questions &times; 3 ratios &mdash; the seed of what we're scaling</td>
+          <td><code>axioms/benchmark.py</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout warning">
+    <div class="callout-title">&#9888; The Gap</div>
+    <p>
+      The current system validates against <strong>3 local filings</strong> (AAPL FY2023, MSFT FY2023, TSLA FY2023)
+      with <strong>3 ratios</strong>. That's enough for a demo, but cannot <em>generate or grade</em> a benchmark
+      across companies and periods. <strong>Closing this gap is the entire point of this PRD.</strong>
+    </p>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ TWO BENCHMARK TRACKS -->
+<section>
+  <h2>The Two Benchmark Tracks</h2>
+
+  <h3>Track R &mdash; Multi-Hop Retrieval (&#38271;&#31243;&#21462;&#25968;)</h3>
+  <p>
+    Measures how well an agent fetches <em>K</em> grounded facts across multiple hops:
+    conditional lookups, period-over-period comparisons, cross-entity queries, multi-constraint filters.
+  </p>
+
+  <div class="callout note">
+    <div class="callout-title">&#9670; Example Question</div>
+    <p>
+      <em>"By how much did Apple's effective tax rate change between the first fiscal year its R&amp;D exceeded $25B and the following year?"</em>
+      <br><br>
+      Solution path: find-the-year &rarr; rate(y) &rarr; rate(y+1) &rarr; &Delta; &nbsp;&mdash;&nbsp; 4 hops, each independently verifiable.
+    </p>
+  </div>
+
+  <p><strong>Metrics</strong> (mirroring &#21516;&#33457;&#39034; evaluation framework):</p>
+  <table>
+    <thead><tr><th>Metric</th><th>Measures</th></tr></thead>
+    <tbody>
+      <tr><td><strong>End-to-end task accuracy</strong></td><td>Final answer correct?</td></tr>
+      <tr><td><strong>Per-hop process accuracy</strong></td><td>Of <em>N</em> hops, how many intermediate facts were correct?</td></tr>
+      <tr><td><strong>Hop efficiency</strong></td><td>Fewer hops to solve = better. Penalizes unnecessary tool calls.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Track C &mdash; Complex Computation (&#22797;&#26434;&#37329;&#34701;&#35745;&#31639;)</h3>
+  <p>
+    The agent <strong>plans and writes</strong> computation logic to derive a quantity from grounded facts &mdash;
+    no pre-built tool for every metric. Tests on-the-fly reasoning, not memorized formulas.
+  </p>
+
+  <div class="callout note">
+    <div class="callout-title">&#9670; Example Question</div>
+    <p>
+      <em>"Calculate Microsoft's DuPont decomposition (net margin &times; asset turnover &times; equity multiplier) for FY2023
+      and identify which component changed most vs FY2022."</em>
+      <br><br>
+      Requires fetching 6+ facts across 2 periods, applying 3 formulas, and a comparative judgment.
+    </p>
+  </div>
+
+  <p><strong>Metrics:</strong></p>
+  <table>
+    <thead><tr><th>Metric</th><th>Measures</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Result correctness</strong></td><td>Within <code>decimals</code>-aware tolerance of the deterministic gold answer</td></tr>
+      <tr><td><strong>Executability</strong></td><td>Does the agent's computation actually run without errors?</td></tr>
+      <tr><td><strong>Internal consistency</strong></td><td>Do intermediate values satisfy axiom constraints (e.g., A=L+E)?</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ════════════════════════════════════════════ VERIFIABILITY MODEL -->
+<section>
+  <h2>The Verifiability Model</h2>
+  <p>Four kinds of verifiability, each generalizing something we already ship:</p>
+
+  <table>
+    <thead><tr><th>#</th><th>Type</th><th>How It Works</th><th>Generalizes</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>1</strong></td>
+        <td>Provenance</td>
+        <td>Every fact &rarr; a specific XBRL context <code>(accession, tag, period, unit, context)</code></td>
+        <td>tagging + <code>query_xbrl_filing</code></td>
+      </tr>
+      <tr>
+        <td><strong>2</strong></td>
+        <td>Value</td>
+        <td>Claimed value == authoritative XBRL value within <code>decimals</code>-aware tolerance</td>
+        <td>Numbers &amp; Ratios L1</td>
+      </tr>
+      <tr>
+        <td><strong>3</strong></td>
+        <td>Path</td>
+        <td>Each hop's intermediate fact is independently checkable &rarr; process accuracy, not just final</td>
+        <td><em>to build</em></td>
+      </tr>
+      <tr>
+        <td><strong>4</strong></td>
+        <td>Computation</td>
+        <td>Derived result re-computable from grounded inputs + axiom consistency</td>
+        <td>Axiom Engine</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ════════════════════════════════════════════ ARCHITECTURE -->
+<section>
+  <h2>Architecture Overview</h2>
+
+  <div class="diagram">
+<pre>
+  ┌─────────────────────────────────────────────────────────┐
+  │                  SEC Structured Data                     │
+  │                                                         │
+  │  companyfacts API    frames API    companyfacts.zip      │
+  │    (breadth)       (cross-entity)   (bulk offline)       │
+  └────────────┬──────────┬──────────────┬──────────────────┘
+               │          │              │
+               ▼          ▼              ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │             Canonical Truth Layer (DuckDB)               │
+  │                                                         │
+  │  ┌──────────────┐  ┌──────────────┐  ┌───────────────┐ │
+  │  │ facts table   │  │ relationships│  │ filing tree   │ │
+  │  │ (context-     │  │ (temporal,   │  │ (presentation │ │
+  │  │  keyed, with  │  │  peer,       │  │  linkbase     │ │
+  │  │  provenance)  │  │  calc-arc)   │  │  view)        │ │
+  │  └──────┬───────┘  └──────┬───────┘  └───────────────┘ │
+  └─────────┼─────────────────┼────────────────────────────┘
+            │                 │
+            ▼                 ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │               Benchmark Engine                          │
+  │                                                         │
+  │  ┌─────────────────┐        ┌─────────────────────┐    │
+  │  │ Construction     │        │ Grading Harness      │    │
+  │  │ Engine           │        │                     │    │
+  │  │ templates → Q +  │───────▶│ Track R: fact-path  │    │
+  │  │ gold answer +    │  gold  │   set/DAG equiv.    │    │
+  │  │ gold fact-path   │  path  │ Track C: determin-  │    │
+  │  │                  │        │   istic re-compute  │    │
+  │  └─────────────────┘        └──────────┬──────────┘    │
+  └────────────────────────────────────────┼───────────────┘
+                                           │
+                                           ▼
+                                ┌─────────────────────┐
+                                │   Agent Under Test   │
+                                │   (FinSearch /       │
+                                │    any MCP agent)    │
+                                └─────────────────────┘
+</pre>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ DATA LAYER -->
+<section>
+  <h2>Data Layer: The Canonical Truth Store</h2>
+
+  <div class="callout decision">
+    <div class="callout-title">&#9670; Key Decision: Context-Keyed Facts, Not Tag&rarr;Value</div>
+    <p>
+      A US-GAAP tag is <strong>not</strong> a unique key. In one Apple 10-K,
+      <code>RevenueFromContractWithCustomerExcludingAssessedTax</code> appears <strong>~15+ times</strong> &mdash;
+      FY2023/2022/2021 comparatives, plus product-line and geographic disaggregations.
+      The key is the full XBRL <strong>context</strong> tuple.
+    </p>
+  </div>
+
+  <h3>Fact Table Schema (DuckDB)</h3>
+<pre>
+<span class="keyword">CREATE TABLE</span> <span class="type">facts</span> (
+  fact_id       <span class="type">VARCHAR</span>,    <span class="comment">-- hash(context tuple + accession)</span>
+  cik           <span class="type">INTEGER</span>,
+  entity_name   <span class="type">VARCHAR</span>,
+  taxonomy      <span class="type">VARCHAR</span>,    <span class="comment">-- 'us-gaap' | 'dei' | 'ifrs' | extension</span>
+  concept       <span class="type">VARCHAR</span>,    <span class="comment">-- the XBRL tag</span>
+  period_type   <span class="type">VARCHAR</span>,    <span class="comment">-- 'instant' | 'duration'</span>
+  period_start  <span class="type">DATE</span>,
+  period_end    <span class="type">DATE</span>,
+  unit          <span class="type">VARCHAR</span>,    <span class="comment">-- 'USD' | 'shares' | 'pure' | 'USD/shares'</span>
+  decimals      <span class="type">INTEGER</span>,    <span class="comment">-- precision → tolerance during matching</span>
+  dim_hash      <span class="type">VARCHAR</span>,    <span class="comment">-- dimensional members; NULL = aggregate</span>
+  segment_json  <span class="type">JSON</span>,
+  value         <span class="type">DOUBLE</span>,
+
+  <span class="comment">-- provenance (verifiability + leakage control)</span>
+  accession         <span class="type">VARCHAR</span>,
+  form_type         <span class="type">VARCHAR</span>,
+  filed_date        <span class="type">DATE</span>,
+  fy                <span class="type">INTEGER</span>,
+  fp                <span class="type">VARCHAR</span>,
+  taxonomy_version  <span class="type">VARCHAR</span>,
+  frame             <span class="type">VARCHAR</span>
+);
+
+<span class="keyword">CREATE TABLE</span> <span class="type">filings</span> (
+  accession        <span class="type">VARCHAR PRIMARY KEY</span>,
+  cik              <span class="type">INTEGER</span>,
+  form_type        <span class="type">VARCHAR</span>,
+  filed_date       <span class="type">DATE</span>,
+  period_of_report <span class="type">DATE</span>,
+  primary_doc_url  <span class="type">VARCHAR</span>,
+  taxonomy_version <span class="type">VARCHAR</span>
+);
+
+<span class="comment">-- Key indexes</span>
+<span class="keyword">CREATE INDEX</span> idx_entity_hist <span class="keyword">ON</span> facts(cik, concept, period_end);
+<span class="keyword">CREATE INDEX</span> idx_cross_entity <span class="keyword">ON</span> facts(concept, period_end);
+<span class="keyword">CREATE INDEX</span> idx_leakage <span class="keyword">ON</span> facts(filed_date);
+</pre>
+
+  <h3>Data Sources &amp; Ingestion</h3>
+  <table>
+    <thead>
+      <tr><th>Source</th><th>What It Gives</th><th>Role</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>companyfacts</code> API</td>
+        <td>Every fact a company ever reported, with <code>val, accn, fy, fp, form, filed, frame</code></td>
+        <td><span class="badge build">Primary ingest</span> One call backfills a company's full history</td>
+      </tr>
+      <tr>
+        <td><code>frames</code> API</td>
+        <td>All companies' value for one concept in one period</td>
+        <td>Cross-entity / peer edges &rarr; Track R cross-entity templates</td>
+      </tr>
+      <tr>
+        <td><code>companyfacts.zip</code> (bulk)</td>
+        <td>Entire corpus offline, no rate limits</td>
+        <td>Full S&amp;P 500 backfill without hitting SEC rate limits</td>
+      </tr>
+      <tr>
+        <td>Existing iXBRL parser</td>
+        <td>Dimensional/segment facts + footnotes</td>
+        <td><span class="badge stretch">Deferred</span> Depth tool for segment-level facts</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout decision">
+    <div class="callout-title">&#9670; Key Decision: Never Overwrite on Restatement</div>
+    <p>
+      A 10-K/A can report a different value for the same <code>(cik, concept, period)</code>.
+      <strong>Store all facts from all filings.</strong> Resolve "the" value with an as-of query:
+      <code>WHERE filed_date &lt;= D</code>, take latest-filed &mdash; this automates leakage control.
+      Restatement detection itself becomes a benchmark question type.
+    </p>
+  </div>
+
+  <h3>Concept Normalization</h3>
+  <p>
+    Companies tag the same economic concept differently (<code>Revenues</code> vs
+    <code>RevenueFromContractWithCustomerExcludingAssessedTax</code> vs extensions).
+    FinTagging measured: fine-grained concept linking peaks <strong>below 19% accuracy</strong>, and <strong>~0% F1</strong> when posed as single-step full-taxonomy tagging.
+  </p>
+  <p>
+    Solution: generalize the shipped <code>RATIO_TAG_MAP</code> into a config-driven
+    <strong>canonical metric &rarr; ordered list of acceptable tags</strong> map, with explicit
+    <code>NOT_APPLICABLE</code> handling (e.g., banks lack <code>AssetsCurrent</code>).
+  </p>
+</section>
+
+<!-- ════════════════════════════════════════════ BENCHMARK ENGINE -->
+<section>
+  <h2>Benchmark Construction Engine</h2>
+  <p>
+    Templates walk the fact table + relationships. For each generated case, the engine outputs:
+  </p>
+<pre>
+{
+  <span class="string">"question"</span>:       <span class="string">"By how much did AAPL's gross margin change from FY2021 to FY2023?"</span>,
+  <span class="string">"gold_answer"</span>:    <span class="string">2.31</span>,
+  <span class="string">"gold_fact_path"</span>: [<span class="string">"fact_abc123"</span>, <span class="string">"fact_def456"</span>, <span class="string">"fact_ghi789"</span>, <span class="string">"fact_jkl012"</span>],
+  <span class="string">"required_facts"</span>: [<span class="string">"Revenue_FY2021"</span>, <span class="string">"COGS_FY2021"</span>, <span class="string">"Revenue_FY2023"</span>, <span class="string">"COGS_FY2023"</span>],
+  <span class="string">"K"</span>:              <span class="string">4</span>,
+  <span class="string">"track"</span>:          <span class="string">"R"</span>,
+  <span class="string">"difficulty"</span>:     <span class="string">"medium"</span>,
+  <span class="string">"as_of_date"</span>:     <span class="string">"2024-01-15"</span>,
+  <span class="string">"template_id"</span>:    <span class="string">"period_over_period_delta"</span>
+}
+</pre>
+
+  <h3>Question Templates</h3>
+  <table>
+    <thead>
+      <tr><th>Track</th><th>Template</th><th>Hop Count</th><th>Example</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td rowspan="4"><strong>R</strong></td>
+        <td>Conditional lookup</td>
+        <td>K=2&ndash;3</td>
+        <td><em>"What was TSLA's revenue in the first year its assets exceeded $50B?"</em></td>
+      </tr>
+      <tr>
+        <td>Period-over-period</td>
+        <td>K=2&ndash;4</td>
+        <td><em>"How did MSFT's R&amp;D spend change from FY2021 to FY2023?"</em></td>
+      </tr>
+      <tr>
+        <td>Cross-entity comparison</td>
+        <td>K=2&ndash;4</td>
+        <td><em>"Which S&amp;P 500 tech company had the highest gross margin in FY2023?"</em></td>
+      </tr>
+      <tr>
+        <td>Multi-constraint filter</td>
+        <td>K=3&ndash;5</td>
+        <td><em>"List companies with current ratio &gt;2 and debt-to-equity &lt;0.5 in FY2023."</em></td>
+      </tr>
+      <tr>
+        <td rowspan="3"><strong>C</strong></td>
+        <td>Ratio/metric derivation</td>
+        <td>K=2&ndash;4</td>
+        <td><em>"Calculate AAPL's ROIC for FY2023."</em></td>
+      </tr>
+      <tr>
+        <td>Multi-step valuation</td>
+        <td>K=4&ndash;6</td>
+        <td><em>"Compute a 3-year average FCF yield for MSFT using FY2021&ndash;2023 data."</em></td>
+      </tr>
+      <tr>
+        <td>Consistency-constrained</td>
+        <td>K=3&ndash;5</td>
+        <td><em>"Derive JPM's Tier 1 capital ratio and verify it satisfies Basel III minimum."</em></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Validity Controls</h3>
+  <ul>
+    <li><strong>Difficulty control:</strong> parameterize K (hop count) and formula complexity; target distribution across easy/medium/hard</li>
+    <li><strong>De-duplication:</strong> no two questions should test the same fact-path with cosmetic rewording</li>
+    <li><strong>Leakage scan:</strong> verify no gold answer is derivable from the question text alone</li>
+    <li><strong>Human spot-check gate:</strong> sample ~30 cases for manual review before the pilot is "blessed"</li>
+    <li><strong>Distractors:</strong> plausible-but-unambiguously-wrong; questions require reasoning, not keyword matching</li>
+  </ul>
+</section>
+
+<!-- ════════════════════════════════════════════ GRADING -->
+<section>
+  <h2>Grading Harness</h2>
+
+  <h3>Track R Grading</h3>
+  <p>
+    Capture the agent's structured tool-call trace. Align it to the gold fact-path.
+    <strong>Grade on facts reached (set/DAG equivalence), not literal tool-call order</strong> &mdash;
+    a question may have multiple valid solution paths.
+  </p>
+
+  <div class="callout decision">
+    <div class="callout-title">&#9670; Key Decision: Set/DAG Equivalence, Not Exact Sequence</div>
+    <p>
+      The gold path is <em>a sufficient</em> path, not the only path.
+      Two agents that reach the same correct intermediate facts via different tool-call orderings
+      should both score full marks on process accuracy.
+    </p>
+  </div>
+
+  <h3>Track C Grading</h3>
+  <ul>
+    <li><strong>Value correctness:</strong> <code>ValidateMetric</code> re-computes from grounded inputs within <code>decimals</code>-aware tolerance</li>
+    <li><strong>Executability:</strong> does the agent's computation run without errors?</li>
+    <li><strong>Axiom consistency:</strong> intermediate values satisfy known constraints (A=L+E, etc.)</li>
+  </ul>
+
+  <h3>Baseline Comparison</h3>
+  <p>
+    Run each track against a vanilla agent <strong>without</strong> the truth layer to quantify the lift
+    and reproduce the 1-hop &rarr; K-hop cliff on our own data.
+  </p>
+</section>
+
+<!-- ════════════════════════════════════════════ BUILD PHASES -->
+<section>
+  <h2>Build Phases</h2>
+  <p>
+    Each phase ships a benchmark slice that is both its acceptance gate and a publishable artifact.
+    The truth infra accretes only as far as the benchmark requires.
+  </p>
+
+  <div class="phase-card p0">
+    <div class="phase-label">Phase 0 &mdash; Start Here <span class="badge shipped">v0 shipped</span></div>
+    <h3>Ingest S&amp;P 500 into the Canonical Truth Store</h3>
+    <p>
+      Build the DuckDB fact store and populate it with S&amp;P 500 company data from SEC's
+      <code>companyfacts</code> API (or bulk <code>companyfacts.zip</code>).
+      This is the foundation everything else builds on.
+    </p>
+    <div class="deliverables">
+      <div class="deliverables-title">Deliverables</div>
+      <ul>
+        <li>DuckDB database with the <code>facts</code> and <code>filings</code> tables (schema above)</li>
+        <li>Ingestion script: fetch S&amp;P 500 CIKs &rarr; pull <code>companyfacts</code> JSON &rarr; normalize &rarr; insert</li>
+        <li>Concept normalization config (canonical metric &rarr; ordered acceptable tags)</li>
+        <li>Basic stats: total facts ingested, companies covered, temporal range</li>
+      </ul>
+    </div>
+    <div class="gate">Gate: &ge;400 S&amp;P 500 companies ingested; all 3 shipped ratios resolvable for AAPL/MSFT/TSLA against the new store (regression test)</div>
+  </div>
+
+  <div class="phase-card p1">
+    <div class="phase-label">Phase 1 <span class="badge shipped">v0 shipped</span></div>
+    <h3>Benchmark Construction Engine</h3>
+    <p>
+      Build the template engine that walks the fact store and generates benchmark cases.
+      Start with Track R (retrieval) templates, then add Track C (computation).
+    </p>
+    <div class="deliverables">
+      <div class="deliverables-title">Deliverables</div>
+      <ul>
+        <li>Template definitions for each question type (see table above)</li>
+        <li>Generator: walks facts + relationships &rarr; outputs <code>(question, gold_answer, gold_fact_path, K, difficulty)</code></li>
+        <li>Validity controls: difficulty distribution, de-dup, leakage scan</li>
+        <li>~300-case pilot benchmark as JSON/Parquet</li>
+      </ul>
+    </div>
+    <div class="gate">Gate: 300 cases generated; human spot-check passes on 30-case sample; K distribution covers 1-hop through &ge;4-hop</div>
+  </div>
+
+  <div class="phase-card p2">
+    <div class="phase-label">Phase 2</div>
+    <h3>Grading Harness</h3>
+    <p>
+      Build the grader that takes an agent's tool-call trace and scores it against the gold labels.
+      Run the first end-to-end benchmark evaluation.
+    </p>
+    <div class="deliverables">
+      <div class="deliverables-title">Deliverables</div>
+      <ul>
+        <li>Structured trace capture from agent tool calls</li>
+        <li>Track R grader: fact-path set/DAG equivalence via <code>networkx</code></li>
+        <li>Track C grader: deterministic re-computation + tolerance check</li>
+        <li>Leakage control: <code>as_of</code> date filtering</li>
+        <li>Score report: end-to-end accuracy, per-hop process accuracy, hop-efficiency, Track C correctness</li>
+      </ul>
+    </div>
+    <div class="gate">Gate: full run on the 300-case pilot; publish 1-hop &rarr; K-hop cliff graph; baseline comparison (with vs without truth layer)</div>
+  </div>
+
+  <div class="phase-card p3">
+    <div class="phase-label">Phase 3 &mdash; Stretch</div>
+    <h3>PV Services &amp; Agent Wiring</h3>
+    <p>
+      Expose the truth layer as MCP-native services (<code>RetrieveEvidence</code>,
+      <code>TraceClaim</code>, <code>ValidateMetric</code>) and wire them into the FinSearch agent.
+      This enables the benchmark to also test the agent's ability to use verification tools.
+    </p>
+    <div class="deliverables">
+      <div class="deliverables-title">Deliverables</div>
+      <ul>
+        <li><code>RetrieveEvidence</code>: <code>(entity, concept, period) &rarr; facts[] + provenance</code></li>
+        <li><code>TraceClaim</code>: <code>(claim) &rarr; source facts + filing accession</code></li>
+        <li><code>ValidateMetric</code>: <code>(metric, inputs, claimed_value) &rarr; VERIFIED/FAILED/SKIPPED</code></li>
+        <li>Single-hop slice benchmark using PV services</li>
+      </ul>
+    </div>
+    <div class="gate">Gate: single-hop Track R accuracy + provenance coverage on FinSearch data</div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ TECH STACK -->
+<section>
+  <h2>Tech Stack</h2>
+  <table>
+    <thead><tr><th>Layer</th><th>Technology</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Language</td>
+        <td>Python 3.12</td>
+        <td>Matches the FinSearch backend</td>
+      </tr>
+      <tr>
+        <td>Fact store</td>
+        <td><strong>DuckDB</strong> + Parquet</td>
+        <td>Columnar, single-file, zero infra, handles millions of facts. Cloud migration deferred.</td>
+      </tr>
+      <tr>
+        <td>Data fetch</td>
+        <td><code>requests</code> + throttle / bulk zip</td>
+        <td>SEC APIs; ~10 req/s + User-Agent header for fair access</td>
+      </tr>
+      <tr>
+        <td>Graph/path analysis</td>
+        <td><code>networkx</code></td>
+        <td>DAG/set equivalence for Track R grading</td>
+      </tr>
+      <tr>
+        <td>Benchmark storage</td>
+        <td>JSON + Parquet</td>
+        <td>Versioned, portable benchmark cases</td>
+      </tr>
+      <tr>
+        <td>Agent framework</td>
+        <td>OpenAI Agents SDK</td>
+        <td>Already shipped in FinSearch; captures structured tool-call traces</td>
+      </tr>
+      <tr>
+        <td>MCP layer (Phase 3)</td>
+        <td><code>mcp[cli]</code> + FastMCP</td>
+        <td>MCP-native services; reuses the repo's existing pattern</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ════════════════════════════════════════════ DESIGN DECISIONS -->
+<section>
+  <h2>Load-Bearing Design Decisions</h2>
+  <p>These are the decisions that shape the whole system. Changing one shifts the design.</p>
+
+  <details>
+    <summary>ADR-01 &mdash; Context-keyed fact table, NOT tag&rarr;value</summary>
+    <div class="details-body">
+      <p><strong>Why:</strong> One US-GAAP tag maps to many facts in a single filing (comparative years + segment/geographic dimensions). A <code>tag&rarr;value</code> map silently collapses the exact ambiguity verification exists to resolve.</p>
+      <p><strong>Consequence:</strong> The key is <code>(cik, concept, period_type, period_start, period_end, unit, dimensions)</code>. Value carries <code>decimals</code> + provenance.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>ADR-02 &mdash; Flat facts are truth; filing tree is a view</summary>
+    <div class="details-body">
+      <p><strong>Why:</strong> A fact lives at the intersection of (entity &times; concept &times; period &times; dimensions) &mdash; 4-dimensional. A single tree forces one hierarchy and loses the rest.</p>
+      <p><strong>Consequence:</strong> Store flat facts. Expose period-tree and per-filing statement-tree as materialized views for navigation.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>ADR-03 &mdash; Store every filing's facts; never overwrite</summary>
+    <div class="details-body">
+      <p><strong>Why:</strong> A 10-K/A can report different values for the same tuple. Overwriting destroys both as-of/leakage-control and restatement detection.</p>
+      <p><strong>Consequence:</strong> <code>filed_date</code> is part of the key. "The" value is an as-of query. Restatements become benchmark question types.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>ADR-04 &mdash; Breadth-first companyfacts; iXBRL is a depth tool</summary>
+    <div class="details-body">
+      <p><strong>Why:</strong> <code>companyfacts</code> gives a company's full pre-parsed history with provenance in one call. Dimensional depth is a minority need for the benchmark.</p>
+      <p><strong>Consequence:</strong> Fast path to benchmark scale. The existing iXBRL parser is reserved for segment-level facts (deferred).</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>ADR-05 &mdash; Local-first (DuckDB) &rarr; cloud-later</summary>
+    <div class="details-body">
+      <p><strong>Why:</strong> Prove the benchmark's value before paying cloud complexity. DuckDB handles millions of facts with zero infra.</p>
+      <p><strong>Consequence:</strong> Phase 5 cloud migration is a clean hand-off to the lab's grant track, not a prerequisite.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>ADR-08 &mdash; No LLM in the validation or grading path</summary>
+    <div class="details-body">
+      <p><strong>Why:</strong> A verifier that hallucinates is worthless. The moat is deterministic checking against the primary source.</p>
+      <p><strong>Consequence:</strong> <code>ValidateMetric</code>, axiom checks, and grading are pure code with <code>decimals</code>-aware tolerance. LLMs only generate questions (in the template engine), never adjudicate (no LLM-as-judge).</p>
+    </div>
+  </details>
+
+  <details>
+    <summary>ADR-11 &mdash; Grade on facts reached (set/DAG equivalence)</summary>
+    <div class="details-body">
+      <p><strong>Why:</strong> A multi-hop question can have multiple valid solution paths. Exact-sequence grading punishes correct alternatives.</p>
+      <p><strong>Consequence:</strong> The gold path is <em>a sufficient</em> path. Process accuracy measures intermediate facts reached, not tool-call order.</p>
+    </div>
+  </details>
+</section>
+
+<!-- ════════════════════════════════════════════ GETTING STARTED -->
+<section>
+  <h2>Getting Started &mdash; Week 1 Checklist</h2>
+  <p>Concrete first steps to get the fact store populated and validate the approach:</p>
+
+  <ol>
+    <li>
+      <strong>Set up the project structure.</strong>
+      Create a <code>benchmark/</code> directory in <code>Main/backend/</code> with:
+      <code>ingest/</code>, <code>store/</code>, <code>templates/</code>, <code>grading/</code>.
+    </li>
+    <li>
+      <strong>Get the S&amp;P 500 CIK list.</strong>
+      SEC publishes this. Map ticker &rarr; CIK for the universe.
+    </li>
+    <li>
+      <strong>Write the companyfacts ingestion script.</strong>
+      For each CIK: fetch <code>data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json</code>,
+      parse the JSON structure, insert into the DuckDB <code>facts</code> table.
+      Respect <code>User-Agent</code> header and ~10 req/s throttle.
+    </li>
+    <li>
+      <strong>Regression test.</strong>
+      Run the existing <code>axioms/benchmark.py</code> 3-case benchmark but resolve values
+      from the new DuckDB store instead of local iXBRL files. All 3 must still pass.
+    </li>
+    <li>
+      <strong>Stats check.</strong>
+      Print: total facts, unique companies, temporal range, top-10 most-reported tags.
+    </li>
+  </ol>
+</section>
+
+<!-- ════════════════════════════════════════════ SEC API REFERENCE -->
+<section>
+  <h2>SEC API Quick Reference</h2>
+
+  <div class="callout warning">
+    <div class="callout-title">&#9888; SEC Fair Access Rules</div>
+    <p>
+      All requests must include a <code>User-Agent</code> header with your name and email
+      (e.g., <code>FinSearch Lab felixflyingt@gmail.com</code>).
+      Max ~10 requests/second. Prefer bulk <code>companyfacts.zip</code> for the initial backfill.
+    </p>
+  </div>
+
+<pre>
+<span class="comment"># All facts for a company (primary ingest path)</span>
+GET https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json
+<span class="comment">#                                              ^^^^^^^^^^  (AAPL CIK, zero-padded to 10 digits)</span>
+
+<span class="comment"># One concept across all companies in a period (cross-entity)</span>
+GET https://data.sec.gov/api/xbrl/frames/us-gaap/Revenues/USD/CY2023Q4I.json
+
+<span class="comment"># One concept's full history for one company (runtime hot path)</span>
+GET https://data.sec.gov/api/xbrl/companyconcept/CIK0000320193/us-gaap/Revenues.json
+
+<span class="comment"># Bulk download — entire corpus, no rate limits</span>
+GET https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip
+</pre>
+
+  <p>
+    The <code>companyfacts</code> JSON structure nests facts under
+    <code>facts.{taxonomy}.{concept}[].units.{unit}[]</code>,
+    where each entry has <code>val, accn, fy, fp, form, filed, frame, start, end</code>.
+  </p>
+</section>
+
+<!-- ════════════════════════════════════════════ RISKS -->
+<section>
+  <h2>Known Risks &amp; Mitigations</h2>
+  <table>
+    <thead><tr><th>Risk</th><th>Impact</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Cross-company tag inconsistency</td>
+        <td>Same concept, different tags &rarr; missing facts</td>
+        <td>Concept-normalization layer (generalized <code>RATIO_TAG_MAP</code>); explicit <code>NOT_APPLICABLE</code></td>
+      </tr>
+      <tr>
+        <td>Auto-generated questions are trivial</td>
+        <td>Benchmark doesn't discriminate</td>
+        <td>Difficulty control + de-dup + leakage scan + human spot-check gate</td>
+      </tr>
+      <tr>
+        <td>Multi-hop: multiple valid paths</td>
+        <td>Correct agents penalized for different ordering</td>
+        <td>Grade on facts-reached (set/DAG equivalence); gold path = sufficient, not unique</td>
+      </tr>
+      <tr>
+        <td>Restatements / data leakage</td>
+        <td>Future-filed values leak into as-of questions</td>
+        <td>Store all filings; resolve via <code>filed_date &le; as_of</code></td>
+      </tr>
+      <tr>
+        <td>SEC rate limits</td>
+        <td>Bulk pulls trigger throttling</td>
+        <td><code>User-Agent</code> header, &le;10 req/s, prefer bulk zip</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ════════════════════════════════════════════ REFERENCES -->
+<section>
+  <h2>References</h2>
+  <table>
+    <thead><tr><th>Source</th><th>Relevance</th></tr></thead>
+    <tbody>
+      <tr><td>FinSearchComp (arXiv:2509.13160)</td><td>Multi-task financial agent benchmark; T1&rarr;T3 decline data</td></tr>
+      <tr><td>FinAgentBench (arXiv:2508.14052)</td><td>Agent degradation at fine-grained fact-pinpointing</td></tr>
+      <tr><td>QuantEval (arXiv:2601.08689v2)</td><td>Execution-based quant reasoning; GPT-5 ~55% vs human 89%</td></tr>
+      <tr><td>FinTagging (arXiv:2505.20650)</td><td>&lt;19% fine-grained concept-linking; ~0% full-taxonomy single-step</td></tr>
+      <tr><td>&#21516;&#33457;&#39034; evaluation</td><td>Multi-hop cliff: single&lt;80%, two-hop&lt;50%</td></tr>
+      <tr><td>&tau;&sup2;-bench (Sierra Research)</td><td>SOTA tool-use agents &lt;50%</td></tr>
+      <tr><td>EU AI Act Annex III</td><td>High-risk finance obligations, Aug 2 2026 deadline</td></tr>
+      <tr><td>FINOS AI Governance v2.0</td><td>46 risks/controls, 6 agentic-specific</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ════════════════════════════════════════════ OPEN QUESTIONS -->
+<section>
+  <h2>Open Questions for Discussion</h2>
+  <ol>
+    <li>
+      <strong>Concept-normalization scope:</strong> How many canonical metrics do we need before the 300-case pilot
+      is "rich enough"? Starting candidates: revenue, net income, total assets, total liabilities, equity,
+      current assets, current liabilities, COGS, R&amp;D, operating income, cash &amp; equivalents, total debt.
+    </li>
+    <li>
+      <strong>K-distribution:</strong> What's the right mix of hop counts? Proposed:
+      ~30% K=1 (baseline), ~40% K=2 (the "cliff"), ~20% K=3, ~10% K&ge;4.
+    </li>
+    <li>
+      <strong>Track C scope:</strong> Start with valuation/metric-derivation only, or include strategy-coding
+      with backtest execution in the pilot?
+    </li>
+    <li>
+      <strong>Fiscal year normalization:</strong> SEC <code>frames</code> use calendar-year periods (CY),
+      but companies have different fiscal year-ends. Rule for cross-entity comparisons?
+    </li>
+  </ol>
+</section>
+
+<!-- ════════════════════════════════════════════ FOOTER -->
+<footer class="doc-footer">
+  <p>
+    <strong>Agentic FinSearch</strong> &middot; SecureFinAI Lab &middot; Columbia University
+    <br>
+    This document distills the engineering bridge design (2026-05-26) into an executable benchmark PRD.
+    The full vision and strategy live upstream in the lab's "Financial Truth Infrastructure for AI Agents" drafts.
+  </p>
+  <p style="margin-top: 0.75rem;">
+    Parent docs:
+    <code>Docs/superpowers/specs/2026-05-26-xbrl-truth-benchmark-bridge-design.md</code>
+    &middot;
+    <code>Docs/superpowers/specs/2026-05-26-xbrl-truth-infrastructure-tech-stack.md</code>
+  </p>
+</footer>
+
+</div>
+</body>
+</html>

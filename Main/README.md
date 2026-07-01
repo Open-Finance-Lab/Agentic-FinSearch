@@ -12,7 +12,7 @@ Agentic-FinSearch/
 │   ├── backend/               # Django backend with MCP agent orchestration
 │   └── frontend/              # Browser extension (Webpack-bundled JS)
 ├── Docs/                      # Sphinx documentation & implementation plans
-├── DevSummaries/              # Developer documentation (API docs, architecture references)
+├── InternalDocs/              # Internal documentation (strategy, architecture, QA)
 ├── Deploy/                    # Deployment configuration & scripts
 ├── docker-compose.yml         # One-command deployment (backend)
 └── CONTRIBUTING.md            # Contribution guidelines
@@ -113,7 +113,7 @@ backend/
 - `GET /v1/models` - List available models
 - `POST /v1/chat/completions` - Chat completions with mode selection
 - Bearer token authentication via `FINGPT_API_KEY` env var
-- See `DevSummaries/api/API_DOCUMENTATION.md` for complete API reference
+- See `InternalDocs/api/API_DOCUMENTATION.md` for complete API reference
 
 **`planner/`** – Query Planning System (v0.13.3+):
 - Heuristic-based planner that analyzes queries and selects the best skill
@@ -126,14 +126,14 @@ backend/
 - Conversation history tracking with metadata
 - Fetched context storage (web_search, js_scraping sources)
 - Multi-worker safe via FileBasedCache (or Redis for scale)
-- See `DevSummaries/context_engineering/UNIFIED_CONTEXT_DOCUMENTATION.md`
+- See `InternalDocs/context_engineering/UNIFIED_CONTEXT_DOCUMENTATION.md`
 
 **`datascraper/research_engine.py`** – Multi-Step Research Engine:
 - Query decomposition into sub-questions (numerical, qualitative, analytical)
 - Parallel sub-question execution
 - Gap detection and follow-up research
 - Streaming synthesis with phase-by-phase status updates
-- See `DevSummaries/deep_research/STREAMING_RESEARCH_ENGINE.md`
+- See `InternalDocs/deep_research/STREAMING_RESEARCH_ENGINE.md`
 
 **`mcp_client/agent.py`** – Agent Orchestration:
 - OpenAI Agents SDK integration
@@ -218,7 +218,7 @@ The backend integrates 4 MCP servers configured in `Main/backend/mcp_server_conf
 | **SEC EDGAR** | External (`sec_edgar_mcp`) | — | SEC filing data (10-K, 10-Q, etc.) |
 | **Filesystem** | External (`@modelcontextprotocol/server-filesystem`) | — | File system access |
 
-See `DevSummaries/api/API_DOCUMENTATION.md` for the complete tool reference.
+See `InternalDocs/api/API_DOCUMENTATION.md` for the complete tool reference.
 
 ---
 
@@ -251,9 +251,9 @@ uv run python manage.py runserver
 |----------|-------------|
 | `Docs/` | Sphinx / ReadTheDocs source files and build output |
 | `Docs/plans/` | Implementation plans and architecture designs |
-| `DevSummaries/api/` | API documentation for testers |
-| `DevSummaries/context_engineering/` | Context management system documentation |
-| `DevSummaries/deep_research/` | Research engine architecture documentation |
+| `InternalDocs/api/` | API documentation for testers |
+| `InternalDocs/context_engineering/` | Context management system documentation |
+| `InternalDocs/deep_research/` | Research engine architecture documentation |
 
 ---
 
@@ -346,7 +346,7 @@ bun run build:full
 | `/v1/models` | GET | List available models |
 | `/v1/chat/completions` | POST | Chat completions (thinking/research modes) |
 
-See `DevSummaries/api/API_DOCUMENTATION.md` for the complete API reference with examples.
+See `InternalDocs/api/API_DOCUMENTATION.md` for the complete API reference with examples.
 
 ### Browser Extension Endpoints (in `api/views.py`)
 
@@ -399,5 +399,5 @@ See `Main/backend/.env.example` for the full configuration template.
 
 ---
 
-*For the full API reference, see `DevSummaries/api/API_DOCUMENTATION.md`.*
-*For detailed architecture documentation, see the `DevSummaries/` directory.*
+*For the full API reference, see `InternalDocs/api/API_DOCUMENTATION.md`.*
+*For detailed architecture documentation, see the `InternalDocs/` directory.*

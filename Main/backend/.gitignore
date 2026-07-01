@@ -1,0 +1,5 @@
+# Truth-layer store: a gitignored build artifact (rebuilt from the vendored
+# companyfacts JSON). Ignore the DB, its WAL sidecar, and lazy-build temp files.
+truthlayer/data/truthlayer.duckdb
+truthlayer/data/truthlayer.duckdb.wal
+truthlayer/data/.building-*

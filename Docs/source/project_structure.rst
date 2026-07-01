@@ -10,7 +10,7 @@ Top-Level Layout
    ├── .github/                      # CI/CD workflows
    ├── Benchmarks/                   # Benchmark documents and test results
    ├── Deploy/                       # Deployment configurations (Podman, Caddy)
-   ├── DevSummaries/                 # Development progress summaries
+   ├── InternalDocs/                 # Internal documentation (strategy, architecture, QA)
    ├── Docs/                         # Sphinx documentation (this site)
    ├── Main/
    │   ├── backend/                  # Django backend (uv-managed)

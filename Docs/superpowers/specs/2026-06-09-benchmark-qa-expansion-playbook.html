@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Benchmark QA &amp; Expansion Playbook</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e5e5e4;
+    --text: #1c1917;
+    --text-secondary: #57534e;
+    --accent: #c2410c;
+    --accent-bg: #fff7ed;
+    --accent-border: #fed7aa;
+    --green: #15803d;
+    --green-bg: #f0fdf4;
+    --green-border: #bbf7d0;
+    --blue: #1d4ed8;
+    --blue-bg: #eff6ff;
+    --blue-border: #bfdbfe;
+    --purple: #7c3aed;
+    --purple-bg: #f5f3ff;
+    --purple-border: #ddd6fe;
+    --yellow-bg: #fefce8;
+    --yellow-border: #fef08a;
+    --slate: #475569;
+    --slate-bg: #f8fafc;
+    --slate-border: #cbd5e1;
+    --mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 15px;
+  }
+
+  .page { max-width: 900px; margin: 0 auto; padding: 3rem 2rem 6rem; }
+
+  /* ── Header ────────────────────────────────── */
+  .doc-header { border-bottom: 2px solid var(--text); padding-bottom: 2rem; margin-bottom: 3rem; }
+  .doc-header h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1.2; margin-bottom: 0.5rem; }
+  .doc-header .subtitle { font-size: 1.1rem; color: var(--text-secondary); font-weight: 400; }
+  .meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin-top: 1.5rem; font-size: 0.85rem; }
+  .meta-item { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; }
+  .meta-item .label { font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; color: var(--text-secondary); display: block; margin-bottom: 0.15rem; }
+
+  /* ── Sections ──────────────────────────────── */
+  section { margin-bottom: 3rem; }
+  h2 { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 1rem; padding-top: 0.5rem; border-top: 1px solid var(--border); }
+  h2 .num { color: var(--accent); font-family: var(--mono); font-size: 1rem; margin-right: 0.5rem; }
+  h3 { font-size: 1.05rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+  p, li { color: var(--text); }
+  p + p { margin-top: 0.75rem; }
+  ul, ol { margin: 0.75rem 0; padding-left: 1.5rem; }
+  li { margin-bottom: 0.35rem; }
+  strong { font-weight: 600; }
+  em.term { font-style: normal; font-weight: 600; color: var(--accent); }
+  code { font-family: var(--mono); font-size: 0.88em; background: #f5f5f4; border: 1px solid var(--border); border-radius: 4px; padding: 0.1em 0.35em; }
+
+  /* ── Callout boxes ─────────────────────────── */
+  .callout { border-radius: 10px; padding: 1.25rem 1.5rem; margin: 1.25rem 0; border: 1px solid; }
+  .callout-title { font-weight: 700; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.4rem; }
+  .callout.thesis { background: var(--accent-bg); border-color: var(--accent-border); }
+  .callout.thesis .callout-title { color: var(--accent); }
+  .callout.shipped { background: var(--green-bg); border-color: var(--green-border); }
+  .callout.shipped .callout-title { color: var(--green); }
+  .callout.decision { background: var(--blue-bg); border-color: var(--blue-border); }
+  .callout.decision .callout-title { color: var(--blue); }
+  .callout.warning { background: var(--yellow-bg); border-color: var(--yellow-border); }
+  .callout.warning .callout-title { color: #a16207; }
+  .callout.note { background: var(--purple-bg); border-color: var(--purple-border); }
+  .callout.note .callout-title { color: var(--purple); }
+  .callout.methods { background: var(--slate-bg); border-color: var(--slate-border); }
+  .callout.methods .callout-title { color: var(--slate); }
+  .callout p + p { margin-top: 0.6rem; }
+
+  /* ── Tables ────────────────────────────────── */
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.9rem; }
+  th { text-align: left; font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); padding: 0.65rem 0.75rem; border-bottom: 2px solid var(--text); }
+  td { padding: 0.65rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td.ok { color: var(--green); font-weight: 600; }
+  td.flag { color: var(--accent); font-weight: 600; }
+
+  /* ── Check cards ───────────────────────────── */
+  .check { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.1rem 1.25rem; margin: 0.85rem 0; position: relative; overflow: hidden; }
+  .check::before { content: ''; position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: var(--green); }
+  .check.correctness::before { background: var(--blue); }
+  .check.quality::before { background: var(--purple); }
+  .check .check-id { font-family: var(--mono); font-size: 0.75rem; font-weight: 700; color: var(--text-secondary); }
+  .check h4 { font-size: 1rem; font-weight: 600; margin: 0.15rem 0 0.4rem; }
+  .check .pass { font-size: 0.85rem; margin-top: 0.5rem; }
+  .check .pass strong { color: var(--green); }
+  .check .onfail { font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.25rem; }
+
+  /* ── Paper tags ────────────────────────────── */
+  .paper { display: inline-block; font-size: 0.68rem; font-weight: 700; font-family: var(--mono); letter-spacing: 0.02em; padding: 0.1rem 0.4rem; border-radius: 4px; background: var(--slate-bg); color: var(--slate); border: 1px solid var(--slate-border); vertical-align: middle; }
+
+  /* ── Rubric ────────────────────────────────── */
+  .rubric-item { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.85rem 1.1rem; margin: 0.6rem 0; }
+  .rubric-item .rid { font-family: var(--mono); font-weight: 700; color: var(--blue); font-size: 0.8rem; }
+  .rubric-item .q { font-weight: 600; }
+  .rubric-item .watch { font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.3rem; }
+
+  /* ── Steps ─────────────────────────────────── */
+  ol.steps { counter-reset: step; list-style: none; padding-left: 0; }
+  ol.steps > li { counter-increment: step; position: relative; padding-left: 2.5rem; margin-bottom: 0.9rem; }
+  ol.steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 1.7rem; height: 1.7rem; background: var(--accent); color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem; font-family: var(--mono); }
+
+  /* ── Gate / done box ───────────────────────── */
+  .gate { background: var(--accent-bg); border: 1px solid var(--accent-border); border-radius: 10px; padding: 1.1rem 1.4rem; margin: 1.25rem 0; }
+  .gate .gate-title { font-weight: 700; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); margin-bottom: 0.5rem; }
+  .gate ul { list-style: none; padding-left: 0; margin: 0; }
+  .gate li { padding-left: 1.6rem; position: relative; margin-bottom: 0.4rem; }
+  .gate li::before { content: '\2610'; position: absolute; left: 0; font-family: var(--mono); color: var(--accent); }
+
+  /* ── Metric tiles ──────────────────────────── */
+  .metric-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.75rem; margin: 1rem 0; }
+  .metric-tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.25rem; text-align: center; }
+  .metric-tile .number { font-size: 1.6rem; font-weight: 700; font-family: var(--mono); letter-spacing: -0.03em; }
+  .metric-tile .label { font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.2rem; }
+
+  /* ── Footer ────────────────────────────────── */
+  .doc-footer { border-top: 1px solid var(--border); padding-top: 1.5rem; margin-top: 3rem; font-size: 0.85rem; color: var(--text-secondary); }
+
+  @media print {
+    body { background: white; font-size: 11pt; }
+    .page { max-width: 100%; padding: 0; }
+    .check, .rubric-item, .gate { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ════════════════════════════════════════════ HEADER -->
+<header class="doc-header">
+  <h1>Benchmark QA &amp; Expansion Playbook</h1>
+  <div class="subtitle">How to harden the 300-case set, then grow it safely</div>
+  <div class="meta-grid">
+    <div class="meta-item"><span class="label">Date</span>2026-06-09</div>
+    <div class="meta-item"><span class="label">Covers</span>QA &amp; expansion of the case set</div>
+    <div class="meta-item"><span class="label">Current state</span>v0 pilot &mdash; 300 cases</div>
+    <div class="meta-item"><span class="label">Goal of this phase</span>Reach v1 &ldquo;blessed&rdquo;, then expand</div>
+    <div class="meta-item"><span class="label">Companion doc</span>Gates &amp; Grading guide</div>
+    <div class="meta-item"><span class="label">Project</span>XBRL Truth Benchmark &middot; SecureFinAI Lab</div>
+  </div>
+</header>
+
+<!-- ════════════════════════════════════════════ READ THIS FIRST -->
+<section>
+  <h2><span class="num">00</span>Read this first</h2>
+  <p>
+    We generated 300 questions straight from SEC filings, each carrying its own answer and the exact facts
+    that answer was built from. That is real work, and it already passes a solid set of automatic checks.
+    This playbook is about turning those one-time checks into a <strong>standing quality process</strong>, 
+    so the set can be trusted and can <strong>keep growing without breaking</strong>.
+  </p>
+
+  <div class="callout thesis">
+    <div class="callout-title">&#9670; The one idea behind everything here</div>
+    <p>
+      &ldquo;Continuous QA&rdquo; is not &ldquo;check the file once.&rdquo; It is a <strong>checklist that can re-run on command</strong>,
+      every time the set changes. The set is only ever allowed to grow while that checklist stays green.
+      A growing benchmark with no standing checklist quietly rots; this playbook is the checklist.
+    </p>
+  </div>
+
+  <p>This document is written to be executable. Our job in this phase is to make each check
+    real and repeatable, however we choose to build it.</p>
+</section>
+
+<!-- ════════════════════════════════════════════ WHERE THE SET STANDS -->
+<section>
+  <h2><span class="num">01</span>Where the set stands today</h2>
+
+  <div class="metric-row">
+    <div class="metric-tile"><div class="number">300</div><div class="label">Cases (v0 pilot)</div></div>
+    <div class="metric-tile"><div class="number">246</div><div class="label">Companies covered</div></div>
+    <div class="metric-tile"><div class="number">198 / 102</div><div class="label">Track R / Track C</div></div>
+    <div class="metric-tile"><div class="number">7</div><div class="label">Question templates</div></div>
+  </div>
+
+  <p>The set spans fiscal years 2005&ndash;2026, with question cutoff dates running from
+    <strong>February 2011 to May 2026</strong>. Two families of question:
+    <em class="term">Track R</em> (find the right facts across one or more steps) and
+    <em class="term">Track C</em> (compute something from the facts, like a margin or a return on equity).</p>
+
+  <h3>What is already verified (our structural QA &mdash; done)</h3>
+  <div class="callout shipped">
+    <div class="callout-title">&#10003; Passing today, before any further work</div>
+    <ul style="margin:0;">
+      <li><strong>Every fact a question points to exists</strong> &mdash; no answer cites evidence that can&rsquo;t be found.</li>
+      <li><strong>No two questions use the exact same evidence set</strong>, and the answer value never appears inside the question text.</li>
+      <li><strong>No future data</strong> &mdash; every fact was filed on or before the question&rsquo;s cutoff date.</li>
+      <li><strong>The math was re-derived</strong> &mdash; 204 computational answers were recomputed from their inputs with zero mismatches, and 51 &ldquo;first year a condition holds&rdquo; questions were re-checked with zero failures.</li>
+    </ul>
+  </div>
+
+  <div class="callout warning">
+    <div class="callout-title">&#9888; What is <em>not</em> done yet (this is the gap)</div>
+    <p><strong>Nobody has read a sample by hand</strong> to judge whether the questions are clear and whether each gold answer is the
+      <em>only</em> defensible one. <strong>The checks were run once, not wired to re-run.</strong> The set is
+      <strong>lopsided</strong> (one template is a third of all cases). And the <strong>old cases</strong> (2011-era) raise a
+      memorization question. Sections 03&ndash;06 close each of these.</p>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ TWO KINDS OF QA -->
+<section>
+  <h2><span class="num">02</span>The two kinds of QA &mdash; and which one is missing</h2>
+  <table>
+    <thead><tr><th style="width:22%">Kind</th><th>What it asks</th><th style="width:18%">Status</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Structural</strong><br><span style="color:var(--text-secondary);font-size:0.85rem;">machine-checkable</span></td>
+        <td>Does the evidence exist? Is there future-data leakage? Does the math re-derive? These have a single right answer and a machine can confirm them.</td>
+        <td class="ok">Done &mdash; section 01</td>
+      </tr>
+      <tr>
+        <td><strong>Semantic &amp; process</strong><br><span style="color:var(--text-secondary);font-size:0.85rem;">judgment + repeatability</span></td>
+        <td>Is the question unambiguous? Is the gold answer the only defensible one? Is the set balanced? And &mdash; can we re-run all of this on demand as the set grows?</td>
+        <td class="flag">The job of this playbook</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>Our structural QA is what makes the benchmark <em class="term">verifiable by construction</em> &mdash; that property is intact and is the whole point.
+    What&rsquo;s left is the human-judgment layer and, above all, making the whole thing <strong>repeatable</strong>.</p>
+</section>
+
+<!-- ════════════════════════════════════════════ THE HARNESS -->
+<section>
+  <h2><span class="num">03</span>Build the standing QA checklist</h2>
+  <p>Turn the one-time checks into a <strong>checklist that can run on the whole set in one go</strong>, which prints a short
+    pass/fail report. Below are the ten checks it must contain. The first five we have already done once &mdash; now they
+    become permanent. The next two are <strong>new correctness checks</strong> borrowed from prior benchmarks. The last three are
+    <strong>quality reports</strong> that flag things for human judgment rather than pass/fail outright.</p>
+
+  <h3>Group A &mdash; Integrity (must be green)</h3>
+
+  <div class="check">
+    <div class="check-id">C1 &middot; Evidence exists</div>
+    <h4>Every fact a question relies on can be found in the fact store.</h4>
+    <div class="pass"><strong>Pass:</strong> zero questions whose evidence is missing or unresolvable.</div>
+    <div class="onfail">On fail: quarantine the case; it cannot ship until its evidence resolves.</div>
+  </div>
+  <div class="check">
+    <div class="check-id">C2 &middot; No duplicate evidence sets</div>
+    <h4>No two questions are built from the identical set of facts.</h4>
+    <div class="pass"><strong>Pass:</strong> zero exact collisions. (Near-identical <em>wording</em> is a separate check &mdash; C8.)</div>
+    <div class="onfail">On fail: drop one of the pair, or change one so it asks something genuinely different.</div>
+  </div>
+  <div class="check">
+    <div class="check-id">C3 &middot; No answer leakage</div>
+    <h4>The answer value never appears in the question text.</h4>
+    <div class="pass"><strong>Pass:</strong> zero questions that hand the answer away.</div>
+    <div class="onfail">On fail: rephrase the question so the value must be looked up, not read off.</div>
+  </div>
+  <div class="check">
+    <div class="check-id">C4 &middot; No future data (the as-of rule)</div>
+    <h4>Every fact used was filed on or before the question&rsquo;s cutoff date.</h4>
+    <div class="pass"><strong>Pass:</strong> zero facts filed after the cutoff.</div>
+    <div class="onfail">On fail: either move the cutoff forward, or drop the offending fact.</div>
+  </div>
+  <div class="check">
+    <div class="check-id">C5 &middot; The math re-derives</div>
+    <h4>For every computed answer, recomputing it from the cited inputs gives the same number.</h4>
+    <div class="pass"><strong>Pass:</strong> zero mismatches (allowing the small rounding tolerance the Gates &amp; Grading guide sets).</div>
+    <div class="onfail">On fail: the case is wrong &mdash; fix the inputs or the formula, do not ship it.</div>
+  </div>
+
+  <h3>Group B &mdash; Correctness, new checks <span class="paper">FINAUDITING</span></h3>
+
+  <div class="check correctness">
+    <div class="check-id">C6 &middot; Subtotals reconcile</div>
+    <h4>Wherever an answer uses a subtotal (total revenue, total assets, equity&hellip;), that subtotal equals the sum of its parts as the <em>filing itself</em> defines them &mdash; signs included.</h4>
+    <p style="font-size:0.88rem;color:var(--text-secondary);margin-top:0.4rem;">Filings carry their own &ldquo;these line items add up to that subtotal&rdquo; relationships. Re-add the parts and confirm they match the reported subtotal. If a number is disconnected from its parts, the fact itself is suspect &mdash; not just the question.</p>
+    <div class="pass"><strong>Pass:</strong> every aggregate used reconciles to its components within tolerance.</div>
+    <div class="onfail">On fail: flag the underlying fact; do not build questions on a number that doesn&rsquo;t add up.</div>
+  </div>
+  <div class="check correctness">
+    <div class="check-id">C7 &middot; Accounting identities hold</div>
+    <h4>Where it applies, confirm Assets = Liabilities + Equity for the company and period the question uses.</h4>
+    <div class="pass"><strong>Pass:</strong> the identity holds within tolerance for every case that touches the balance sheet.</div>
+    <div class="onfail">On fail: the period&rsquo;s figures are internally inconsistent &mdash; investigate before using them.</div>
+  </div>
+
+  <h3>Group C &mdash; Quality reports (flag for human review, don&rsquo;t auto-fail)</h3>
+
+  <div class="check quality">
+    <div class="check-id">C8 &middot; Near-duplicate wording <span class="paper">QuantEval</span></div>
+    <h4>Flag pairs of questions that are near-identical in shape and wording, so the set isn&rsquo;t padded with cosmetic variants.</h4>
+    <p style="font-size:0.88rem;color:var(--text-secondary);margin-top:0.4rem;">This matters most for the largest template (see C9): 102 of the 300 questions follow the same &ldquo;how did metric X change from year A to year B&rdquo; shape, so many will read almost the same. QuantEval&rsquo;s rule of thumb: when two items score above <strong>0.92 similarity</strong>, review them as a likely duplicate.</p>
+    <div class="pass"><strong>Outcome:</strong> a list of suspected duplicate pairs for a human to keep, merge, or cut.</div>
+  </div>
+  <div class="check quality">
+    <div class="check-id">C9 &middot; Distribution report</div>
+    <h4>Count cases per template, track, difficulty, and era; flag any template above 25% of the set.</h4>
+    <div class="pass"><strong>Outcome:</strong> the table in section 05, refreshed on every run, so imbalance is visible.</div>
+  </div>
+  <div class="check quality">
+    <div class="check-id">C10 &middot; Era report</div>
+    <h4>Count cases by how old the cutoff date is (e.g. before vs after 2020), and report the old-case share.</h4>
+    <div class="pass"><strong>Outcome:</strong> a number used to apply the era policy (section 05).</div>
+  </div>
+
+  <div class="gate">
+    <div class="gate-title">What &ldquo;the checklist is green&rdquo; means</div>
+    <ul>
+      <li>Checks C1&ndash;C7 all pass with zero failures.</li>
+      <li>Checks C8&ndash;C10 have been produced, and every flag they raised has been reviewed and resolved.</li>
+      <li>The run produces a one-page report (date, set version, every check&rsquo;s result and counts).</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ HUMAN SPOT-CHECK -->
+<section>
+  <h2><span class="num">04</span>The human spot-check</h2>
+  <p>Machines confirm the facts; only a person can confirm the <strong>questions read well and have a single defensible answer</strong>.
+    This is a small, structured read &mdash; not a review of all 300.</p>
+
+  <h3>Step 1 &mdash; Pick the sample</h3>
+  <p>Read about <strong>30 cases</strong> (or 10% of any new batch, whichever is larger), chosen to <strong>cover the variety</strong>, not at random across the whole pile:</p>
+  <ul>
+    <li>At least a few from <strong>every template</strong>, roughly in proportion to its size.</li>
+    <li>At least one from <strong>each difficulty level</strong> (easy, medium, hard, very hard).</li>
+    <li>At least <strong>two old cases</strong> (pre-2020 cutoff) and two recent ones.</li>
+    <li><strong>No more than two or three from the same company</strong>, so the sample isn&rsquo;t dominated by one filer.</li>
+  </ul>
+  <p class="paper-note" style="font-size:0.85rem;color:var(--text-secondary);">This &ldquo;cover the variety on a small budget&rdquo; sampling mirrors how FinTagging chose its audit set <span class="paper">FinTagging</span>.</p>
+
+  <h3>Step 2 &mdash; Score each case against five questions</h3>
+
+  <div class="rubric-item"><span class="rid">R1 &middot; Readable</span> &mdash; <span class="q">Is the question grammatical and unambiguous about the company, the metric, and the period?</span>
+    <div class="watch">Watch for: vague periods (&ldquo;recently&rdquo;), missing units, or a company named in a way that could match two entities.</div></div>
+  <div class="rubric-item"><span class="rid">R2 &middot; Single defensible answer</span> &mdash; <span class="q">Given the filing, is the gold answer the <em>only</em> reasonable answer?</span>
+    <div class="watch">Watch for: a metric that the company reports two ways (e.g. revenue under different labels), or an equity figure that may or may not include non-controlling interest &mdash; either can make a <em>second</em> answer arguable. If so, the question must pin down which one it means.</div></div>
+  <div class="rubric-item"><span class="rid">R3 &middot; Faithful evidence</span> &mdash; <span class="q">Do the cited facts actually support the answer, and are they from the right filing and period?</span>
+    <div class="watch">Watch for: the right number from the wrong year, or a comparative column mistaken for the primary figure.</div></div>
+  <div class="rubric-item"><span class="rid">R4 &middot; No shortcut</span> &mdash; <span class="q">Is the question impossible to answer from its own text or general knowledge alone &mdash; does it truly require the data?</span>
+    <div class="watch">Watch for: famous round numbers, or old cases whose answers a model might simply remember.</div></div>
+  <div class="rubric-item"><span class="rid">R5 &middot; Difficulty feels right</span> &mdash; <span class="q">Does the assigned difficulty match the actual effort, or is a &ldquo;hard&rdquo; case trivial (or vice versa)?</span>
+    <div class="watch">Note: difficulty today is set purely from how many facts are needed. R5 is the human sanity check on that proxy.</div></div>
+
+  <h3>Step 3 &mdash; Two readers, one judge</h3>
+  <p>To keep this honest, not a rubber stamp:</p>
+  <ol class="steps">
+    <li><strong>Calibrate first.</strong> Both reviewers score the same 5 cases together and talk through any disagreement, so &ldquo;pass&rdquo; means the same thing to both.</li>
+    <li><strong>Review independently.</strong> Each reviewer then scores the rest of the sample on their own, marking each of R1&ndash;R5 pass or fail with a one-line note.</li>
+    <li><strong>Adjudicate.</strong> A senior reviewer resolves every disagreement, producing the final verdict per case.</li>
+  </ol>
+
+  <div class="callout methods">
+    <div class="callout-title">&#9670; How we know two readers agree</div>
+    <p>Report a simple <strong>agreement score</strong> &mdash; how often the two reviewers reached the same verdict, corrected for the agreement we&rsquo;d expect by chance (this is &ldquo;Cohen&rsquo;s kappa&rdquo;; a person needs no formula, just the number). FinTagging reached <strong>96% raw agreement, kappa 0.81</strong> on the same kind of task <span class="paper">FinTagging</span>. The Gates &amp; Grading guide sets <strong>kappa &ge; 0.8</strong> as the bar. If we&rsquo;re far below that, our rubric isn&rsquo;t being read the same way &mdash; recalibrate and re-review, don&rsquo;t just push the cases through.</p>
+  </div>
+
+  <h3>Worked examples</h3>
+  <table>
+    <thead><tr><th style="width:42%">Case</th><th>How it scores</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>&ldquo;What was NVIDIA&rsquo;s total revenue for the fiscal year ending in 2026?&rdquo;</strong><br><span style="color:var(--text-secondary);font-size:0.85rem;">Answer: $215.9B, single fact.</span></td>
+        <td class="ok">Clean pass on all five. One company, one metric, one clearly-named period; the cited fact is exactly that figure from that 10-K; nothing to misread.</td>
+      </tr>
+      <tr>
+        <td><strong>&ldquo;Compute Intuitive Surgical&rsquo;s return on equity for FY2025 using the DuPont decomposition.&rdquo;</strong><br><span style="color:var(--text-secondary);font-size:0.85rem;">Answer: 16.02%, four facts.</span></td>
+        <td class="flag"><strong>R2 watch.</strong> Equity can be reported with or without non-controlling interest, and that choice shifts ROE. The set&rsquo;s own rule is to use the figure that <em>includes</em> it &mdash; so the reviewer confirms the question and evidence are consistent with that rule, and that no other equity figure makes a rival answer defensible.</td>
+      </tr>
+      <tr>
+        <td><strong>Any &ldquo;how did metric X change from year A to year B&rdquo; case from 2012.</strong></td>
+        <td class="flag"><strong>R4 + era watch.</strong> Old, well-known figures may be answerable from memory. Keep some for coverage, but flag for the era cap (section 05) and make sure the answer genuinely needs the data.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ════════════════════════════════════════════ EXPANSION TARGETS -->
+<section>
+  <h2><span class="num">05</span>Expansion targets &mdash; what a healthy set looks like</h2>
+  <p>The point of QA is to let the set <strong>grow</strong>. Growth should move the set toward balance, not away. Here is the current
+    shape and where it needs to go.</p>
+
+  <h3>Template balance</h3>
+  <p><strong>The rule:</strong> no single template should exceed <strong>25%</strong> of the set. One template is well over that today.</p>
+  <table>
+    <thead><tr><th>Template (what it asks)</th><th>Now</th><th>Share</th><th>Direction</th></tr></thead>
+    <tbody>
+      <tr><td>Change in a metric between two periods</td><td>102</td><td class="flag">34%</td><td class="flag">Over cap &mdash; trim or out-grow it</td></tr>
+      <tr><td>Multi-step valuation (DuPont, multi-year averages)</td><td>69</td><td>23%</td><td>At the cap &mdash; hold</td></tr>
+      <tr><td>First year a condition holds, then read a metric</td><td>51</td><td>17%</td><td class="ok">Healthy</td></tr>
+      <tr><td>Compute a ratio (margin, ROE, current ratio&hellip;)</td><td>33</td><td>11%</td><td>Room to grow</td></tr>
+      <tr><td>One metric for one company and period</td><td>30</td><td>10%</td><td>Room to grow</td></tr>
+      <tr><td>Which company leads a metric within a set</td><td>9</td><td class="flag">3%</td><td class="flag">Thin &mdash; grow</td></tr>
+      <tr><td>All companies meeting two constraints at once</td><td>6</td><td class="flag">2%</td><td class="flag">Thin &mdash; grow</td></tr>
+    </tbody>
+  </table>
+  <p><strong>What to do:</strong> as we add cases, favor the thin templates (the bottom four rows) until no template tops 25%.
+    The fastest single fix is to add cross-company and multi-constraint questions, which are also the hardest and most valuable.</p>
+
+  <h3>Difficulty and era</h3>
+  <ul>
+    <li><strong>Difficulty spread</strong> is currently 10% easy / 45% medium / 30% hard / 15% very hard &mdash; a reasonable shape. Keep roughly this balance; let the human spot-check (R5) catch cases whose label doesn&rsquo;t match reality.</li>
+    <li><strong>Era policy (a decision to ratify at the acceptance gate):</strong> cutoff dates run back to 2011. Old, well-known figures risk being answered from memory rather than from retrieval, which is exactly what this benchmark is meant to measure. <strong>Recommended default:</strong> flag every pre-2020 case and cap them at a modest share of the set (the exact share is set in the Gates &amp; Grading guide). New cases should lean recent.</li>
+  </ul>
+</section>
+
+<!-- ════════════════════════════════════════════ EXPANSION WORKFLOW -->
+<section>
+  <h2><span class="num">06</span>The expansion workflow</h2>
+  <p>Every time we add cases, follow the same loop. This is the &ldquo;continuous&rdquo; in continuous QA.</p>
+  <ol class="steps">
+    <li><strong>Generate the new batch</strong>, aiming at the under-filled templates from section 05.</li>
+    <li><strong>Run the full checklist (section 03) on the whole set.</strong> It must come back green &mdash; integrity and correctness with zero failures, quality flags reviewed.</li>
+    <li><strong>Check the distribution moved the right way.</strong> The new batch should bring the set <em>closer</em> to the targets, never further from them.</li>
+    <li><strong>Spot-check the new batch</strong> (section 04) with the same rubric and the two-reader process.</li>
+    <li><strong>Version and document.</strong> Bump the version (v1 &rarr; v1.1), and add one changelog line: what was added, how many, and which templates.</li>
+    <li><strong>Submit it to the acceptance gate</strong> (Gates &amp; Grading guide) for sign-off.</li>
+  </ol>
+  <div class="callout warning">
+    <div class="callout-title">&#9888; The one rule that protects everything</div>
+    <p><strong>Never add to an already-released version in place, and never expand while the checklist is red.</strong>
+      Every change produces a new version with its own report. That is what lets anyone trust a set that keeps growing.</p>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ DEFINITION OF DONE -->
+<section>
+  <h2><span class="num">07</span>Definition of done</h2>
+  <p>A batch is ready for the acceptance gate when all of the following are true.</p>
+  <div class="gate">
+    <div class="gate-title">A case (or batch) is done when&hellip;</div>
+    <ul>
+      <li>It passes integrity checks C1&ndash;C5 and correctness checks C6&ndash;C7 with zero failures.</li>
+      <li>Quality flags from C8&ndash;C10 have been reviewed and resolved (duplicates cut, no template over 25%, era policy applied).</li>
+      <li>It was covered by a human spot-check that met the agreement bar (kappa &ge; 0.8) and passed the rubric &mdash; with <strong>zero R2 &ldquo;ambiguous answer&rdquo; failures</strong> in the sample.</li>
+      <li>It is recorded in the dataset card and changelog with its template, track, difficulty, and era.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ METHODS BOX -->
+<section>
+  <h2><span class="num">08</span>Grounded in prior work</h2>
+  <div class="callout methods">
+    <div class="callout-title">&#9670; Where these methods come from</div>
+    <p><span class="paper">FINAUDITING</span> &mdash; a sibling XBRL benchmark from our own lab circle. We borrow its idea of checking that <strong>subtotals reconcile to their parts</strong> and that <strong>accounting identities hold</strong> (checks C6&ndash;C7), and its practice of double-checking a large share of cases by hand.</p>
+    <p><span class="paper">FinTagging</span> &mdash; an XBRL tagging benchmark. We borrow its <strong>human-review protocol</strong>: cover-the-variety sampling, two independent reviewers plus an adjudicator, a calibration round, and reporting an agreement score (section 04).</p>
+    <p><span class="paper">QuantEval</span> &mdash; a quantitative-finance benchmark. We borrow its <strong>near-duplicate screen</strong> (flag items above 0.92 similarity, check C8) so the set isn&rsquo;t padded with cosmetic variants.</p>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ FOOTER -->
+<footer class="doc-footer">
+  <p><strong>XBRL Truth Benchmark</strong> &middot; SecureFinAI Lab &middot; Columbia University<br>
+  This playbook covers the QA &amp; expansion side of the next phase. The acceptance gate, grading plan, and roadmap live in the companion <strong>Gates &amp; Grading guide</strong>. Specific tools and code are deliberately out of scope here; they belong in the implementation spec written from these two guides.</p>
+</footer>
+
+</div>
+</body>
+</html>

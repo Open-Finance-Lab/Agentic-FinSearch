@@ -1,0 +1,1276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Benchmark Question Generation — Contributor Guide</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e5e5e4;
+    --text: #1c1917;
+    --text-secondary: #57534e;
+    --accent: #c2410c;
+    --accent-bg: #fff7ed;
+    --accent-border: #fed7aa;
+    --green: #15803d;
+    --green-bg: #f0fdf4;
+    --green-border: #bbf7d0;
+    --blue: #1d4ed8;
+    --blue-bg: #eff6ff;
+    --blue-border: #bfdbfe;
+    --purple: #7c3aed;
+    --purple-bg: #f5f3ff;
+    --purple-border: #ddd6fe;
+    --yellow-bg: #fefce8;
+    --yellow-border: #fef08a;
+    --teal: #0f766e;
+    --teal-bg: #f0fdfa;
+    --teal-border: #99f6e4;
+    --mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 15px;
+    padding: 0;
+  }
+
+  .page {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 3rem 2rem 6rem;
+  }
+
+  /* ── Header ────────────────────────────────── */
+  .doc-header {
+    border-bottom: 2px solid var(--text);
+    padding-bottom: 2rem;
+    margin-bottom: 3rem;
+  }
+
+  .doc-header h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+    margin-bottom: 0.5rem;
+  }
+
+  .doc-header .subtitle {
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+
+  .meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    font-size: 0.85rem;
+  }
+
+  .meta-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+  }
+
+  .meta-item .label {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    display: block;
+    margin-bottom: 0.15rem;
+  }
+
+  /* ── Sections ──────────────────────────────── */
+  section {
+    margin-bottom: 3rem;
+  }
+
+  h2 {
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 1rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+  }
+
+  h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  h4 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-top: 1.25rem;
+    margin-bottom: 0.4rem;
+  }
+
+  p, li { color: var(--text); }
+  p + p { margin-top: 0.75rem; }
+
+  ul, ol {
+    margin: 0.75rem 0;
+    padding-left: 1.5rem;
+  }
+
+  li { margin-bottom: 0.35rem; }
+  strong { font-weight: 600; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: #f5f5f4;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+  }
+
+  /* ── Callout boxes ─────────────────────────── */
+  .callout {
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    margin: 1.25rem 0;
+    border: 1px solid;
+  }
+
+  .callout-title {
+    font-weight: 700;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .callout.scope {
+    background: var(--accent-bg);
+    border-color: var(--accent-border);
+  }
+  .callout.scope .callout-title { color: var(--accent); }
+
+  .callout.shipped {
+    background: var(--green-bg);
+    border-color: var(--green-border);
+  }
+  .callout.shipped .callout-title { color: var(--green); }
+
+  .callout.decision {
+    background: var(--blue-bg);
+    border-color: var(--blue-border);
+  }
+  .callout.decision .callout-title { color: var(--blue); }
+
+  .callout.warning {
+    background: var(--yellow-bg);
+    border-color: var(--yellow-border);
+  }
+  .callout.warning .callout-title { color: #a16207; }
+
+  .callout.note {
+    background: var(--purple-bg);
+    border-color: var(--purple-border);
+  }
+  .callout.note .callout-title { color: var(--purple); }
+
+  .callout.example {
+    background: var(--teal-bg);
+    border-color: var(--teal-border);
+  }
+  .callout.example .callout-title { color: var(--teal); }
+
+  /* ── Tables ────────────────────────────────── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+
+  th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    padding: 0.65rem 0.75rem;
+    border-bottom: 2px solid var(--text);
+  }
+
+  td {
+    padding: 0.65rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  /* ── Step cards ────────────────────────────── */
+  .step-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .step-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+  }
+
+  .step-card.s0::before { background: var(--text-secondary); }
+  .step-card.s1::before { background: var(--accent); }
+  .step-card.s2::before { background: var(--blue); }
+  .step-card.s3::before { background: var(--green); }
+
+  .step-card .step-label {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.25rem;
+  }
+
+  .step-card.s0 .step-label { color: var(--text-secondary); }
+  .step-card.s1 .step-label { color: var(--accent); }
+  .step-card.s2 .step-label { color: var(--blue); }
+  .step-card.s3 .step-label { color: var(--green); }
+
+  .step-card h3 {
+    margin-top: 0;
+    font-size: 1.1rem;
+  }
+
+  /* ── Template cards ────────────────────────── */
+  .template-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    margin: 1rem 0;
+  }
+
+  .template-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .template-header h4 {
+    margin: 0;
+    font-size: 1rem;
+  }
+
+  .template-meta {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+
+  /* ── Badges ────────────────────────────────── */
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+
+  .badge.track-r {
+    background: var(--blue-bg);
+    color: var(--blue);
+    border: 1px solid var(--blue-border);
+  }
+
+  .badge.track-c {
+    background: var(--purple-bg);
+    color: var(--purple);
+    border: 1px solid var(--purple-border);
+  }
+
+  .badge.easy {
+    background: var(--green-bg);
+    color: var(--green);
+    border: 1px solid var(--green-border);
+  }
+
+  .badge.medium {
+    background: var(--yellow-bg);
+    color: #a16207;
+    border: 1px solid var(--yellow-border);
+  }
+
+  .badge.hard {
+    background: var(--accent-bg);
+    color: var(--accent);
+    border: 1px solid var(--accent-border);
+  }
+
+  .badge.start {
+    background: var(--teal-bg);
+    color: var(--teal);
+    border: 1px solid var(--teal-border);
+  }
+
+  /* ── Gate boxes ────────────────────────────── */
+  .gate {
+    background: var(--accent-bg);
+    border: 1px solid var(--accent-border);
+    color: var(--accent);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    font-size: 0.85rem;
+    margin-top: 1rem;
+  }
+
+  .gate-title {
+    font-weight: 700;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.35rem;
+  }
+
+  .gate ul {
+    margin: 0.35rem 0 0;
+    padding-left: 1.25rem;
+  }
+
+  .gate li {
+    margin-bottom: 0.2rem;
+    font-size: 0.85rem;
+  }
+
+  /* ── Code blocks ───────────────────────────── */
+  pre {
+    background: #1c1917;
+    color: #e7e5e4;
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    line-height: 1.6;
+    margin: 1rem 0;
+  }
+
+  pre .comment { color: #78716c; }
+  pre .keyword { color: #fb923c; }
+  pre .string { color: #86efac; }
+  pre .type { color: #93c5fd; }
+  pre .number { color: #fbbf24; }
+  pre .punct { color: #a8a29e; }
+
+  /* ── Tree structure ────────────────────────── */
+  .file-tree {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    line-height: 1.8;
+    margin: 1rem 0;
+  }
+
+  .file-tree .dir { color: var(--blue); font-weight: 600; }
+  .file-tree .file { color: var(--text); }
+  .file-tree .desc { color: var(--text-secondary); font-family: var(--sans); font-size: 0.8rem; }
+
+  /* ── Checklist ─────────────────────────────── */
+  .checklist {
+    list-style: none;
+    padding-left: 0;
+  }
+
+  .checklist li {
+    position: relative;
+    padding-left: 1.75rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .checklist li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.35rem;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-radius: 3px;
+    background: var(--surface);
+  }
+
+  /* ── Metric tiles ──────────────────────────── */
+  .metric-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+
+  .metric-tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    text-align: center;
+  }
+
+  .metric-tile .number {
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-family: var(--mono);
+    letter-spacing: -0.03em;
+  }
+
+  .metric-tile .label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-top: 0.15rem;
+  }
+
+  /* ── Not-in-scope ──────────────────────────── */
+  .out-of-scope {
+    background: #f5f5f4;
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin: 1rem 0;
+  }
+
+  .out-of-scope ul {
+    margin: 0;
+    padding-left: 1.25rem;
+  }
+
+  .out-of-scope li {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+  }
+
+  .out-of-scope li strong {
+    color: var(--text);
+  }
+
+  /* ── Pseudocode ────────────────────────────── */
+  .pseudo {
+    background: #fafaf9;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    line-height: 1.7;
+    margin: 0.75rem 0;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+  }
+
+  .pseudo .kw { color: var(--accent); font-weight: 600; }
+  .pseudo .cond { color: var(--blue); }
+  .pseudo .act { color: var(--green); }
+
+  /* ── Collapsible sections ──────────────────── */
+  details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin: 1rem 0;
+    overflow: hidden;
+  }
+
+  details summary {
+    padding: 1rem 1.25rem;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  details summary::before {
+    content: '\25B8';
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    transition: transform 0.15s;
+  }
+
+  details[open] summary::before {
+    transform: rotate(90deg);
+  }
+
+  details summary::-webkit-details-marker { display: none; }
+
+  details .details-body {
+    padding: 0 1.25rem 1.25rem;
+  }
+
+  /* ── Footer ────────────────────────────────── */
+  .doc-footer {
+    border-top: 1px solid var(--border);
+    padding-top: 1.5rem;
+    margin-top: 3rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
+
+  /* ── Print ─────────────────────────────────── */
+  @media print {
+    body { background: white; font-size: 11pt; }
+    .page { max-width: 100%; padding: 0; }
+    details { break-inside: avoid; }
+    pre { white-space: pre-wrap; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ════════════════════════════════════════════ HEADER -->
+<header class="doc-header">
+  <h1>Benchmark Question Generation</h1>
+  <div class="subtitle">Contributor Guide &mdash; what to build and how</div>
+  <div class="meta-grid">
+    <div class="meta-item">
+      <span class="label">Date</span>
+      2026-05-28
+    </div>
+    <div class="meta-item">
+      <span class="label">Scope</span>
+      Question generation only
+    </div>
+    <div class="meta-item">
+      <span class="label">Starting Point</span>
+      <code style="font-size: 0.82em;">axioms/benchmark.py</code> (3 cases &rarr; ~300)
+    </div>
+    <div class="meta-item">
+      <span class="label">Parent Doc</span>
+      <a href="2026-05-28-xbrl-benchmark-prd.html" style="color: var(--accent); text-decoration: none;">Full Benchmark PRD</a>
+    </div>
+    <div class="meta-item">
+      <span class="label">Repo</span>
+      <code style="font-size: 0.82em;">Benchmarks/xbrl-benchmark/</code>
+    </div>
+    <div class="meta-item">
+      <span class="label">Dependencies</span>
+      <code style="font-size: 0.82em;">duckdb</code>, <code style="font-size: 0.82em;">requests</code>
+    </div>
+  </div>
+</header>
+
+<!-- ════════════════════════════════════════════ WHAT WE'RE BUILDING -->
+<section>
+  <h2>What We're Building</h2>
+  <p>
+    A Python pipeline that <strong>automatically generates financial benchmark questions from real SEC data</strong>,
+    with gold answers attached by construction &mdash; no manual labeling needed.
+  </p>
+
+  <div class="metric-row">
+    <div class="metric-tile">
+      <div class="number">~300</div>
+      <div class="label">Questions to generate</div>
+    </div>
+    <div class="metric-tile">
+      <div class="number">~300</div>
+      <div class="label">Filings to ingest</div>
+    </div>
+    <div class="metric-tile">
+      <div class="number">7</div>
+      <div class="label">Question templates</div>
+    </div>
+    <div class="metric-tile">
+      <div class="number">3</div>
+      <div class="label">Steps to get there</div>
+    </div>
+  </div>
+
+  <div class="callout scope">
+    <div class="callout-title">&#9670; This guide covers ONE thing</div>
+    <p>
+      Ingest data &rarr; generate questions &rarr; output JSON. That's it.<br>
+      Grading, agent wiring, MCP services, and cloud deployment are <strong>not in scope</strong>.
+      See the <a href="2026-05-28-xbrl-benchmark-prd.html" style="color: var(--accent);">full PRD</a> for the bigger picture.
+    </p>
+  </div>
+
+  <h3>The output: what each generated case looks like</h3>
+<pre>
+{
+  <span class="string">"question"</span>:        <span class="string">"How did Apple's gross margin change from FY2022 to FY2023?"</span>,
+  <span class="string">"gold_answer"</span>:     <span class="number">-0.58</span>,
+  <span class="string">"gold_answer_unit"</span>: <span class="string">"percentage_points"</span>,
+  <span class="string">"gold_fact_path"</span>:  [<span class="string">"fact_abc123"</span>, <span class="string">"fact_def456"</span>, <span class="string">"fact_ghi789"</span>, <span class="string">"fact_jkl012"</span>],
+  <span class="string">"required_facts"</span>:  {
+    <span class="string">"Revenue_FY2022"</span>: <span class="number">394328000000</span>,
+    <span class="string">"COGS_FY2022"</span>:    <span class="number">223546000000</span>,
+    <span class="string">"Revenue_FY2023"</span>: <span class="number">383285000000</span>,
+    <span class="string">"COGS_FY2023"</span>:    <span class="number">214137000000</span>
+  },
+  <span class="string">"K"</span>:              <span class="number">4</span>,
+  <span class="string">"track"</span>:          <span class="string">"R"</span>,
+  <span class="string">"template_id"</span>:    <span class="string">"period_over_period_delta"</span>,
+  <span class="string">"difficulty"</span>:     <span class="string">"medium"</span>,
+  <span class="string">"as_of_date"</span>:     <span class="string">"2024-01-15"</span>,
+  <span class="string">"entity"</span>:         { <span class="string">"cik"</span>: <span class="number">320193</span>, <span class="string">"ticker"</span>: <span class="string">"AAPL"</span>, <span class="string">"name"</span>: <span class="string">"Apple Inc."</span> }
+}
+</pre>
+</section>
+
+<!-- ════════════════════════════════════════════ STEP 0 -->
+<section>
+  <h2>Step 0 &mdash; Project Structure</h2>
+
+  <p>Work inside <code>Benchmarks/xbrl-benchmark/</code>:</p>
+
+  <div class="file-tree">
+    <span class="dir">xbrl-benchmark/</span><br>
+    &nbsp;&nbsp;<span class="dir">ingest/</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">__init__.py</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">companyfacts.py</span> &nbsp;<span class="desc">&larr; Fetch + parse SEC companyfacts JSON</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">universe.py</span> &nbsp;<span class="desc">&larr; Company CIK list (~300 large-cap S&amp;P 500)</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">normalize.py</span> &nbsp;<span class="desc">&larr; Concept normalization (tag aliases)</span><br>
+    &nbsp;&nbsp;<span class="dir">store/</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">__init__.py</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">db.py</span> &nbsp;<span class="desc">&larr; DuckDB connection + schema creation</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">queries.py</span> &nbsp;<span class="desc">&larr; Common queries (entity + concept + period)</span><br>
+    &nbsp;&nbsp;<span class="dir">templates/</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">__init__.py</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">base.py</span> &nbsp;<span class="desc">&larr; Base template class + BenchmarkCase dataclass</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">track_r.py</span> &nbsp;<span class="desc">&larr; Retrieval templates (1, 2, 4, 5, 7)</span><br>
+    &nbsp;&nbsp;&nbsp;&nbsp;<span class="file">track_c.py</span> &nbsp;<span class="desc">&larr; Computation templates (3, 6)</span><br>
+    &nbsp;&nbsp;<span class="file">generate.py</span> &nbsp;<span class="desc">&larr; Main entry: templates + store &rarr; cases JSON</span><br>
+    &nbsp;&nbsp;<span class="file">validate_output.py</span> &nbsp;<span class="desc">&larr; Sanity checks on generated cases</span><br>
+    &nbsp;&nbsp;<span class="file">requirements.txt</span> &nbsp;<span class="desc">&larr; duckdb, requests</span>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ STEP 1 -->
+<section>
+  <h2>Step 1 &mdash; Ingest SEC Data into DuckDB</h2>
+
+  <div class="callout warning">
+    <div class="callout-title">&#9888; Why we can't skip this</div>
+    <p>
+      The existing <code>axioms/benchmark.py</code> resolves values from <strong>3 local iXBRL files</strong>
+      (AAPL, MSFT, TSLA). We can't generate 300 diverse questions from 3 companies.
+      Start with ~300 filings from large-cap S&amp;P 500 companies.
+      The SEC publishes pre-extracted XBRL &mdash; one API call gives us every fact a company ever reported.
+    </p>
+  </div>
+
+  <h3>1a. The fact table schema</h3>
+<pre>
+<span class="keyword">CREATE TABLE</span> <span class="type">facts</span> (
+  fact_id       <span class="type">VARCHAR</span>,     <span class="comment">-- hash of (cik, concept, period_end, unit, accession, dim_hash)</span>
+  cik           <span class="type">INTEGER</span>,
+  entity_name   <span class="type">VARCHAR</span>,
+  taxonomy      <span class="type">VARCHAR</span>,     <span class="comment">-- 'us-gaap' | 'dei' | 'ifrs'</span>
+  concept       <span class="type">VARCHAR</span>,     <span class="comment">-- the XBRL tag, e.g. 'Revenues'</span>
+  period_type   <span class="type">VARCHAR</span>,     <span class="comment">-- 'instant' | 'duration'</span>
+  period_start  <span class="type">DATE</span>,
+  period_end    <span class="type">DATE</span>,
+  unit          <span class="type">VARCHAR</span>,     <span class="comment">-- 'USD' | 'shares' | 'pure' | 'USD/shares'</span>
+  decimals      <span class="type">INTEGER</span>,
+  value         <span class="type">DOUBLE</span>,
+  accession     <span class="type">VARCHAR</span>,     <span class="comment">-- filing accession number (provenance)</span>
+  form_type     <span class="type">VARCHAR</span>,     <span class="comment">-- '10-K', '10-Q', etc.</span>
+  filed_date    <span class="type">DATE</span>,
+  fy            <span class="type">INTEGER</span>,     <span class="comment">-- fiscal year</span>
+  fp            <span class="type">VARCHAR</span>,     <span class="comment">-- fiscal period ('FY', 'Q1', etc.)</span>
+  frame         <span class="type">VARCHAR</span>      <span class="comment">-- SEC frame identifier</span>
+);
+
+<span class="keyword">CREATE INDEX</span> idx_entity_concept <span class="keyword">ON</span> facts(cik, concept, period_end);
+<span class="keyword">CREATE INDEX</span> idx_cross_entity <span class="keyword">ON</span> facts(concept, period_end);
+</pre>
+
+  <h3>1b. The ingestion script</h3>
+  <p>For each company in our ~300-filing universe, the script does three things:</p>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Action</th><th>Details</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>1</strong></td>
+        <td>Fetch</td>
+        <td><code>GET https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json</code></td>
+      </tr>
+      <tr>
+        <td><strong>2</strong></td>
+        <td>Parse</td>
+        <td>JSON nests facts under <code>facts.{taxonomy}.{concept}.units.{unit}[]</code></td>
+      </tr>
+      <tr>
+        <td><strong>3</strong></td>
+        <td>Insert</td>
+        <td>Each entry has <code>val, accn, fy, fp, form, filed, frame, start, end</code> &mdash; map to schema above</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout decision">
+    <div class="callout-title">&#9670; Rules for SEC API access</div>
+    <ul style="margin: 0;">
+      <li><strong>User-Agent header required:</strong> <code>"Agentic-FinSearch felixflyingt@gmail.com"</code> (SEC blocks without it)</li>
+      <li><strong>Rate limit:</strong> &le;10 req/s &mdash; use <code>time.sleep(0.1)</code> between calls</li>
+      <li><strong>Idempotent:</strong> <code>INSERT OR IGNORE</code> keyed on <code>fact_id</code> so re-runs don't duplicate</li>
+      <li><strong>Bulk alternative:</strong> Download <code>companyfacts.zip</code> once instead of making 300 individual API calls</li>
+    </ul>
+  </div>
+
+  <details>
+    <summary>The companyfacts JSON structure (expand to see)</summary>
+    <div class="details-body">
+<pre>
+{
+  <span class="string">"cik"</span>: <span class="number">320193</span>,
+  <span class="string">"entityName"</span>: <span class="string">"Apple Inc."</span>,
+  <span class="string">"facts"</span>: {
+    <span class="string">"us-gaap"</span>: {
+      <span class="string">"Revenues"</span>: {
+        <span class="string">"label"</span>: <span class="string">"Revenues"</span>,
+        <span class="string">"units"</span>: {
+          <span class="string">"USD"</span>: [
+            {
+              <span class="string">"val"</span>:    <span class="number">394328000000</span>,
+              <span class="string">"accn"</span>:   <span class="string">"0000320193-22-000108"</span>,
+              <span class="string">"fy"</span>:     <span class="number">2022</span>,
+              <span class="string">"fp"</span>:     <span class="string">"FY"</span>,
+              <span class="string">"form"</span>:   <span class="string">"10-K"</span>,
+              <span class="string">"filed"</span>:  <span class="string">"2022-10-28"</span>,
+              <span class="string">"frame"</span>:  <span class="string">"CY2022"</span>,
+              <span class="string">"start"</span>:  <span class="string">"2021-09-26"</span>,
+              <span class="string">"end"</span>:    <span class="string">"2022-09-24"</span>
+            },
+            <span class="comment">// ... more entries for other periods</span>
+          ]
+        }
+      },
+      <span class="string">"Assets"</span>: { <span class="comment">/* same structure */</span> },
+      <span class="comment">// ... hundreds more concepts</span>
+    },
+    <span class="string">"dei"</span>: { <span class="comment">/* document-entity info */</span> }
+  }
+}
+</pre>
+    </div>
+  </details>
+
+  <h3>1c. Concept normalization</h3>
+  <p>
+    Companies tag the same economic concept differently.
+    The existing <code>RATIO_TAG_MAP</code> in <code>axioms/resolver.py</code> handles this for 3 ratios &mdash;
+    generalize it to cover the 12 metrics needed for question generation:
+  </p>
+
+  <details>
+    <summary>CANONICAL_METRICS &mdash; tag alias map (expand to see)</summary>
+    <div class="details-body">
+<pre>
+CANONICAL_METRICS = {
+  <span class="string">"revenue"</span>: [
+    <span class="string">"RevenueFromContractWithCustomerExcludingAssessedTax"</span>,  <span class="comment"># ASC 606</span>
+    <span class="string">"Revenues"</span>,                                              <span class="comment"># pre-606</span>
+    <span class="string">"SalesRevenueNet"</span>,                                       <span class="comment"># retail</span>
+    <span class="string">"SalesRevenueGoodsNet"</span>,                                  <span class="comment"># goods-only</span>
+  ],
+  <span class="string">"net_income"</span>:           [<span class="string">"NetIncomeLoss"</span>, <span class="string">"ProfitLoss"</span>],
+  <span class="string">"total_assets"</span>:          [<span class="string">"Assets"</span>],
+  <span class="string">"total_liabilities"</span>:     [<span class="string">"Liabilities"</span>],
+  <span class="string">"stockholders_equity"</span>:   [
+    <span class="string">"StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"</span>,
+    <span class="string">"StockholdersEquity"</span>,
+  ],
+  <span class="string">"current_assets"</span>:        [<span class="string">"AssetsCurrent"</span>],
+  <span class="string">"current_liabilities"</span>:   [<span class="string">"LiabilitiesCurrent"</span>],
+  <span class="string">"cogs"</span>:                  [
+    <span class="string">"CostOfGoodsAndServicesSold"</span>,  <span class="comment"># Apple</span>
+    <span class="string">"CostOfRevenue"</span>,               <span class="comment"># MSFT/Tesla</span>
+    <span class="string">"CostOfGoodsSold"</span>,             <span class="comment"># older/industrial</span>
+  ],
+  <span class="string">"research_and_development"</span>: [<span class="string">"ResearchAndDevelopmentExpense"</span>],
+  <span class="string">"operating_income"</span>:      [<span class="string">"OperatingIncomeLoss"</span>],
+  <span class="string">"cash_and_equivalents"</span>:  [
+    <span class="string">"CashAndCashEquivalentsAtCarryingValue"</span>,
+    <span class="string">"CashCashEquivalentsAndShortTermInvestments"</span>,
+  ],
+  <span class="string">"long_term_debt"</span>:        [<span class="string">"LongTermDebt"</span>, <span class="string">"LongTermDebtNoncurrent"</span>],
+}
+</pre>
+      <p style="margin-top: 0.75rem;">
+        The resolver tries tags in order, returns the first match.
+        If none match &rarr; the metric is unavailable for that company. <strong>Skip, don't guess.</strong>
+      </p>
+    </div>
+  </details>
+
+  <div class="gate">
+    <div class="gate-title">Acceptance Gate &mdash; Step 1</div>
+    <ul class="checklist">
+      <li>&ge;300 companies ingested (large-cap S&amp;P 500 subset)</li>
+      <li>Print stats: total facts, unique companies, date range, top-10 tags by frequency</li>
+      <li>Regression: the 3 existing <code>axioms/benchmark.py</code> cases still resolve correctly from the DuckDB store</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ STEP 2 -->
+<section>
+  <h2>Step 2 &mdash; Write Question Templates</h2>
+
+  <p>
+    A template is a Python class that queries the fact store, checks data sufficiency,
+    generates a natural-language question, computes the gold answer, and returns a structured case.
+  </p>
+
+  <h3>Base interface</h3>
+<pre>
+<span class="keyword">@dataclass</span>
+<span class="keyword">class</span> <span class="type">BenchmarkCase</span>:
+    question:        <span class="type">str</span>
+    gold_answer:     <span class="type">float</span>
+    gold_answer_unit:<span class="type">str</span>    <span class="comment"># 'USD', 'ratio', 'percentage_points', 'percent'</span>
+    gold_fact_path:  <span class="type">list[str]</span>  <span class="comment"># fact_ids used to derive the answer</span>
+    required_facts:  <span class="type">dict</span>   <span class="comment"># human-readable label &rarr; value</span>
+    K:               <span class="type">int</span>    <span class="comment"># hop count (number of facts needed)</span>
+    track:           <span class="type">str</span>    <span class="comment"># 'R' (retrieval) or 'C' (computation)</span>
+    template_id:     <span class="type">str</span>
+    difficulty:      <span class="type">str</span>    <span class="comment"># 'easy' | 'medium' | 'hard'</span>
+    as_of_date:      <span class="type">str</span>    <span class="comment"># ISO date &mdash; temporal cutoff</span>
+    entity:          <span class="type">dict</span>   <span class="comment"># {'cik': ..., 'ticker': ..., 'name': ...}</span>
+
+<span class="keyword">class</span> <span class="type">Template</span>(<span class="type">ABC</span>):
+    template_id: <span class="type">str</span>
+    track:       <span class="type">str</span>
+
+    <span class="keyword">@abstractmethod</span>
+    <span class="keyword">def</span> generate(self, db: duckdb.DuckDBPyConnection) -&gt; <span class="type">list[BenchmarkCase]</span>:
+        <span class="string">"""Walk the fact store and emit all valid cases."""</span>
+        ...
+</pre>
+
+  <h3>The 7 templates</h3>
+  <p>
+    Ordered from <strong>easiest to hardest to build</strong>.
+    Start with Templates 1&ndash;2 &mdash; they validate our pipeline end-to-end before we invest in harder ones.
+  </p>
+
+  <!-- ── Template 1 ──────────────────────────── -->
+  <div class="template-card">
+    <div class="template-header">
+      <h4>Template 1: Single-Fact Lookup</h4>
+      <div class="template-meta">
+        <span class="badge track-r">Track R</span>
+        <span class="badge easy">K=1 Easy</span>
+        <span class="badge start">Start here</span>
+      </div>
+    </div>
+    <p>
+      The baseline. Not interesting by itself, but establishes the pipeline and gives K=1 data points.
+    </p>
+    <div class="callout example">
+      <div class="callout-title">&#9670; Example</div>
+      <p><em>"What was Apple's total revenue for FY2023?"</em> &rarr; <strong>$383,285,000,000</strong></p>
+    </div>
+    <p><strong>Pattern:</strong> <code>"What was {company}'s {metric} for {period}?"</code></p>
+    <div class="pseudo"><span class="kw">FOR EACH</span> company <span class="kw">IN</span> universe:
+  <span class="kw">FOR EACH</span> canonical metric:
+    <span class="kw">FOR EACH</span> annual period (10-K):
+      <span class="cond">IF</span> fact exists <span class="act">&rarr; emit case</span></div>
+    <p style="font-size: 0.85rem; color: var(--text-secondary);">
+      Limit output: ~30 cases across diverse companies/metrics. Don't emit thousands.
+    </p>
+  </div>
+
+  <!-- ── Template 2 ──────────────────────────── -->
+  <div class="template-card">
+    <div class="template-header">
+      <h4>Template 2: Period-over-Period Change</h4>
+      <div class="template-meta">
+        <span class="badge track-r">Track R</span>
+        <span class="badge medium">K=2-4 Medium</span>
+        <span class="badge start">Start here</span>
+      </div>
+    </div>
+    <p>Measures change between two periods &mdash; absolute delta or percentage change.</p>
+    <div class="callout example">
+      <div class="callout-title">&#9670; Example</div>
+      <p><em>"By how much did Microsoft's R&amp;D spending change from FY2022 to FY2023?"</em> &rarr; <strong>+$2,195,000,000</strong></p>
+    </div>
+    <p><strong>Pattern:</strong> <code>"By how much did {company}'s {metric} change from {period1} to {period2}?"</code></p>
+    <div class="pseudo"><span class="kw">FOR EACH</span> company:
+  <span class="kw">FOR EACH</span> canonical metric:
+    Find all periods where the metric exists
+    <span class="kw">FOR EACH</span> consecutive pair (or 2-year / 3-year gap):
+      Compute delta and percentage change
+      <span class="act">Emit case</span> with K = 2</div>
+    <p style="font-size: 0.85rem; color: var(--text-secondary);">
+      <strong>Variants:</strong> absolute change (K=2), percentage change (K=2), multi-year change (K=3-4).
+    </p>
+  </div>
+
+  <!-- ── Template 3 ──────────────────────────── -->
+  <div class="template-card">
+    <div class="template-header">
+      <h4>Template 3: Ratio Derivation</h4>
+      <div class="template-meta">
+        <span class="badge track-c">Track C</span>
+        <span class="badge medium">K=2-4 Medium</span>
+      </div>
+    </div>
+    <p>Agent must compute a ratio from fetched facts. Reuse the math in <code>axioms/engine.py</code>.</p>
+    <div class="callout example">
+      <div class="callout-title">&#9670; Example</div>
+      <p><em>"Calculate Tesla's current ratio for FY2023."</em> &rarr; <strong>1.73</strong></p>
+    </div>
+    <p><strong>Pattern:</strong> <code>"Calculate {company}'s {ratio} for {period}."</code></p>
+    <table>
+      <thead><tr><th>Formula</th><th>Inputs</th><th>K</th></tr></thead>
+      <tbody>
+        <tr><td>Gross margin</td><td><code>(revenue - cogs) / revenue &times; 100</code></td><td>2</td></tr>
+        <tr><td>Current ratio</td><td><code>current_assets / current_liabilities</code></td><td>2</td></tr>
+        <tr><td>Debt-to-equity</td><td><code>total_liabilities / equity</code></td><td>2</td></tr>
+        <tr><td>ROA</td><td><code>net_income / total_assets &times; 100</code></td><td>2</td></tr>
+        <tr><td>ROE</td><td><code>net_income / equity &times; 100</code></td><td>2</td></tr>
+      </tbody>
+    </table>
+    <div class="pseudo"><span class="kw">FOR EACH</span> company:
+  <span class="kw">FOR EACH</span> ratio formula:
+    <span class="kw">FOR EACH</span> period:
+      Resolve all input metrics via CANONICAL_METRICS
+      <span class="cond">IF</span> all inputs found <span class="act">&rarr; compute gold answer &rarr; emit case</span></div>
+  </div>
+
+  <!-- ── Template 4 ──────────────────────────── -->
+  <div class="template-card">
+    <div class="template-header">
+      <h4>Template 4: Cross-Entity Comparison</h4>
+      <div class="template-meta">
+        <span class="badge track-r">Track R</span>
+        <span class="badge hard">K=2-4 Hard</span>
+      </div>
+    </div>
+    <p>Agent must retrieve the same metric for multiple companies and compare.</p>
+    <div class="callout example">
+      <div class="callout-title">&#9670; Example</div>
+      <p><em>"Which of AAPL, MSFT, GOOGL had the highest revenue in FY2023?"</em> &rarr; <strong>MSFT, $211,915,000,000</strong></p>
+    </div>
+    <p><strong>Pattern:</strong> <code>"Which company had the highest {metric} among {set} in {period}?"</code></p>
+    <div class="pseudo">Pick 3&ndash;5 companies (e.g. same sector or top-N by size)
+<span class="kw">FOR EACH</span> canonical metric:
+  <span class="kw">FOR EACH</span> period:
+    Fetch metric for all companies in the set
+    <span class="cond">IF</span> all values exist AND max is unambiguous <span class="act">&rarr; emit case</span></div>
+    <p style="font-size: 0.85rem; color: var(--text-secondary);">
+      Skip if two companies report the same value &mdash; the gold answer must be unambiguous.
+    </p>
+  </div>
+
+  <!-- ── Template 5 ──────────────────────────── -->
+  <div class="template-card">
+    <div class="template-header">
+      <h4>Template 5: Conditional Lookup</h4>
+      <div class="template-meta">
+        <span class="badge track-r">Track R</span>
+        <span class="badge hard">K=2-3 Hard</span>
+      </div>
+    </div>
+    <p>Two-hop reasoning: first find a year meeting a condition, then look up a different metric for that year.</p>
+    <div class="callout example">
+      <div class="callout-title">&#9670; Example</div>
+      <p>
+        <em>"What was Apple's net income in the first year its revenue exceeded $300B?"</em><br>
+        Step 1: Find FY2021 (revenue $365.8B &gt; $300B) &rarr; Step 2: Net income = <strong>$94,680,000,000</strong>
+      </p>
+    </div>
+    <p><strong>Pattern:</strong> <code>"What was {company}'s {metric_B} in the first year its {metric_A} exceeded {threshold}?"</code></p>
+    <div class="pseudo"><span class="kw">FOR EACH</span> company:
+  <span class="kw">FOR EACH</span> pair (metric_A, metric_B):
+    Sort metric_A values chronologically
+    Pick threshold between company's min and max for metric_A
+    Find first period where metric_A &gt; threshold
+    <span class="cond">IF</span> found AND metric_B exists for that period <span class="act">&rarr; emit case</span></div>
+    <p style="font-size: 0.85rem; color: var(--text-secondary);">
+      Threshold choice matters: pick a value that makes the "first year exceeding" neither the first nor last year of data.
+    </p>
+  </div>
+
+  <!-- ── Template 6 ──────────────────────────── -->
+  <div class="template-card">
+    <div class="template-header">
+      <h4>Template 6: Multi-Step Valuation</h4>
+      <div class="template-meta">
+        <span class="badge track-c">Track C</span>
+        <span class="badge hard">K=4-6 Hard</span>
+      </div>
+    </div>
+    <p>
+      Multi-step deterministic calculation chaining multiple facts and formulas.
+      Limit to metrics derivable purely from filing data (no market cap).
+    </p>
+    <div class="callout example">
+      <div class="callout-title">&#9670; Example</div>
+      <p><em>"Compute Microsoft's DuPont decomposition (net margin &times; asset turnover &times; equity multiplier) for FY2023 and identify which component changed most vs FY2022."</em></p>
+    </div>
+    <p><strong>Start with these chains:</strong></p>
+    <ul>
+      <li>3-year average of a ratio (e.g. avg gross margin FY2021&ndash;2023)</li>
+      <li>DuPont decomposition (net margin &times; asset turnover &times; equity multiplier)</li>
+      <li>Year-over-year growth rate of a derived metric</li>
+    </ul>
+  </div>
+
+  <!-- ── Template 7 ──────────────────────────── -->
+  <div class="template-card">
+    <div class="template-header">
+      <h4>Template 7: Multi-Constraint Filter</h4>
+      <div class="template-meta">
+        <span class="badge track-r">Track R</span>
+        <span class="badge hard">K=3-5 Hard</span>
+      </div>
+    </div>
+    <p>Scan companies to find those meeting multiple conditions simultaneously.</p>
+    <div class="callout example">
+      <div class="callout-title">&#9670; Example</div>
+      <p><em>"Which S&amp;P 500 companies had current ratio &gt; 2 and debt-to-equity &lt; 0.5 in FY2023?"</em></p>
+    </div>
+    <p><strong>Pattern:</strong> <code>"List S&amp;P 500 companies with {condition_A} AND {condition_B} in {period}."</code></p>
+    <div class="pseudo"><span class="kw">FOR EACH</span> period:
+  <span class="kw">FOR EACH</span> pair of constraints:
+    Scan all companies, compute both metrics
+    Filter to those meeting both conditions
+    <span class="cond">IF</span> result set is 2&ndash;15 companies <span class="act">&rarr; emit case</span>
+    <span class="cond">IF</span> result set is 0 or &gt;15 <span class="act">&rarr; skip</span> (impossible or trivial)</div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ STEP 3 -->
+<section>
+  <h2>Step 3 &mdash; Generate the Pilot Benchmark</h2>
+
+  <h3>Main entry point</h3>
+<pre>
+<span class="keyword">def</span> generate_benchmark(db_path: <span class="type">str</span>, output_path: <span class="type">str</span>, target: <span class="type">int</span> = <span class="number">300</span>):
+    db = duckdb.connect(db_path, read_only=<span class="keyword">True</span>)
+    all_cases = []
+
+    <span class="keyword">for</span> template_cls <span class="keyword">in</span> ALL_TEMPLATES:
+        cases = template_cls().generate(db)
+        all_cases.extend(cases)
+
+    <span class="comment"># Apply validity controls</span>
+    cases = deduplicate(all_cases)
+    cases = balance_difficulty(cases, target)
+    cases = leakage_scan(cases)
+
+    <span class="keyword">with</span> open(output_path, <span class="string">'w'</span>) <span class="keyword">as</span> f:
+        json.dump([asdict(c) <span class="keyword">for</span> c <span class="keyword">in</span> cases], f, indent=<span class="number">2</span>)
+
+    print_stats(cases)
+</pre>
+
+  <h3>Target distribution</h3>
+  <table>
+    <thead><tr><th>Difficulty</th><th>% of cases</th><th>Count</th><th>Templates</th></tr></thead>
+    <tbody>
+      <tr><td><span class="badge easy">Easy</span> K=1</td><td>~15%</td><td>~45</td><td>Template 1</td></tr>
+      <tr><td><span class="badge medium">Medium</span> K=2</td><td>~40%</td><td>~120</td><td>Templates 2, 3</td></tr>
+      <tr><td><span class="badge hard">Hard</span> K=3-4</td><td>~30%</td><td>~90</td><td>Templates 4, 5, 6</td></tr>
+      <tr><td><span class="badge hard">V. Hard</span> K&ge;5</td><td>~15%</td><td>~45</td><td>Templates 6, 7</td></tr>
+    </tbody>
+  </table>
+
+  <table>
+    <thead><tr><th>Track</th><th>% of cases</th><th>Templates</th></tr></thead>
+    <tbody>
+      <tr><td><span class="badge track-r">Track R</span> Retrieval</td><td>~65%</td><td>1, 2, 4, 5, 7</td></tr>
+      <tr><td><span class="badge track-c">Track C</span> Computation</td><td>~35%</td><td>3, 6</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Validity controls</h3>
+  <p>These quality checks are what make this a real benchmark, not just a pile of generated questions:</p>
+
+  <table>
+    <thead><tr><th>#</th><th>Control</th><th>What it checks</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>1</strong></td>
+        <td>De-duplication</td>
+        <td>Two questions testing the same <code>(company, metric, period)</code> with different wording are duplicates. Keep one.</td>
+      </tr>
+      <tr>
+        <td><strong>2</strong></td>
+        <td>Leakage scan</td>
+        <td>Gold answer must NOT appear in the question text. Check: <code>str(gold_answer) not in question</code>.</td>
+      </tr>
+      <tr>
+        <td><strong>3</strong></td>
+        <td>Difficulty balance</td>
+        <td>K (hop count) determines difficulty. Sample to match the target distribution above.</td>
+      </tr>
+      <tr>
+        <td><strong>4</strong></td>
+        <td>Temporal validity</td>
+        <td>Every case has an <code>as_of_date</code>. Only facts with <code>filed_date &le; as_of_date</code> are visible. Prevents future data leakage.</td>
+      </tr>
+      <tr>
+        <td><strong>5</strong></td>
+        <td>Fact completeness</td>
+        <td>Every <code>fact_id</code> in <code>gold_fact_path</code> must exist in the DuckDB store. Missing = discard.</td>
+      </tr>
+      <tr>
+        <td><strong>6</strong></td>
+        <td>Human spot-check</td>
+        <td>Manually review ~30 random cases. Question makes sense? Gold answer correct? Difficulty reasonable?</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="gate">
+    <div class="gate-title">Acceptance Gate &mdash; Steps 2 + 3</div>
+    <ul class="checklist">
+      <li>&ge;300 cases generated</li>
+      <li>K distribution covers K=1 through K&ge;4</li>
+      <li>Both tracks represented (R and C)</li>
+      <li>No duplicate fact-paths</li>
+      <li>No leaked answers in question text</li>
+      <li>30-case human spot-check passes</li>
+      <li>Output is valid JSON, every <code>fact_id</code> resolves in the store</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ NOT IN SCOPE -->
+<section>
+  <h2>Explicitly NOT in Scope</h2>
+  <p>These are important but come later. Don't build them now:</p>
+  <div class="out-of-scope">
+    <ul>
+      <li><strong>Grading harness</strong> &mdash; how to score an agent's answers against the gold labels</li>
+      <li><strong>PV services</strong> &mdash; <code>RetrieveEvidence</code>, <code>TraceClaim</code>, <code>ValidateMetric</code> as MCP tools</li>
+      <li><strong>Agent wiring</strong> &mdash; routing Agentic FinSearch retrieval through the truth layer</li>
+      <li><strong>Cloud deployment</strong> &mdash; Aurora / Neptune / leaderboard</li>
+      <li><strong>Strategy-coding execution</strong> &mdash; backtest harness for Track C stretch goals</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ QUICK REF: SEC API -->
+<section>
+  <h2>Quick Reference: SEC API</h2>
+
+  <div class="callout warning">
+    <div class="callout-title">&#9888; Fair access rules</div>
+    <p>
+      All requests must include a <code>User-Agent</code> header with our name and email (Agentic-FinSearch felixflyingt@gmail.com).
+      Max ~10 requests/second. Prefer bulk <code>companyfacts.zip</code> for the initial backfill.
+    </p>
+  </div>
+
+<pre>
+<span class="comment"># All facts for a company (primary ingest path)</span>
+curl -H <span class="string">"User-Agent: Agentic-FinSearch felixflyingt@gmail.com"</span> \
+  <span class="string">"https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json"</span>
+
+<span class="comment"># Bulk download — all companies, no rate limits</span>
+curl -O <span class="string">"https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip"</span>
+
+<span class="comment"># S&amp;P 500 CIK list</span>
+curl <span class="string">"https://www.sec.gov/files/company_tickers.json"</span>
+</pre>
+</section>
+
+<!-- ════════════════════════════════════════════ QUICK REF: CODE REUSE -->
+<section>
+  <h2>Quick Reference: Existing Code to Reuse</h2>
+  <table>
+    <thead><tr><th>What</th><th>Where</th><th>Reuse How</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Tag preference lists</td>
+        <td><code>axioms/resolver.py</code> &rarr; <code>RATIO_TAG_MAP</code></td>
+        <td>Seed <code>CANONICAL_METRICS</code> from this</td>
+      </tr>
+      <tr>
+        <td>Ratio math</td>
+        <td><code>axioms/engine.py</code> &rarr; <code>check_*</code> functions</td>
+        <td>Import for Track C gold-answer computation</td>
+      </tr>
+      <tr>
+        <td>iXBRL parser</td>
+        <td><code>mcp_server/xbrl/parser.py</code></td>
+        <td>Reference for field names; DuckDB replaces it for scale</td>
+      </tr>
+      <tr>
+        <td>S&amp;P 500 CIK mapping</td>
+        <td>SEC: <code>company_tickers.json</code></td>
+        <td>Pick ~300 large-cap companies as the starting universe</td>
+      </tr>
+      <tr>
+        <td>Existing 3-case benchmark</td>
+        <td><code>axioms/benchmark.py</code></td>
+        <td>Regression test &mdash; these 3 cases must still pass on the new store</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ════════════════════════════════════════════ FOOTER -->
+<footer class="doc-footer">
+  <p>
+    <strong>Agentic FinSearch</strong> &middot; SecureFinAI Lab &middot; Columbia University
+    <br>
+    This contributor guide distills the <a href="2026-05-28-xbrl-benchmark-prd.html" style="color: var(--accent);">Benchmark PRD</a>
+    into an executable question-generation pipeline.
+    For the full benchmark vision (grading, agent wiring, cloud scale), see the parent doc.
+  </p>
+  <p style="margin-top: 0.75rem;">
+    Parent docs:
+    <code>2026-05-28-xbrl-benchmark-prd.html</code>
+    &middot;
+    <code>2026-05-26-xbrl-truth-benchmark-bridge-design.md</code>
+  </p>
+</footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,1386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentic FinSearch — Community Kickstart Plan (v2)</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e5e5e4;
+    --text: #1c1917;
+    --text-secondary: #57534e;
+    --accent: #c2410c;
+    --accent-bg: #fff7ed;
+    --accent-border: #fed7aa;
+    --green: #15803d;
+    --green-bg: #f0fdf4;
+    --green-border: #bbf7d0;
+    --blue: #1d4ed8;
+    --blue-bg: #eff6ff;
+    --blue-border: #bfdbfe;
+    --purple: #7c3aed;
+    --purple-bg: #f5f3ff;
+    --purple-border: #ddd6fe;
+    --yellow-bg: #fefce8;
+    --yellow-border: #fef08a;
+    --red: #dc2626;
+    --red-bg: #fef2f2;
+    --red-border: #fecaca;
+    --mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 15px;
+    padding: 0;
+  }
+
+  .page {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 3rem 2rem 6rem;
+  }
+
+  /* ── Header ────────────────────────────────── */
+  .doc-header {
+    border-bottom: 2px solid var(--text);
+    padding-bottom: 2rem;
+    margin-bottom: 3rem;
+  }
+
+  .doc-header h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+    margin-bottom: 0.5rem;
+  }
+
+  .doc-header .subtitle {
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+
+  .meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    font-size: 0.85rem;
+  }
+
+  .meta-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+  }
+
+  .meta-item .label {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    display: block;
+    margin-bottom: 0.15rem;
+  }
+
+  /* ── Sections ──────────────────────────────── */
+  section {
+    margin-bottom: 3rem;
+  }
+
+  h2 {
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 1rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+  }
+
+  h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  h4 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-top: 1rem;
+    margin-bottom: 0.4rem;
+    color: var(--text-secondary);
+  }
+
+  p, li { color: var(--text); }
+  p + p { margin-top: 0.75rem; }
+
+  ul, ol {
+    margin: 0.75rem 0;
+    padding-left: 1.5rem;
+  }
+
+  li { margin-bottom: 0.35rem; }
+  strong { font-weight: 600; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: #f5f5f4;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+  }
+
+  pre {
+    background: #1c1917;
+    color: #e7e5e4;
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    margin: 1rem 0;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    line-height: 1.6;
+  }
+
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+  }
+
+  /* ── Callout boxes ─────────────────────────── */
+  .callout {
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    margin: 1.25rem 0;
+    border: 1px solid;
+  }
+
+  .callout-title {
+    font-weight: 700;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .callout.thesis {
+    background: var(--accent-bg);
+    border-color: var(--accent-border);
+  }
+  .callout.thesis .callout-title { color: var(--accent); }
+
+  .callout.shipped {
+    background: var(--green-bg);
+    border-color: var(--green-border);
+  }
+  .callout.shipped .callout-title { color: var(--green); }
+
+  .callout.decision {
+    background: var(--blue-bg);
+    border-color: var(--blue-border);
+  }
+  .callout.decision .callout-title { color: var(--blue); }
+
+  .callout.warning {
+    background: var(--yellow-bg);
+    border-color: var(--yellow-border);
+  }
+  .callout.warning .callout-title { color: #a16207; }
+
+  .callout.note {
+    background: var(--purple-bg);
+    border-color: var(--purple-border);
+  }
+  .callout.note .callout-title { color: var(--purple); }
+
+  .callout.danger {
+    background: var(--red-bg);
+    border-color: var(--red-border);
+  }
+  .callout.danger .callout-title { color: var(--red); }
+
+  /* ── Tables ────────────────────────────────── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+
+  th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    padding: 0.65rem 0.75rem;
+    border-bottom: 2px solid var(--text);
+  }
+
+  td {
+    padding: 0.65rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  /* ── Phase cards ───────────────────────────── */
+  .phase-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .phase-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+  }
+
+  .phase-card.p0::before { background: var(--accent); }
+  .phase-card.p1::before { background: var(--blue); }
+  .phase-card.p2::before { background: var(--purple); }
+  .phase-card.p3::before { background: var(--green); }
+  .phase-card.p4::before { background: #ca8a04; }
+  .phase-card.p5::before { background: var(--text-secondary); }
+
+  .phase-card .phase-label {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.25rem;
+  }
+
+  .phase-card.p0 .phase-label { color: var(--accent); }
+  .phase-card.p1 .phase-label { color: var(--blue); }
+  .phase-card.p2 .phase-label { color: var(--purple); }
+  .phase-card.p3 .phase-label { color: var(--green); }
+  .phase-card.p4 .phase-label { color: #ca8a04; }
+  .phase-card.p5 .phase-label { color: var(--text-secondary); }
+
+  .phase-card h3 {
+    margin-top: 0;
+    font-size: 1.1rem;
+  }
+
+  .gate {
+    display: inline-block;
+    background: var(--accent-bg);
+    border: 1px solid var(--accent-border);
+    border-radius: 6px;
+    padding: 0.3rem 0.65rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--accent);
+    margin-top: 0.75rem;
+  }
+
+  /* ── ADR accordion ─────────────────────────── */
+  .adr-grid {
+    display: grid;
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+
+  .adr {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .adr summary {
+    padding: 0.85rem 1.25rem;
+    font-weight: 600;
+    font-size: 0.92rem;
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .adr summary::before {
+    content: '\25B8';
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    transition: transform 0.15s;
+  }
+
+  .adr[open] summary::before {
+    transform: rotate(90deg);
+  }
+
+  .adr summary::-webkit-details-marker { display: none; }
+
+  .adr .adr-body {
+    padding: 0 1.25rem 1rem;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    border-top: 1px solid var(--border);
+  }
+
+  .adr .adr-body p { margin-top: 0.65rem; }
+
+  .adr-tag {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    background: var(--blue-bg);
+    color: var(--blue);
+    border-radius: 4px;
+    padding: 0.1em 0.4em;
+    margin-right: 0.25rem;
+    flex-shrink: 0;
+  }
+
+  .adr-tag.green {
+    background: var(--green-bg);
+    color: var(--green);
+  }
+
+  .adr-tag.purple {
+    background: var(--purple-bg);
+    color: var(--purple);
+  }
+
+  .adr-tag.yellow {
+    background: var(--yellow-bg);
+    color: #a16207;
+  }
+
+  .adr-tag.red {
+    background: var(--red-bg);
+    color: var(--red);
+  }
+
+  /* ── Architecture diagram ──────────────────── */
+  .arch-diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin: 1.25rem 0;
+    overflow-x: auto;
+  }
+
+  .arch-diagram pre {
+    background: none;
+    color: var(--text);
+    padding: 0;
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.5;
+  }
+
+  .arch-diagram pre code {
+    color: var(--text);
+  }
+
+  .arch-caption {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    text-align: center;
+    margin-top: 0.75rem;
+    font-style: italic;
+  }
+
+  /* ── Track cards ───────────────────────────── */
+  .track-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .track-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+  }
+
+  .track-card.track-a::before { background: var(--accent); }
+  .track-card.track-b::before { background: var(--blue); }
+  .track-card.track-c::before { background: var(--purple); }
+  .track-card.track-d::before { background: var(--green); }
+
+  .track-label {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.25rem;
+  }
+
+  .track-card.track-a .track-label { color: var(--accent); }
+  .track-card.track-b .track-label { color: var(--blue); }
+  .track-card.track-c .track-label { color: var(--purple); }
+  .track-card.track-d .track-label { color: var(--green); }
+
+  .track-card h3 { margin-top: 0; }
+
+  /* ── Stat row ──────────────────────────────── */
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem;
+    margin: 1.25rem 0;
+  }
+
+  .stat-item {
+    text-align: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem;
+  }
+
+  .stat-item .stat-value {
+    font-family: var(--mono);
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--accent);
+    display: block;
+  }
+
+  .stat-item .stat-label {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-top: 0.15rem;
+  }
+
+  /* ── TOC ────────────────────────────────────── */
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem 2rem;
+    margin-bottom: 2.5rem;
+  }
+
+  .toc h2 {
+    border-top: none;
+    padding-top: 0;
+    margin-bottom: 0.75rem;
+    font-size: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+  }
+
+  .toc ol {
+    counter-reset: toc;
+    list-style: none;
+    padding-left: 0;
+    margin: 0;
+    columns: 2;
+    column-gap: 2rem;
+  }
+
+  .toc li {
+    counter-increment: toc;
+    margin-bottom: 0.35rem;
+    break-inside: avoid;
+  }
+
+  .toc li::before {
+    content: counter(toc, decimal-leading-zero) ".";
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin-right: 0.5rem;
+  }
+
+  .toc a {
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.92rem;
+  }
+
+  .toc a:hover { color: var(--accent); }
+
+  /* ── Role cards ────────────────────────────── */
+  .role-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+
+  .role-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.15rem;
+  }
+
+  .role-card .role-name {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--blue);
+    margin-bottom: 0.25rem;
+  }
+
+  .role-card .role-layer {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    font-style: italic;
+    margin-bottom: 0.35rem;
+  }
+
+  .role-card .role-earned {
+    font-size: 0.85rem;
+    color: var(--text);
+  }
+
+  /* ── Checklist ─────────────────────────────── */
+  .checklist {
+    list-style: none;
+    padding-left: 0;
+    margin: 0.75rem 0;
+  }
+
+  .checklist li {
+    position: relative;
+    padding-left: 1.75rem;
+    margin-bottom: 0.65rem;
+  }
+
+  .checklist li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.35rem;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-radius: 3px;
+    background: var(--surface);
+  }
+
+  /* ── Defect lifecycle steps ────────────────── */
+  .lifecycle-grid {
+    display: grid;
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+
+  .lifecycle-step {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .lifecycle-step::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+  }
+
+  .lifecycle-step:nth-child(1)::before { background: var(--accent); }
+  .lifecycle-step:nth-child(2)::before { background: var(--blue); }
+  .lifecycle-step:nth-child(3)::before { background: var(--green); }
+
+  .lifecycle-step .step-num {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.25rem;
+  }
+
+  .lifecycle-step:nth-child(1) .step-num { color: var(--accent); }
+  .lifecycle-step:nth-child(2) .step-num { color: var(--blue); }
+  .lifecycle-step:nth-child(3) .step-num { color: var(--green); }
+
+  .lifecycle-step h4 {
+    margin-top: 0;
+    font-size: 1rem;
+    color: var(--text);
+  }
+
+  /* ── Hybrid table ──────────────────────────── */
+  .hybrid-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+
+  .hybrid-table th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.65rem 0.75rem;
+  }
+
+  .hybrid-table th:first-child {
+    color: var(--green);
+    border-bottom: 2px solid var(--green);
+  }
+
+  .hybrid-table th:last-child {
+    color: var(--blue);
+    border-bottom: 2px solid var(--blue);
+  }
+
+  .hybrid-table td {
+    padding: 0.65rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  /* ── v1→v2 change banner ───────────────────── */
+  .change-banner {
+    background: var(--purple-bg);
+    border: 1px solid var(--purple-border);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    margin: 1.25rem 0;
+    font-size: 0.9rem;
+  }
+
+  .change-banner .change-title {
+    font-weight: 700;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--purple);
+    margin-bottom: 0.5rem;
+  }
+
+  /* ── Footer ────────────────────────────────── */
+  .doc-footer {
+    border-top: 2px solid var(--text);
+    padding-top: 1.5rem;
+    margin-top: 3rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
+
+  /* ── Print ──────────────────────────────────── */
+  @media print {
+    body { font-size: 11pt; }
+    .page { padding: 0; max-width: 100%; }
+    .toc ol { columns: 1; }
+    .phase-card, .adr, .callout { break-inside: avoid; }
+  }
+
+  @media (max-width: 640px) {
+    .page { padding: 1.5rem 1rem 3rem; }
+    .toc ol { columns: 1; }
+    .stat-row { grid-template-columns: 1fr 1fr; }
+    .role-grid { grid-template-columns: 1fr; }
+    .hybrid-table { font-size: 0.82rem; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<header class="doc-header">
+  <h1>Agentic FinSearch &mdash; Community Kickstart Plan</h1>
+  <div class="subtitle">Building a quality-production engine, not a consumer growth funnel</div>
+  <div class="meta-grid">
+    <div class="meta-item">
+      <span class="label">Version</span>
+      v2
+    </div>
+    <div class="meta-item">
+      <span class="label">Date</span>
+      2026-05-26
+    </div>
+    <div class="meta-item">
+      <span class="label">Status</span>
+      Draft &mdash; awaiting audience decision (Step 0)
+    </div>
+    <div class="meta-item">
+      <span class="label">Owner</span>
+      FlyMiss
+    </div>
+    <div class="meta-item">
+      <span class="label">Supersedes</span>
+      <code>COMMUNITY_KICKSTART_LEGACY.md</code> (v1)
+    </div>
+    <div class="meta-item">
+      <span class="label">Related</span>
+      <code>POSITIONING_STRATEGY.md</code> &middot; <code>ARKSIM_USER_STORY.md</code>
+    </div>
+  </div>
+</header>
+
+<div class="change-banner">
+  <div class="change-title">What Changed v1 &rarr; v2</div>
+  <p>v1 framed the Discord through an <em>acquisition</em> lens (find the right people, onboard, engage). v2 keeps all of that operational substance but reframes the community as a <strong>quality-production engine</strong> &mdash; because for FinSearch, quality (numerical accuracy, zero hallucination, XBRL verification) <strong>is</strong> the moat, and in open source the community is the mechanism that produces quality. New material: Section 2 (Quality Engine framing + cathedral-rigor caution), the roles-as-progression-ladder rewrite in Section 6, Section 7 (Defect Lifecycle), and an onion-health metric in Section 10.</p>
+</div>
+
+<!-- ═══════════════ TOC ═══════════════ -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#context">Strategic Context</a></li>
+    <li><a href="#quality-engine">Community as a Quality Engine</a></li>
+    <li><a href="#step0">Step 0 &mdash; Audience Decision</a></li>
+    <li><a href="#blockers">Pre-Launch Blockers</a></li>
+    <li><a href="#launch">Launch Sequence</a></li>
+    <li><a href="#discord">Discord Structure</a></li>
+    <li><a href="#defect">Defect Lifecycle</a></li>
+    <li><a href="#onboarding">First-100 Onboarding Playbook</a></li>
+    <li><a href="#acquisition">Acquisition Channels</a></li>
+    <li><a href="#metrics">Metrics That Matter</a></li>
+    <li><a href="#governance">Governance Basics</a></li>
+    <li><a href="#open">Open Strategic Questions</a></li>
+    <li><a href="#recurring">Long-Term &amp; Recurring Actions</a></li>
+  </ol>
+</nav>
+
+<!-- ═══════════════ §1 STRATEGIC CONTEXT ═══════════════ -->
+<section id="context">
+  <h2>1. Strategic Context</h2>
+  <p>Agentic FinSearch is transitioning from a research artifact (Columbia SecureFinAI Lab, ICAIF paper, JPM Award) to a self-sustaining product. Approach C (Columbia-anchored ecosystem) is the chosen strategy: build proof infrastructure, not features. The community is one of four resource flywheels &mdash; students, data providers, cloud sponsors, companies &mdash; not a consumer growth funnel.</p>
+
+  <h3>Current State</h3>
+  <ul>
+    <li>Discord exists, basic channels, internal team members only</li>
+    <li>Chrome extension is listed on Web Store but set to &ldquo;Unlisted&rdquo; visibility (deep link works, public search does not surface it)</li>
+    <li>User manual exists but is stamped &ldquo;INTERNAL USE ONLY&rdquo;</li>
+    <li>ICAIF paper published, JPM Faculty Research Award won, NYT + XBRL International press coverage exists</li>
+    <li>Layer 1 (numbers + ratios validation) shipped; 91.7% accuracy vs Perplexity 41.7% on the 24-question benchmark</li>
+  </ul>
+
+  <div class="stat-row">
+    <div class="stat-item">
+      <span class="stat-value">91.7%</span>
+      <span class="stat-label">FinSearch L1 accuracy (24-Q)</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">41.7%</span>
+      <span class="stat-label">Perplexity baseline (24-Q)</span>
+    </div>
+  </div>
+
+  <h3>Constraints</h3>
+  <ul>
+    <li>Yahoo Finance ToS prohibits commercial data redistribution</li>
+    <li>Columbia IP ownership unclarified &mdash; blocks monetization paths</li>
+    <li>LLM token burn rate is high &mdash; every active user is a real cost against a lab budget</li>
+    <li>&ldquo;Need to acquire first group of loyal users/testers&rdquo; is an open issue</li>
+  </ul>
+
+  <div class="callout thesis">
+    <div class="callout-title">Implication for Community Building</div>
+    <p>Optimize for <strong>signal density</strong> (right people producing evidence) over headcount. Most consumer-SaaS community advice does not apply.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ §2 QUALITY ENGINE ═══════════════ -->
+<section id="quality-engine">
+  <h2>2. Community as a Quality Engine</h2>
+  <p>The OSS-quality literature (Aberdour 2007; Bahamdain 2015) makes one claim that should reorganize how we think about this work: <strong>in open source, the community is not a marketing channel bolted onto the product &mdash; it is the infrastructure that produces software quality.</strong> Aberdour&rsquo;s central finding is that &ldquo;creating a sustainable community should be a project&rsquo;s key objective&rdquo; and that &ldquo;the system and the community must coevolve.&rdquo;</p>
+
+  <div class="callout thesis">
+    <div class="callout-title">Why This Matters More for FinSearch</div>
+    <p>Our differentiator is not features &mdash; it is <strong>91.7% vs 41.7%, zero hallucination, XBRL-verified numbers.</strong> So community-building and the core mission are the same activity, not competing priorities.</p>
+  </div>
+
+  <h3>2.1 The Onion Model</h3>
+  <p>A sustainable OSS community is concentric, with members migrating <em>inward</em> over time via earned merit:</p>
+
+  <div class="arch-diagram">
+    <pre><code>        ┌─────────────────────────────────┐
+        │           Users                  │   use the product
+        │   ┌─────────────────────────┐    │
+        │   │    Bug reporters         │    │   test it, report wrong answers
+        │   │  ┌───────────────────┐   │    │
+        │   │  │ Contributing      │   │    │   add features / MCP servers, fix bugs
+        │   │  │  developers       │   │    │
+        │   │  │  ┌─────────────┐  │   │    │
+        │   │  │  │    Core     │  │   │    │   small; owns roadmap, integrates code,
+        │   │  │  │    team     │  │   │    │   maintains the release cycle
+        │   │  │  └─────────────┘  │   │    │
+        │   │  └───────────────────┘   │    │
+        │   └─────────────────────────┘    │
+        └─────────────────────────────────┘</code></pre>
+    <div class="arch-caption">The same shape as the Approach C ecosystem diagram, but organized by role in producing quality rather than by commercial relationship. Progression inward is the engagement mechanic.</div>
+  </div>
+
+  <h3>2.2 Why This Is Unusually Literal for FinSearch</h3>
+  <p>Both papers report that in OSS, <strong>the user base performs the bulk of system testing</strong> &mdash; finding more bugs across more real-world scenarios than any internal team or test suite can (&ldquo;given enough eyeballs, all bugs are shallow&rdquo;; Apache was tested almost exclusively by its users).</p>
+  <p>Two facts make this directly load-bearing for us:</p>
+  <ol>
+    <li><strong>CI tests are disabled</strong> (<code>RUN_TESTS=false</code>). A community of financial bug-reporters is a partial substitute for formal test infrastructure we have not built, <em>and</em> a feedstock for the QA benchmark and ArkSim regression work that anchors our positioning.</li>
+    <li><strong>The product already ships a Validate button + per-claim verification UI.</strong> A user who clicks Validate and sees a wrong number is performing black-box testing and producing a defect report in one action. So &ldquo;I found a question where FinSearch was wrong&rdquo; should be the <strong>highest-status contribution</strong> in the community &mdash; it directly improves the headline metric.</li>
+  </ol>
+
+  <div class="callout decision">
+    <div class="callout-title">Design Principle</div>
+    <p>Make finding accuracy bugs <strong>prestigious, never embarrassing.</strong></p>
+  </div>
+
+  <h3>2.3 What We Deliberately Keep from Cathedral-Style Development</h3>
+  <p>For a financial-accuracy product positioned as <strong>certification infrastructure</strong>, where a wrong number is a liability and the professor explicitly wants certification-grade rigor, &ldquo;no single responsibility for problems&rdquo; is a <em>disqualifying</em> property, not an acceptable tradeoff. FinSearch must be a <strong>hybrid</strong>:</p>
+
+  <table class="hybrid-table">
+    <thead>
+      <tr>
+        <th>Harness from the Bazaar (Community)</th>
+        <th>Retain from the Cathedral (Lab)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Many testers, many real scenarios</td>
+        <td>A documented, public roadmap</td>
+      </tr>
+      <tr>
+        <td>Fast bug-finding via the Validate button</td>
+        <td>The QA benchmark as a formal quality gate</td>
+      </tr>
+      <tr>
+        <td>Contributor energy on MCP servers</td>
+        <td>Measurable accuracy goals, tracked</td>
+      </tr>
+      <tr>
+        <td>Peer review by outsiders</td>
+        <td>A single accountable owner per release</td>
+      </tr>
+      <tr>
+        <td>Rapid release cycle</td>
+        <td>Regression suites (ArkSim) &mdash; sponsor-funded</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout note">
+    <div class="callout-title">Operating Principle</div>
+    <p>The community produces <strong>coverage</strong>; the lab produces <strong>rigor</strong>. Neither alone yields trustworthy financial AI. Aberdour notes the highest-quality OSS projects (e.g., Mozilla) kept dedicated test teams and nightly regression precisely because sponsorship allowed it &mdash; which is exactly what the Approach C sponsor tier is meant to fund.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ §3 STEP 0 ═══════════════ -->
+<section id="step0">
+  <h2>3. Step 0 &mdash; Audience Decision (BLOCKER)</h2>
+  <p>Pick one primary audience before opening the Discord. Channel structure, content cadence, and recruiting channels all derive from this choice.</p>
+
+  <div class="track-card track-a">
+    <div class="track-label">Framing A</div>
+    <h3>Verified Numbers</h3>
+    <p><strong>Primary members:</strong> Equity analysts, finance students</p>
+    <p><strong>Hook:</strong> 91.7% benchmark</p>
+    <p><strong>Unique asset:</strong> XBRL pipeline, SEC EDGAR MCP</p>
+  </div>
+
+  <div class="track-card track-b">
+    <div class="track-label">Framing B</div>
+    <h3>Quant Screener</h3>
+    <p><strong>Primary members:</strong> Crypto / technical traders</p>
+    <p><strong>Hook:</strong> NL exchange-wide scans</p>
+    <p><strong>Unique asset:</strong> TradingView MCP</p>
+  </div>
+
+  <div class="track-card track-c">
+    <div class="track-label">Framing C</div>
+    <h3>Build on FinSearch</h3>
+    <p><strong>Primary members:</strong> MCP authors, capstone teams</p>
+    <p><strong>Hook:</strong> Plug-in architecture</p>
+    <p><strong>Unique asset:</strong> Open MCP layer</p>
+  </div>
+
+  <div class="track-card track-d">
+    <div class="track-label">Framing D &mdash; Recommended</div>
+    <h3>Trusted Financial AI</h3>
+    <p><strong>Primary members:</strong> Compliance officers, fiduciaries, value investors</p>
+    <p><strong>Hook:</strong> Air-gapped + zero hallucination + Columbia/JPM/NYT credibility</p>
+    <p><strong>Unique asset:</strong> Air-gapped deploy + Buffet Agent + Columbia anchor</p>
+  </div>
+
+  <div class="callout decision">
+    <div class="callout-title">Recommendation</div>
+    <p><strong>D primary, A as on-ramp.</strong> B and C become sub-channels later when 3+ members organically push them.</p>
+  </div>
+
+  <div class="callout danger">
+    <div class="callout-title">Decision Required</div>
+    <p>Lock the audience before any other step.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ §4 PRE-LAUNCH BLOCKERS ═══════════════ -->
+<section id="blockers">
+  <h2>4. Pre-Launch Blockers</h2>
+  <p>All of these must ship before flipping the Chrome Web Store to public or opening the Discord beyond the internal team.</p>
+
+  <ul class="checklist">
+    <li><strong>Produce a public user manual.</strong> Strip &ldquo;INTERNAL USE ONLY,&rdquo; remove stale <code>FinGPT</code> / <code>FinGPT-Light</code> references that conflict with the FinSearch rebrand, host as a Sphinx page at <code>agenticfinsearch.org/docs/manual</code> or similar. ~1 day.<br><em style="font-size:0.85rem;color:var(--text-secondary)">The papers independently validate this as the top blocker: Mozilla had high modularity but no contributors until it shipped docs, tutorials, and tooling &mdash; modularity alone does not attract people.</em></li>
+    <li><strong>Resolve the model-name inconsistency.</strong> Backend config keys still expose <code>FinGPT</code> / <code>FinGPT-Light</code> in the model dropdown. Coordinated frontend + backend + docs rollout per the central-db open issue. New users currently see old names in the UI.</li>
+    <li><strong>Build a &ldquo;Press &amp; Recognition&rdquo; page.</strong> Lead with JPM Faculty Award (2025), NYT coverage, XBRL International coverage, ICAIF 2024 paper, named PIs (Prof. Xiaodong Wang, Dr. Xiao-Yang &ldquo;Yanglet&rdquo; Liu). Link prominently from landing page and Discord <code>#about</code>.</li>
+    <li><strong>Build the &ldquo;Build a FinSearch MCP Server&rdquo; contributor guide.</strong> This is the bridge that converts modularity into actual contributing developers &mdash; the papers identify this as the single highest-leverage move for growing the onion&rsquo;s inner layers. Targeted at capstone teams and external developers.</li>
+    <li><strong>Package the FinSearch vs. Perplexity side-by-side asset.</strong> The Nvidia September 2025 question screenshot already exists in the internal manual; polish, add 2&ndash;3 more from the QA benchmark, produce a single shareable image set. This is the hero asset for every social post.</li>
+    <li><strong>Designate one community-facing contact.</strong> Three named PIs = great credentials, terrible for &ldquo;who do I ping.&rdquo; One human&rsquo;s name + Discord handle in <code>#welcome</code>. (Directly addresses the &ldquo;no single responsibility&rdquo; OSS failure mode.)</li>
+    <li><strong>Draft pinned posts</strong> for <code>#welcome</code>, <code>#announcements</code>, and <code>#about</code>. (See Section 6.)</li>
+    <li><strong>Pre-seed 3&ndash;5 starter posts in each channel.</strong> Empty channels signal &ldquo;this is dead.&rdquo;</li>
+    <li><strong>Adopt the Contributor Covenant</strong> verbatim as Code of Conduct. Pin in <code>#welcome</code>.</li>
+    <li><strong>Pin a financial-advice disclaimer</strong> in <code>#welcome</code> and <code>#help</code>.</li>
+    <li><strong>Flip the Chrome Web Store listing from Unlisted to Public.</strong> Single toggle, do this LAST after everything above ships.</li>
+  </ul>
+</section>
+
+<!-- ═══════════════ §5 LAUNCH SEQUENCE ═══════════════ -->
+<section id="launch">
+  <h2>5. Launch Sequence</h2>
+
+  <div class="phase-card p0">
+    <div class="phase-label">Week 1</div>
+    <h3>Lock Audience &amp; Foundation</h3>
+    <p>Lock audience (Step 0); build public manual; fix model-name inconsistency.</p>
+    <div class="gate">Deliverable: Public manual live</div>
+  </div>
+
+  <div class="phase-card p1">
+    <div class="phase-label">Week 2</div>
+    <h3>Credibility Assets</h3>
+    <p>Press &amp; Recognition page; MCP contributor guide; side-by-side asset; designate contact.</p>
+    <div class="gate">Deliverable: Landing page updated</div>
+  </div>
+
+  <div class="phase-card p2">
+    <div class="phase-label">Week 3</div>
+    <h3>Discord Preparation</h3>
+    <p>Draft and pin all Discord posts; pre-seed channels; set up onion roles + GitHub issue labels.</p>
+    <div class="gate">Deliverable: Discord internally ready</div>
+  </div>
+
+  <div class="phase-card p3">
+    <div class="phase-label">Week 4</div>
+    <h3>Pre-Seeded Community</h3>
+    <p>Recruit 10 people you already know (Columbia students, paper co-authors, FINOS contacts) into Discord pre-public.</p>
+    <div class="gate">Deliverable: Pre-seeded conversation visible</div>
+  </div>
+
+  <div class="phase-card p4">
+    <div class="phase-label">Week 5</div>
+    <h3>Soft Launch</h3>
+    <p>Flip Chrome Web Store to Public; soft launch via FINOS Slack + XBRL International + 1 targeted subreddit.</p>
+    <div class="gate">Deliverable: First public joiners</div>
+  </div>
+
+  <div class="phase-card p5">
+    <div class="phase-label">Week 6</div>
+    <h3>Hard Launch</h3>
+    <p>Show HN post (~9am ET weekday), Twitter/X thread, paper update post.</p>
+    <div class="gate">Deliverable: Public visibility peak</div>
+  </div>
+
+  <div class="callout warning">
+    <div class="callout-title">Critical Sequencing</div>
+    <p>Do not do weeks 5 and 6 simultaneously. Sequential lets you fix problems before the bigger crowd arrives.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ §6 DISCORD STRUCTURE ═══════════════ -->
+<section id="discord">
+  <h2>6. Discord Structure</h2>
+  <p>Start narrow. Expand only on demand.</p>
+
+  <div class="arch-diagram">
+    <pre><code>INFO
+  #welcome           — rules, intro template, link to Chrome extension, disclaimer
+  #announcements     — read-only; releases, paper updates, demos
+  #changelog         — read-only; shipped fixes (closes the bug-report → fix loop visibly)
+  #about             — Columbia anchor, JPM Award, NYT/XBRL Intl press, team, paper
+  #roadmap           — public read-only roadmap mirror
+
+CONVERSATION
+  #general           — anything
+  #help              — install issues, "I got this answer, is it right?" (defect detection)
+  #show-and-tell     — user-posted use cases, screenshots, prompts
+
+OPEN ONLY WHEN 3+ MEMBERS ASK
+  #mcp-developers, #research-papers, #feature-requests, #buffet-agent</code></pre>
+  </div>
+
+  <h3>Roles as a Progression Ladder</h3>
+  <p>The papers are explicit that <em>advancement is the reward</em> &mdash; meritocratic movement inward is what motivates volunteers. Make the onion layers visible, earned, and announced:</p>
+
+  <div class="role-grid">
+    <div class="role-card">
+      <div class="role-name">@user</div>
+      <div class="role-layer">Users</div>
+      <div class="role-earned">Earned by: joining</div>
+    </div>
+    <div class="role-card">
+      <div class="role-name">@tester</div>
+      <div class="role-layer">Bug reporters</div>
+      <div class="role-earned">Earned by: filing &ge;1 verified accuracy/bug report</div>
+    </div>
+    <div class="role-card">
+      <div class="role-name">@contributor</div>
+      <div class="role-layer">Contributing developers</div>
+      <div class="role-earned">Earned by: shipping a merged fix or an MCP server</div>
+    </div>
+    <div class="role-card">
+      <div class="role-name">@core</div>
+      <div class="role-layer">Core team</div>
+      <div class="role-earned">Earned by: sustained high-quality contribution + roadmap trust</div>
+    </div>
+    <div class="role-card">
+      <div class="role-name">@founding-member</div>
+      <div class="role-layer">Cross-cutting badge</div>
+      <div class="role-earned">Earned by: first 100 joiners; retired after #100</div>
+    </div>
+    <div class="role-card">
+      <div class="role-name">@student</div>
+      <div class="role-layer">Cross-cutting</div>
+      <div class="role-earned">Columbia / academic affiliation</div>
+    </div>
+    <div class="role-card">
+      <div class="role-name">@sponsor</div>
+      <div class="role-layer">Cross-cutting</div>
+      <div class="role-earned">Sponsor tier</div>
+    </div>
+  </div>
+
+  <div class="callout shipped">
+    <div class="callout-title">Recognition Mechanic</div>
+    <p>Promotions get a public shout-out in <code>#announcements</code>. &ldquo;Sign your own work&rdquo; &mdash; credit contributors and MCP authors by name everywhere.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ §7 DEFECT LIFECYCLE ═══════════════ -->
+<section id="defect">
+  <h2>7. The Defect Lifecycle (Discord + GitHub)</h2>
+  <p>Bahamdain&rsquo;s three-process QA framework (his Fig. 2) is the operational loop that turns the Discord from a chat room into a quality apparatus. Instrument it explicitly:</p>
+
+  <div class="lifecycle-grid">
+    <div class="lifecycle-step">
+      <div class="step-num">Step 1</div>
+      <h4>Defect Detection</h4>
+      <p>A user hits a wrong number (via the Validate button or normal use) and either ignores it, files it, or asks in <code>#help</code> (most common). Path: <code>#help</code> &rarr; triaged into a GitHub Issue.</p>
+    </div>
+    <div class="lifecycle-step">
+      <div class="step-num">Step 2</div>
+      <h4>Defect Verification</h4>
+      <p>A maintainer reads the report, reproduces it, and labels the GitHub Issue <code>open</code> / <code>in-progress</code> / <code>duplicate</code> / <code>invalid</code>, then assigns an <strong>owner</strong> (single responsibility &mdash; the cathedral discipline from &sect;2.3). Verified accuracy bugs also become candidate benchmark/ArkSim cases.</p>
+    </div>
+    <div class="lifecycle-step">
+      <div class="step-num">Step 3</div>
+      <h4>Solution Verification</h4>
+      <p>The owner self-reviews, opens a PR, gets outside peer-review, merges, and the fix lands in <code>#changelog</code>. If the fix introduces a new defect, it re-enters step 2.</p>
+    </div>
+  </div>
+
+  <div class="callout thesis">
+    <div class="callout-title">Retention Mechanism</div>
+    <p>The visible, fast loop (report &rarr; labeled issue &rarr; fix &rarr; changelog) is itself the retention mechanism: contributors stay engaged when they see their reports turn into shipped fixes quickly (Aberdour: rapid release cycles keep reviewers motivated).</p>
+  </div>
+</section>
+
+<!-- ═══════════════ §8 ONBOARDING ═══════════════ -->
+<section id="onboarding">
+  <h2>8. First-100 Onboarding Playbook</h2>
+
+  <div class="callout warning">
+    <div class="callout-title">The Single Most Important Phase</div>
+    <p>Do not skip. This is a 90-day investment, not a permanent commitment. After ~100 active members, the community starts running itself.</p>
+  </div>
+
+  <ul>
+    <li><strong>DM every new joiner within 24 hours.</strong> Three sentences: welcome / what brought you here / what would you ask FinSearch first.</li>
+    <li><strong>Log every response</strong> in a Google Sheet (member, source, persona, first question). This becomes the most valuable artifact for the next 6 months.</li>
+    <li><strong>Reply to every question in the server for the first month.</strong> Even &ldquo;I don&rsquo;t know yet.&rdquo; Silence kills momentum.</li>
+    <li><strong>Turn every confused user into a docs entry.</strong> Question in <code>#help</code> &rarr; pinned message or manual update.</li>
+    <li><strong>Actively nudge the onion inward:</strong> when someone files a good bug, thank them publicly and invite them to the next rung (&ldquo;want to take a crack at the fix?&rdquo;). Conversion from user &rarr; tester &rarr; contributor does not happen by itself.</li>
+  </ul>
+</section>
+
+<!-- ═══════════════ §9 ACQUISITION CHANNELS ═══════════════ -->
+<section id="acquisition">
+  <h2>9. Acquisition Channels</h2>
+
+  <table>
+    <thead>
+      <tr><th>Channel</th><th>Why It Fits</th><th>Lead Content</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>FINOS Slack + mailing list</strong></td>
+        <td>Natural OSS home; project already references FINOS</td>
+        <td>Intro post + offer to give a talk</td>
+      </tr>
+      <tr>
+        <td><strong>XBRL International</strong></td>
+        <td>Already covered FinSearch; aligned audience</td>
+        <td>Member-newsletter intro at Discord launch</td>
+      </tr>
+      <tr>
+        <td><strong>Columbia CS / DSI / SecureFinAI</strong></td>
+        <td>Most committable contributors</td>
+        <td>&ldquo;Build an MCP server as a capstone&rdquo;</td>
+      </tr>
+      <tr>
+        <td><strong>r/ValueInvesting, r/Bogleheads, r/SecurityAnalysis</strong></td>
+        <td>Audience D match; Buffet Agent hook</td>
+        <td>Buffet Agent + accuracy story</td>
+      </tr>
+      <tr>
+        <td><strong>r/algotrading, r/CFA</strong></td>
+        <td>Audience A match</td>
+        <td>91.7% vs 41.7% benchmark</td>
+      </tr>
+      <tr>
+        <td><strong>FinTwit (Twitter/X)</strong></td>
+        <td>Equity analysts live here</td>
+        <td>Nvidia side-by-side video</td>
+      </tr>
+      <tr>
+        <td><strong>Hacker News</strong></td>
+        <td>Loves OSS with academic anchor</td>
+        <td>&ldquo;Show HN: A financial AI that proves its numbers (Columbia, ICAIF paper)&rdquo; &mdash; submit once, ~9am ET weekday</td>
+      </tr>
+      <tr>
+        <td><strong>r/ChatGPT, r/LocalLLaMA</strong></td>
+        <td>Side-by-side demos do well</td>
+        <td>Same benchmark, different framing</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout danger">
+    <div class="callout-title">Anti-Patterns</div>
+    <p><strong>Do not:</strong> pay for ads, post in unrelated subs, cold-DM on LinkedIn, &ldquo;growth hack.&rdquo; Audience is sophisticated and will smell it.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ §10 METRICS ═══════════════ -->
+<section id="metrics">
+  <h2>10. Metrics That Matter</h2>
+  <p>Track these weekly in a sheet. Ignore everything else for the first 6 months.</p>
+
+  <div class="stat-row">
+    <div class="stat-item">
+      <span class="stat-value">#1</span>
+      <span class="stat-label">New joiners (raw growth)</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">&gt;20%</span>
+      <span class="stat-label">Weekly active members posting (target)</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">&gt;80%</span>
+      <span class="stat-label">Questions answered within 4h (target)</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">#4</span>
+      <span class="stat-label">Onion inward migrations / month</span>
+    </div>
+  </div>
+
+  <div class="callout note">
+    <div class="callout-title">Onion Health Metric</div>
+    <p><strong>Inward migration:</strong> count of members who advanced a rung this month (user&rarr;tester, tester&rarr;contributor). A community that grows in headcount but never promotes anyone inward is stalling, not scaling.</p>
+  </div>
+
+  <p><strong>Bonus quality signal:</strong> verified accuracy bugs caught by the community that became benchmark cases. This is the direct measure of community-as-QA paying off.</p>
+
+  <div class="callout warning">
+    <div class="callout-title">Vanity Metrics to Ignore</div>
+    <p>Total member count, message volume, Discord analytics dashboard.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ §11 GOVERNANCE ═══════════════ -->
+<section id="governance">
+  <h2>11. Governance Basics</h2>
+
+  <h3>Five Rules</h3>
+  <ol>
+    <li>Be kind</li>
+    <li>No financial-advice spam</li>
+    <li>No referral links</li>
+    <li>English in public channels</li>
+    <li>Lab and research questions welcome</li>
+  </ol>
+
+  <h3>Moderation</h3>
+  <p>FlyMiss + one teammate as mods. Discord AutoMod for invite-spam and slurs. No third-party bots until actually needed.</p>
+
+  <h3>Legal</h3>
+  <ul>
+    <li><strong>Disclaimer:</strong> &ldquo;FinSearch outputs are not financial advice.&rdquo; Pinned in <code>#welcome</code> and <code>#help</code>.</li>
+    <li><strong>Code of Conduct:</strong> Contributor Covenant verbatim. Do not reinvent.</li>
+  </ul>
+</section>
+
+<!-- ═══════════════ §12 OPEN QUESTIONS ═══════════════ -->
+<section id="open">
+  <h2>12. Open Strategic Questions</h2>
+  <p>These need resolution before or shortly after launch. Flag to professor / team.</p>
+
+  <ul>
+    <li><strong>Columbia IP ownership</strong> &mdash; blocks all monetization paths including sponsor tier. Talk to tech transfer office.</li>
+    <li><strong>Whether to open a sponsor tier formally</strong> before or after first 100 members.</li>
+    <li><strong>Buffet Agent positioning</strong> &mdash; is it a sub-product, a marketing hook, or a research demo? Affects whether it gets its own channel.</li>
+    <li><strong>Bilingual community?</strong> Lab has Chinese-language presence (Materials includes Chinese-titled PDFs); decision on whether Discord supports CN/EN or stays EN-only.</li>
+    <li><strong>OSS maturity scoring</strong> &mdash; audience D (compliance/enterprise) evaluates OSS by rubrics like OSMM / Business Readiness Rating (Aberdour sidebar). Scoring well on one becomes a trust artifact, like the benchmark. Long-term: decide whether to pursue a formal maturity rating.</li>
+  </ul>
+</section>
+
+<!-- ═══════════════ §13 RECURRING ACTIONS ═══════════════ -->
+<section id="recurring">
+  <h2>13. Long-Term &amp; Recurring Actions</h2>
+
+  <div class="callout danger">
+    <div class="callout-title">Read This Section Every Monday</div>
+    <p>The kickstart succeeds or fails on whether these stay alive.</p>
+  </div>
+
+  <div class="adr-grid">
+    <details class="adr" open>
+      <summary><span class="adr-tag">WEEKLY</span> Every week, indefinitely</summary>
+      <div class="adr-body">
+        <ul>
+          <li><strong>Monday:</strong> Post one announcement (release note, paper update, demo, sponsor news) in <code>#announcements</code>.</li>
+          <li><strong>Wednesday:</strong> Post one discussion prompt in <code>#general</code> (&ldquo;How are you using SEC EDGAR retrieval?&rdquo;, &ldquo;What ratio would you want next in the Validate button?&rdquo;).</li>
+          <li><strong>Friday:</strong> Post one &ldquo;build in public&rdquo; item (commit highlight, axiom of the week, benchmark update) in <code>#announcements</code> or <code>#show-and-tell</code>.</li>
+          <li>Update the weekly metrics row in the tracking sheet: joiners / active / response time / inward migrations.</li>
+          <li>Review <code>#help</code> for any unanswered questions older than 24 hours.</li>
+          <li>Run the defect lifecycle: triage new <code>#help</code> reports into labeled GitHub Issues; post any shipped fixes to <code>#changelog</code>.</li>
+          <li>DM every new joiner from the past 7 days who has not been onboarded.</li>
+        </ul>
+      </div>
+    </details>
+
+    <details class="adr">
+      <summary><span class="adr-tag green">MONTHLY</span> First Monday of the month</summary>
+      <div class="adr-body">
+        <ul>
+          <li>Publish a &ldquo;month in review&rdquo; post in <code>#announcements</code> &mdash; shipped features, benchmark deltas, new contributors, sponsor news, upcoming.</li>
+          <li><strong>Recognize the onion:</strong> publicly shout out members who advanced a rung and the accuracy bugs caught by the community this month. Recognition is the volunteer&rsquo;s pay.</li>
+          <li>Review the onboarding sheet for persona patterns. If a new persona is emerging (e.g., &ldquo;5+ joiners this month are crypto traders&rdquo;), evaluate spinning off a sub-channel.</li>
+          <li>Review whether any channel deserves to be opened (3+ members organically pushing a topic) or closed (no activity for 30 days).</li>
+          <li>Audit pinned posts in <code>#welcome</code> and <code>#about</code> for accuracy. Stale credentials or outdated links erode trust.</li>
+          <li>Re-run the FinSearch vs. Perplexity benchmark on 3&ndash;5 fresh questions and post the result. Keeps the moat visible and gives content for the month.</li>
+        </ul>
+      </div>
+    </details>
+
+    <details class="adr">
+      <summary><span class="adr-tag purple">QUARTERLY</span> Every three months</summary>
+      <div class="adr-body">
+        <ul>
+          <li>Re-audit acquisition channels. Which ones produced active members vs. lurkers? Cut what is not working.</li>
+          <li>Update the public roadmap mirror in <code>#roadmap</code>. The roadmap as a trust signal only works if it is actually current.</li>
+          <li><strong>Promote and review the core:</strong> assess who has earned <code>@contributor</code> / <code>@core</code>, and whether any contributor is overloaded (the papers warn the core team becomes overburdened without enough contributing developers).</li>
+          <li>Solicit testimonials from the most active members. These feed into the Press &amp; Recognition page and sponsor pitches.</li>
+          <li>Office hours with Prof. Liu (or designated PI) &mdash; 1 hour, open invite to Discord, recorded if possible. Most powerful single trust-builder for academic-anchored projects.</li>
+          <li>Refresh the Buffet Agent (or whichever fine-tuned model is live) &mdash; even a small update is a content peg and signals the project is alive.</li>
+        </ul>
+      </div>
+    </details>
+
+    <details class="adr">
+      <summary><span class="adr-tag yellow">SEMI-ANNUAL</span> Every six months</summary>
+      <div class="adr-body">
+        <ul>
+          <li>Re-run ArkSim with current MCP configuration. Update <code>ARKSIM_USER_STORY.md</code> with new before/after numbers. Post the delta publicly.</li>
+          <li>Fold community-caught accuracy bugs into the formal benchmark / regression suite (this is the bazaar&rarr;cathedral handoff from &sect;2.3 made concrete).</li>
+          <li>Submit FinSearch to one academic conference, one industry conference, or one OSS event. Every appearance is a recruiting funnel.</li>
+          <li>Revisit this kickstart doc. Update what is stale. Archive what is done.</li>
+        </ul>
+      </div>
+    </details>
+
+    <details class="adr">
+      <summary><span class="adr-tag red">ANNUAL</span> Once a year</summary>
+      <div class="adr-body">
+        <ul>
+          <li>Re-evaluate the audience choice from Step 0. Is the primary framing still right, or has the membership shifted enough to warrant a re-pick?</li>
+          <li>Apply or re-apply for cloud credits (AWS Activate, Google for Education, Azure for Research). One day of paperwork = a year of free hosting.</li>
+          <li>Pursue or renew FINOS membership / standing for OSS governance credibility.</li>
+          <li>Consider an OSS maturity self-assessment (OSMM / Business Readiness Rating) as a trust artifact for enterprise/audience-D evaluation.</li>
+          <li>Member survey: 5 questions max, posted in <code>#general</code> and announced. Use results to prioritize the next year.</li>
+        </ul>
+      </div>
+    </details>
+
+    <details class="adr">
+      <summary><span class="adr-tag">TRIGGER</span> Do when the trigger fires, not on a calendar</summary>
+      <div class="adr-body">
+        <ul>
+          <li><strong>Member count crosses 100:</strong> retire <code>@founding-member</code> role; transition from manual DM onboarding to a welcome bot + lighter-touch personal follow-up on a sample.</li>
+          <li><strong>Member count crosses 500:</strong> formalize a moderator role beyond the founding team; recruit 2 community moderators from active members (promote from the onion, don&rsquo;t appoint outsiders).</li>
+          <li><strong>First sponsor signed:</strong> open private <code>#sponsors</code> channel; schedule quarterly office hours for them with the PI; route sponsor funding toward the regression/test infrastructure the community can&rsquo;t fully cover.</li>
+          <li><strong>First external MCP server shipped by a community member:</strong> spotlight in <code>#announcements</code>; promote the author to <code>@contributor</code>; open <code>#mcp-developers</code> if not yet open; consider an &ldquo;MCP Showcase&rdquo; recurring monthly post.</li>
+          <li><strong>First negative press / public criticism:</strong> respond within 24 hours, in public, factually, without defensiveness. The response is more important than the criticism itself.</li>
+          <li><strong>First viral moment (HN front page, viral tweet, etc.):</strong> double moderation coverage for 72 hours; have the team available; expect a member-count spike and a quality dip; over-invest in onboarding the new cohort.</li>
+          <li><strong>Yahoo Finance changes ToS or breaks scraping:</strong> pause all member-acquisition activity, communicate transparently in <code>#announcements</code>, accelerate the alternative data source roadmap.</li>
+          <li><strong>Columbia IP ownership resolved:</strong> revisit monetization paths in <code>POSITIONING_STRATEGY.md</code> and update community-facing language around sponsor tiers.</li>
+        </ul>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- ═══════════════ FOOTER ═══════════════ -->
+<footer class="doc-footer">
+  <p><strong>SecureFinAI Lab</strong> &middot; Agentic FinSearch Community Kickstart Plan (v2)</p>
+  <p style="margin-top:0.25rem">Source: <code>COMMUNITY_KICKSTART.md</code> &middot; Supersedes: <code>COMMUNITY_KICKSTART_LEGACY.md</code> (v1) &middot; Related: <em>POSITIONING_STRATEGY.md</em>, <em>ARKSIM_USER_STORY.md</em></p>
+  <p style="margin-top:0.25rem">Source inspiration: Aberdour, M. (2007) &ldquo;Achieving Quality in Open Source Software,&rdquo; <em>IEEE Software</em>; Bahamdain, S.S. (2015) &ldquo;Open Source Software (OSS) Quality Assurance: A Survey Paper,&rdquo; <em>Procedia Computer Science</em> 56.</p>
+  <p style="margin-top:0.5rem;font-size:0.8rem;color:#a8a29e"><em>This document is the source of truth for community operations. When it conflicts with anything else, update this document &mdash; do not let the conflict persist.</em></p>
+  <p style="margin-top:0.25rem;font-size:0.8rem;color:#a8a29e">Generated 2026-05-29.</p>
+</footer>
+
+</div>
+</body>
+</html>

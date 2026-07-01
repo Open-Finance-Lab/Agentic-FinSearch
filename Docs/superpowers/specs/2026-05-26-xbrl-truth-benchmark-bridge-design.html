@@ -1,0 +1,1590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A Verifiable XBRL Benchmark</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e5e5e4;
+    --text: #1c1917;
+    --text-secondary: #57534e;
+    --accent: #c2410c;
+    --accent-bg: #fff7ed;
+    --accent-border: #fed7aa;
+    --green: #15803d;
+    --green-bg: #f0fdf4;
+    --green-border: #bbf7d0;
+    --blue: #1d4ed8;
+    --blue-bg: #eff6ff;
+    --blue-border: #bfdbfe;
+    --purple: #7c3aed;
+    --purple-bg: #f5f3ff;
+    --purple-border: #ddd6fe;
+    --yellow-bg: #fefce8;
+    --yellow-border: #fef08a;
+    --red: #dc2626;
+    --red-bg: #fef2f2;
+    --red-border: #fecaca;
+    --mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    font-size: 15px;
+    padding: 0;
+  }
+
+  .page {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 3rem 2rem 6rem;
+  }
+
+  /* ── Header ────────────────────────────────── */
+  .doc-header {
+    border-bottom: 2px solid var(--text);
+    padding-bottom: 2rem;
+    margin-bottom: 3rem;
+  }
+
+  .doc-header h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+    margin-bottom: 0.5rem;
+  }
+
+  .doc-header .subtitle {
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+
+  .meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    font-size: 0.85rem;
+  }
+
+  .meta-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+  }
+
+  .meta-item .label {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    display: block;
+    margin-bottom: 0.15rem;
+  }
+
+  /* ── Sections ──────────────────────────────── */
+  section {
+    margin-bottom: 3rem;
+  }
+
+  h2 {
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 1rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+  }
+
+  h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  h4 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-top: 1rem;
+    margin-bottom: 0.4rem;
+    color: var(--text-secondary);
+  }
+
+  p, li { color: var(--text); }
+  p + p { margin-top: 0.75rem; }
+
+  ul, ol {
+    margin: 0.75rem 0;
+    padding-left: 1.5rem;
+  }
+
+  li { margin-bottom: 0.35rem; }
+  strong { font-weight: 600; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: #f5f5f4;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+  }
+
+  pre {
+    background: #1c1917;
+    color: #e7e5e4;
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    margin: 1rem 0;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    line-height: 1.6;
+  }
+
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+  }
+
+  /* ── Callout boxes ─────────────────────────── */
+  .callout {
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    margin: 1.25rem 0;
+    border: 1px solid;
+  }
+
+  .callout-title {
+    font-weight: 700;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .callout.thesis {
+    background: var(--accent-bg);
+    border-color: var(--accent-border);
+  }
+  .callout.thesis .callout-title { color: var(--accent); }
+
+  .callout.shipped {
+    background: var(--green-bg);
+    border-color: var(--green-border);
+  }
+  .callout.shipped .callout-title { color: var(--green); }
+
+  .callout.decision {
+    background: var(--blue-bg);
+    border-color: var(--blue-border);
+  }
+  .callout.decision .callout-title { color: var(--blue); }
+
+  .callout.warning {
+    background: var(--yellow-bg);
+    border-color: var(--yellow-border);
+  }
+  .callout.warning .callout-title { color: #a16207; }
+
+  .callout.note {
+    background: var(--purple-bg);
+    border-color: var(--purple-border);
+  }
+  .callout.note .callout-title { color: var(--purple); }
+
+  .callout.danger {
+    background: var(--red-bg);
+    border-color: var(--red-border);
+  }
+  .callout.danger .callout-title { color: var(--red); }
+
+  /* ── Tables ────────────────────────────────── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+
+  th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    padding: 0.65rem 0.75rem;
+    border-bottom: 2px solid var(--text);
+  }
+
+  td {
+    padding: 0.65rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  /* ── Phase cards ───────────────────────────── */
+  .phase-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .phase-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+  }
+
+  .phase-card.p0::before { background: var(--accent); }
+  .phase-card.p1::before { background: var(--blue); }
+  .phase-card.p2::before { background: var(--purple); }
+  .phase-card.p3::before { background: var(--green); }
+  .phase-card.p4::before { background: #ca8a04; }
+  .phase-card.p5::before { background: var(--text-secondary); }
+
+  .phase-card .phase-label {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.25rem;
+  }
+
+  .phase-card.p0 .phase-label { color: var(--accent); }
+  .phase-card.p1 .phase-label { color: var(--blue); }
+  .phase-card.p2 .phase-label { color: var(--purple); }
+  .phase-card.p3 .phase-label { color: var(--green); }
+  .phase-card.p4 .phase-label { color: #ca8a04; }
+  .phase-card.p5 .phase-label { color: var(--text-secondary); }
+
+  .phase-card h3 {
+    margin-top: 0;
+    font-size: 1.1rem;
+  }
+
+  .gate {
+    display: inline-block;
+    background: var(--accent-bg);
+    border: 1px solid var(--accent-border);
+    border-radius: 6px;
+    padding: 0.3rem 0.65rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--accent);
+    margin-top: 0.75rem;
+  }
+
+  /* ── ADR accordion ─────────────────────────── */
+  .adr-grid {
+    display: grid;
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+
+  .adr {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .adr summary {
+    padding: 0.85rem 1.25rem;
+    font-weight: 600;
+    font-size: 0.92rem;
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .adr summary::before {
+    content: '▸';
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    transition: transform 0.15s;
+  }
+
+  .adr[open] summary::before {
+    transform: rotate(90deg);
+  }
+
+  .adr summary::-webkit-details-marker { display: none; }
+
+  .adr .adr-body {
+    padding: 0 1.25rem 1rem;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    border-top: 1px solid var(--border);
+  }
+
+  .adr .adr-body p { margin-top: 0.65rem; }
+
+  .adr-tag {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    background: var(--blue-bg);
+    color: var(--blue);
+    border-radius: 4px;
+    padding: 0.1em 0.4em;
+    margin-right: 0.25rem;
+    flex-shrink: 0;
+  }
+
+  /* ── Architecture diagram ──────────────────── */
+  .arch-diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin: 1.25rem 0;
+    overflow-x: auto;
+  }
+
+  .arch-diagram pre {
+    background: none;
+    color: var(--text);
+    padding: 0;
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.5;
+  }
+
+  .arch-diagram pre code {
+    color: var(--text);
+  }
+
+  .arch-caption {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    text-align: center;
+    margin-top: 0.75rem;
+    font-style: italic;
+  }
+
+  /* ── Service cards ─────────────────────────── */
+  .service-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+
+  .service-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem;
+  }
+
+  .service-card .service-name {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--blue);
+    margin-bottom: 0.35rem;
+  }
+
+  .service-card .service-sig {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    background: #f5f5f4;
+    border-radius: 6px;
+    padding: 0.5rem 0.65rem;
+    margin: 0.5rem 0;
+    line-height: 1.5;
+  }
+
+  .service-card .service-used {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+  }
+
+  /* ── Risk table ────────────────────────────── */
+  .risk-table td:first-child {
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  /* ── Stat row ──────────────────────────────── */
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem;
+    margin: 1.25rem 0;
+  }
+
+  .stat-item {
+    text-align: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem;
+  }
+
+  .stat-item .stat-value {
+    font-family: var(--mono);
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--accent);
+    display: block;
+  }
+
+  .stat-item .stat-label {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-top: 0.15rem;
+  }
+
+  /* ── TOC ────────────────────────────────────── */
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem 2rem;
+    margin-bottom: 2.5rem;
+  }
+
+  .toc h2 {
+    border-top: none;
+    padding-top: 0;
+    margin-bottom: 0.75rem;
+    font-size: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+  }
+
+  .toc ol {
+    counter-reset: toc;
+    list-style: none;
+    padding-left: 0;
+    margin: 0;
+    columns: 2;
+    column-gap: 2rem;
+  }
+
+  .toc li {
+    counter-increment: toc;
+    margin-bottom: 0.35rem;
+    break-inside: avoid;
+  }
+
+  .toc li::before {
+    content: counter(toc, decimal-leading-zero) ".";
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin-right: 0.5rem;
+  }
+
+  .toc a {
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.92rem;
+  }
+
+  .toc a:hover { color: var(--accent); }
+
+  /* ── Verifiability matrix ──────────────────── */
+  .v-matrix {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+
+  .v-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.15rem;
+  }
+
+  .v-card .v-num {
+    font-family: var(--mono);
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 0.15rem;
+  }
+
+  .v-card .v-name {
+    font-weight: 700;
+    font-size: 0.95rem;
+    margin-bottom: 0.35rem;
+  }
+
+  .v-card .v-means {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.35rem;
+  }
+
+  .v-card .v-generalizes {
+    font-size: 0.78rem;
+    font-family: var(--mono);
+    color: var(--blue);
+    background: var(--blue-bg);
+    border-radius: 4px;
+    padding: 0.2em 0.5em;
+    display: inline-block;
+  }
+
+  /* ── Track cards ───────────────────────────── */
+  .track-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .track-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+  }
+
+  .track-card.track-r::before { background: var(--blue); }
+  .track-card.track-c::before { background: var(--purple); }
+
+  .track-label {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.25rem;
+  }
+
+  .track-card.track-r .track-label { color: var(--blue); }
+  .track-card.track-c .track-label { color: var(--purple); }
+
+  .track-card h3 { margin-top: 0; }
+
+  .example-q {
+    background: #f5f5f4;
+    border-radius: 8px;
+    padding: 0.65rem 1rem;
+    margin: 0.75rem 0;
+    font-size: 0.88rem;
+    font-style: italic;
+    color: var(--text-secondary);
+    border-left: 3px solid var(--border);
+  }
+
+  /* ── Footer ────────────────────────────────── */
+  .doc-footer {
+    border-top: 2px solid var(--text);
+    padding-top: 1.5rem;
+    margin-top: 3rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
+
+  /* ── Stack layer cards ─────────────────────── */
+  .stack-grid {
+    display: grid;
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+
+  .stack-layer {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.15rem 1.25rem;
+  }
+
+  .stack-layer .layer-label {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    margin-bottom: 0.35rem;
+  }
+
+  .stack-layer h4 {
+    margin-top: 0;
+    font-size: 1rem;
+    color: var(--text);
+  }
+
+  .stack-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+  }
+
+  .stack-col-label {
+    font-weight: 600;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    margin-bottom: 0.15rem;
+  }
+
+  /* ── Print ──────────────────────────────────── */
+  @media print {
+    body { font-size: 11pt; }
+    .page { padding: 0; max-width: 100%; }
+    .toc ol { columns: 1; }
+    .phase-card, .adr, .callout { break-inside: avoid; }
+  }
+
+  @media (max-width: 640px) {
+    .page { padding: 1.5rem 1rem 3rem; }
+    .toc ol { columns: 1; }
+    .stat-row { grid-template-columns: 1fr 1fr; }
+    .v-matrix { grid-template-columns: 1fr; }
+    .service-grid { grid-template-columns: 1fr; }
+    .stack-cols { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<header class="doc-header">
+  <h1>XBRL Truth Infrastructure &rarr; Verifiable XBRL Benchmark</h1>
+  <div class="subtitle">The benchmark for the XBRL Truth Infrastructure</div>
+  <div class="meta-grid">
+    <div class="meta-item">
+      <span class="label">Date</span>
+      2026-05-26
+    </div>
+    <div class="meta-item">
+      <span class="label">Status</span>
+      Draft for review
+    </div>
+    <div class="meta-item">
+      <span class="label">Authors</span>
+      Felix Tian &middot; SecureFinAI Lab
+    </div>
+    <div class="meta-item">
+      <span class="label">Scope</span>
+      Inward-facing engineering design
+    </div>
+    <div class="meta-item">
+      <span class="label">Companion</span>
+      Tech Stack &amp; ADRs
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════ TOC ═══════════════ -->
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#framing">Purpose &amp; Framing</a></li>
+    <li><a href="#shipped">Shipped Pipeline</a></li>
+    <li><a href="#tracks">Two Benchmark Tracks</a></li>
+    <li><a href="#verifiability">Verifiability Model</a></li>
+    <li><a href="#architecture">Architecture</a></li>
+    <li><a href="#truth-layer">Canonical Truth Layer</a></li>
+    <li><a href="#pv">PV Services</a></li>
+    <li><a href="#construction">Construction Engine</a></li>
+    <li><a href="#grading">Grading Harness</a></li>
+    <li><a href="#phases">Phased Build Sequence</a></li>
+    <li><a href="#stack">Technology Stack</a></li>
+    <li><a href="#adrs">Architectural Decisions (ADRs)</a></li>
+    <li><a href="#risks">Risks &amp; Mitigations</a></li>
+    <li><a href="#landscape">Landscape &amp; Demand</a></li>
+    <li><a href="#open">Open Questions</a></li>
+    <li><a href="#references">References</a></li>
+  </ol>
+</nav>
+
+<!-- ═══════════════ §0 FRAMING ═══════════════ -->
+<section id="framing">
+  <h2>0. Purpose &amp; Framing</h2>
+  <p>This document addresses two core engineering questions:</p>
+  <ol>
+    <li><strong>Construct:</strong> Agentic FinSearch + XBRL &mdash; how do we build a <strong>Benchmark</strong> for (a) <em>长程取数 / long-range multi-hop data fetching</em> and (b) <em>复杂金融计算 / complex financial computation</em>?</li>
+    <li><strong>Verify:</strong> For those tasks, how do we <strong>ensure verifiability</strong>?</li>
+  </ol>
+  <p>This document is scoped to inward-facing engineering design. Higher-level product strategy is covered in the companion <em>Financial Truth Infrastructure for AI Agents</em> specification. The purpose here is to bridge <strong>vision &rarr; buildable engineering tasks</strong>, each with a measurable acceptance gate.</p>
+
+  <div class="callout thesis">
+    <div class="callout-title">Core Thesis &mdash; Dual-Use Substrate</div>
+    <p>The same canonical-truth-layer + PV services that <strong>verify</strong> agent outputs at runtime are also (a) the grounded substrate agents <strong>retrieve</strong> from, and (b) the ground-truth oracle + grader needed to <strong>benchmark</strong> agents.</p>
+    <p style="margin-top:0.5rem"><strong>One substrate, three jobs: retrieve &middot; verify &middot; benchmark.</strong></p>
+    <p style="margin-top:0.5rem;font-style:italic">&ldquo;Ingest once &rarr; validate millions &rarr; benchmark rigorously.&rdquo;</p>
+  </div>
+
+  <div class="callout decision">
+    <div class="callout-title">Key Reframing</div>
+    <p>Because every question is generated <em>from</em> grounded XBRL facts, its gold answer <em>and</em> its gold solution-path exist by construction. That sidesteps the two things that make agent benchmarks expensive and disputable &mdash; human answer-keys and LLM-as-judge ambiguity. <strong>Verifiability (Q2) is the generative principle of the benchmark (Q1), not a bolt-on.</strong></p>
+  </div>
+</section>
+
+<!-- ═══════════════ §1 SHIPPED ═══════════════ -->
+<section id="shipped">
+  <h2>1. Where We Are Starting From</h2>
+  <p>The draft&rsquo;s abstract &ldquo;tagging &rarr; retrieval &rarr; matching&rdquo; is, concretely, this shipped stack:</p>
+
+  <table>
+    <thead>
+      <tr><th>Shipped Component</th><th>What It Does</th><th>Code</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>XBRL Tagging</strong></td>
+        <td>Anti-hallucination retrieval-then-select over FASB 2026 US-GAAP taxonomy; agent never fabricates tag names</td>
+        <td><code>lookup_xbrl_tags</code>, <code>validate_xbrl_tag</code> (MCP)</td>
+      </tr>
+      <tr>
+        <td><strong><code>query_xbrl_filing</code></strong></td>
+        <td>Local iXBRL parser; resolves <code>(company, tag) &rarr; value</code> with period/unit/context; 3&ndash;5 local filings (AAPL, MSFT, TSLA, JPM, BRK)</td>
+        <td><code>mcp_server/xbrl/parser.py</code>, <code>server.py</code></td>
+      </tr>
+      <tr>
+        <td><strong>Axiom Engine</strong></td>
+        <td>Deterministic <code>A = L + E</code> check, code-enforced in the tool wrapper</td>
+        <td><code>axioms/engine.py</code></td>
+      </tr>
+      <tr>
+        <td><strong>Numbers + Ratios (L1)</strong></td>
+        <td>User-triggered &ldquo;Validate&rdquo; button; 3 ratios (accounting identity, gross margin, current ratio) checked against local XBRL; inline mismatch marks</td>
+        <td><code>axioms/{engine,resolver,registry}.py</code>, <code>report_claim</code>, <code>/api/axioms/validate/</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout shipped">
+    <div class="callout-title">FinSearch Four-Layer Architecture</div>
+    <p><strong>L1</strong> Numbers+Ratios (shipped, 91.7% vs Perplexity 41.7% on 24-Q benchmark) &middot; <strong>L2</strong> Streaming per-claim validation + long-form report tagging &middot; <strong>L3</strong> Compliance-as-contract (deferred) &middot; <strong>L4</strong> Cross-source / canonical truth.</p>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat-item">
+      <span class="stat-value">91.7%</span>
+      <span class="stat-label">FinSearch L1 accuracy (24-Q)</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">41.7%</span>
+      <span class="stat-label">Perplexity baseline (24-Q)</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">3&ndash;5</span>
+      <span class="stat-label">Local filings shipped</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">3</span>
+      <span class="stat-label">Ratios validated</span>
+    </div>
+  </div>
+
+  <div class="callout warning">
+    <div class="callout-title">The Gap</div>
+    <p>3&ndash;5 local filings can verify a demo, but cannot <em>generate or grade</em> a benchmark across companies and periods. Closing that gap is what pulls the truth layer into existence.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ §2 TRACKS ═══════════════ -->
+<section id="tracks">
+  <h2>2. The Two Benchmark Tracks</h2>
+
+  <div class="track-card track-r">
+    <div class="track-label">Track R</div>
+    <h3>长程取数 &mdash; Multi-Hop Retrieval over XBRL</h3>
+    <p><strong>Task:</strong> A FinSearch agent answers a question requiring <em>K</em> grounded facts fetched across multiple hops (conditional lookups, period-over-period, cross-entity comparisons, multi-constraint filters).</p>
+    <div class="example-q">&ldquo;By how much did Apple&rsquo;s effective tax rate change between the first fiscal year its R&amp;D exceeded $25B and the following year?&rdquo; &rarr; find-the-year &rarr; rate(y) &rarr; rate(y+1) &rarr; &Delta;</div>
+    <p><strong>Inputs:</strong> Question + access to FinSearch tools (search, <code>RetrieveEvidence</code>).</p>
+    <p><strong>Gold label:</strong> Canonical answer <strong>+ the gold fact-path</strong> (which XBRL facts, in order) &mdash; auto-derived from the truth layer at generation time.</p>
+    <h4>Metrics (mirroring 同花顺)</h4>
+    <ul>
+      <li><strong>End-to-end task accuracy</strong> &mdash; final answer correct</li>
+      <li><strong>Per-hop process accuracy</strong> &mdash; of <em>N</em> hops, how many intermediate facts correct</li>
+      <li><strong>Hop-efficiency</strong> &mdash; fewer hops to solve is better</li>
+    </ul>
+    <div class="callout note" style="margin-bottom:0">
+      <div class="callout-title">Why It Matters</div>
+      <p>Single-hop accuracy is already &lt;80% and <strong>two-hop drops below 50%</strong> (同花顺). FinSearchComp: monotonic decline T1&rarr;T3 (Grok-4 68.9% vs human 75.0%). FinAgentBench: models &ldquo;degrade sharply at fine-grained chunking.&rdquo; This cliff is the headline result the benchmark measures.</p>
+    </div>
+  </div>
+
+  <div class="track-card track-c">
+    <div class="track-label">Track C</div>
+    <h3>复杂金融计算 &mdash; Complex Computation Grounded in XBRL</h3>
+    <p><strong>Task:</strong> The agent <strong>plans and writes</strong> computation logic to derive a quantity/decision from grounded facts &mdash; <em>no pre-built tool for every metric</em> (tests on-the-fly logic).</p>
+    <p><strong>Inputs:</strong> Question + grounded facts (or the tools to fetch them).</p>
+    <p><strong>Gold label:</strong> Reference result computed deterministically from the <em>same</em> grounded inputs; for algorithmic/strategy tasks, <strong>execution-based</strong> via a deterministic harness.</p>
+    <h4>Metrics</h4>
+    <ul>
+      <li><strong>Result correctness</strong> within <code>decimals</code>-aware tolerance</li>
+      <li><strong>Executability</strong> / internal consistency</li>
+    </ul>
+    <h4>Sub-Modes</h4>
+    <ul>
+      <li><strong>Core:</strong> Valuation / metric-derivation (ROIC, DuPont, leverage, coverage from real filing data)</li>
+      <li><strong>Stretch (Phase 4):</strong> Strategy-coding with backtest execution</li>
+    </ul>
+    <div class="callout note" style="margin-bottom:0">
+      <div class="callout-title">Why It Matters</div>
+      <p>QuantEval: even GPT-5 ~55% on quantitative reasoning vs human experts 89%. Failures are arithmetic + formula-composition + interface/execution errors. Correctness must be validated by execution, not surface inspection.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════ §3 VERIFIABILITY ═══════════════ -->
+<section id="verifiability">
+  <h2>3. The Verifiability Model</h2>
+  <p>Four kinds of verifiability, each a generalization of a pipeline stage we already have. This is the answer to &ldquo;how do we ensure verifiability&rdquo;:</p>
+
+  <div class="v-matrix">
+    <div class="v-card">
+      <div class="v-num">01</div>
+      <div class="v-name">Provenance</div>
+      <div class="v-means">Every fact &rarr; a specific XBRL fact (<code>accession, tag, period, unit, context</code>)</div>
+      <span class="v-generalizes">tagging + query_xbrl_filing</span>
+    </div>
+    <div class="v-card">
+      <div class="v-num">02</div>
+      <div class="v-name">Value</div>
+      <div class="v-means">Claimed value == authoritative XBRL value within <code>decimals</code>-aware tolerance</div>
+      <span class="v-generalizes">matching / Numbers-Ratios</span>
+    </div>
+    <div class="v-card">
+      <div class="v-num">03</div>
+      <div class="v-name">Path</div>
+      <div class="v-means">Each hop&rsquo;s intermediate fact independently checkable &rarr; process accuracy, not just final</div>
+      <span class="v-generalizes">retrieval graph (to build)</span>
+    </div>
+    <div class="v-card">
+      <div class="v-num">04</div>
+      <div class="v-name">Computation</div>
+      <div class="v-means">Derived result re-computable from grounded inputs + axiom consistency; strategy via deterministic execution</div>
+      <span class="v-generalizes">Axiom Engine (to generalize)</span>
+    </div>
+  </div>
+
+  <div class="callout thesis">
+    <div class="callout-title">Verifiable by Construction</div>
+    <p>Every generated question carries the <code>fact_id</code>s it was built from, so its answer (value-verifiable), its solution path (path-verifiable), and any derivation (computation-verifiable) are all gradable deterministically &mdash; <strong>no manual answer key</strong>.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ §4 ARCHITECTURE ═══════════════ -->
+<section id="architecture">
+  <h2>4. Architecture</h2>
+
+  <div class="arch-diagram">
+    <pre><code>
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │                        SEC Structured Data                             │
+  │                                                                        │
+  │  companyfacts API     frames API     companyfacts.zip /   raw iXBRL    │
+  │    (breadth)        (cross-entity)   Fin. Statement      (dimensional  │
+  │                                      Data Sets             depth)      │
+  └────────┬──────────────┬──────────────────┬──────────────────┬──────────┘
+           │              │                  │                  │
+           └──────────────┴─────────┬────────┴──────────────────┘
+                                    ▼
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │                   Canonical Truth Layer (Track A)                       │
+  │                                                                        │
+  │  ┌─────────────────┐  ┌──────────────────────────────────────────────┐ │
+  │  │  Ingestion +     │  │  facts table                                │ │
+  │  │  concept         │──│  (context-keyed, provenance-bearing)        │ │
+  │  │  normalization   │  │                                             │ │
+  │  └─────────────────┘  └───────────────┬──────────────────────────────┘ │
+  │                                       │                                │
+  │  ┌────────────────────────────────────┼────────────────────────────┐   │
+  │  │  relationships                     │  filing-tree view          │   │
+  │  │  (temporal · peer · calc-arc)      │  (presentation linkbase)   │   │
+  │  └────────────────────────────────────┴────────────────────────────┘   │
+  └──────────────────┬───────────────────────────────────┬─────────────────┘
+                     │                                   │
+                     ▼                                   ▼
+  ┌───────────────────────────────┐   ┌────────────────────────────────────┐
+  │  PV Services (Track B)       │   │  Benchmark (dual-use)              │
+  │  MCP-native                   │   │                                    │
+  │                               │   │  Construction Engine               │
+  │  ┌──────────────────────┐     │   │  (templates → Q + gold answer      │
+  │  │ RetrieveEvidence     │     │   │   + gold path)                     │
+  │  ├──────────────────────┤     │   │                                    │
+  │  │ TraceClaim           │     │   │  Grading Harness                   │
+  │  ├──────────────────────┤     │   │  (Track R metrics ·                │
+  │  │ ValidateMetric       │─────│───│   Track C correctness)             │
+  │  └──────────────────────┘     │   │                                    │
+  └──────────────┬────────────────┘   └──────┬─────────────────────────────┘
+                 │                           │
+                 ▼                           │ gold path
+  ┌──────────────────────────────┐           │
+  │  Agentic FinSearch           │           │
+  │  (under test)                │───────────▼
+  │                              │──→  Grading Harness
+  └──────────────────────────────┘     (trace → grade)
+    </code></pre>
+    <div class="arch-caption">Data flows from SEC sources through the truth layer into both PV services and benchmark generation. The agent under test consumes PV services and is graded against gold paths.</div>
+  </div>
+</section>
+
+<!-- ═══════════════ §5 TRUTH LAYER ═══════════════ -->
+<section id="truth-layer">
+  <h2>5. Canonical Truth Layer &mdash; Detailed Design</h2>
+
+  <h3>5.1 Storage Primitive: Context-Keyed Fact Table</h3>
+  <p>A US-GAAP tag is <strong>not</strong> a unique key. In one Apple 10-K, <code>RevenueFromContractWithCustomerExcludingAssessedTax</code> appears ~15+ times &mdash; FY2023/2022/2021 comparatives, plus product-line and geographic disaggregations. What disambiguates them is the XBRL <strong>context</strong>. The key is the full context tuple:</p>
+
+  <pre><code>fact_key   = (cik, concept, period_type, period_start, period_end, unit, dimensions)
+fact_value = (value, decimals)  +  provenance</code></pre>
+
+  <h4>Schema (DuckDB locally &rarr; Aurora/Neptune in cloud)</h4>
+  <pre><code>facts(
+  fact_id,                       -- hash(context tuple + accession)
+  cik, entity_name,
+  taxonomy,                      -- us-gaap | dei | ifrs | company-extension
+  concept,                       -- the tag
+  period_type,                   -- 'instant' | 'duration'
+  period_start, period_end,
+  unit,                          -- USD | shares | pure | USD/shares
+  decimals,                      -- precision → tolerance during matching
+  dim_hash, segment_json,        -- dimensional members; NULL = aggregate
+  value,
+  -- provenance (verifiability + leakage control):
+  accession, form_type, filed_date, fy, fp, taxonomy_version, frame
+)
+
+filings(
+  accession, cik, form_type, filed_date,
+  period_of_report, primary_doc_url, taxonomy_version
+)</code></pre>
+
+  <p><strong>Indexes:</strong> <code>(cik, concept, period_end)</code> entity history &middot; <code>(concept, period_end)</code> peer/cross-entity &middot; <code>(filed_date)</code> leakage as-of filtering.</p>
+
+  <h3>5.2 The Filing Tree Is a View, Not the Storage</h3>
+  <p>A fact lives at the intersection of <em>(entity &times; concept &times; period &times; dimensions)</em> &mdash; four-dimensional; a single tree forces one hierarchy and loses the rest. So: <strong>store flat facts; expose the period/time tree and the per-filing statement tree as materialized views/indexes.</strong></p>
+  <p>The statement tree (Statement &rarr; section &rarr; line item), derived from the <strong>presentation linkbase</strong>, is useful for <code>RetrieveEvidence</code>&rsquo;s &ldquo;return the relevant table&rdquo; and for generating structurally-coherent questions &mdash; but it is a navigation layer over the fact table, not the source of truth.</p>
+
+  <h3>5.3 Ingestion: Breadth-First via <code>companyfacts</code>, S&amp;P 500</h3>
+  <p>We do <strong>not</strong> parse raw iXBRL for most facts. SEC publishes pre-extracted XBRL:</p>
+
+  <table>
+    <thead>
+      <tr><th>Source</th><th>Gives</th><th>Role</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong><code>companyfacts</code> API</strong></td>
+        <td>Every fact a company ever reported, each with <code>val, accn, fy, fp, form, filed, frame, start, end</code></td>
+        <td><strong>Primary ingest (breadth).</strong> One call backfills full history, provenance baked in.</td>
+      </tr>
+      <tr>
+        <td><strong><code>frames</code> API</strong></td>
+        <td>All companies&rsquo; value for one concept in one period</td>
+        <td>Cross-entity / peer edges &rarr; Track R cross-entity templates</td>
+      </tr>
+      <tr>
+        <td><strong><code>companyconcept</code> API</strong></td>
+        <td>One concept&rsquo;s full history for one company</td>
+        <td>Runtime <code>RetrieveEvidence</code> hot path</td>
+      </tr>
+      <tr>
+        <td><strong>Bulk <code>companyfacts.zip</code></strong></td>
+        <td>Entire corpus offline, no rate limits</td>
+        <td>Full S&amp;P 500 backfill</td>
+      </tr>
+      <tr>
+        <td><strong>Existing iXBRL parser</strong></td>
+        <td>Dimensional/segment facts + footnote text blocks</td>
+        <td><strong>Depth tool</strong> (deferred tier)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout decision">
+    <div class="callout-title">Universe: S&amp;P 500</div>
+    <p>Credible leaderboard universe; rich cross-entity questions. <strong>Order:</strong> breadth-first &mdash; aggregate facts for all 500 first; dimensional depth later. ~500 calls throttled to SEC&rsquo;s ~10 req/s + <code>User-Agent</code> header, or pull <code>companyfacts.zip</code> once. Idempotent on <code>(accession, fact context)</code>.</p>
+  </div>
+
+  <h3>5.4 Restatement &amp; As-Of Semantics</h3>
+  <p>A 10-K/A can report a <em>different</em> value for the same <code>(cik, concept, period)</code> than the original. <strong>Store all facts from all filings. Never overwrite.</strong></p>
+  <ul>
+    <li><strong>Knowable on date D:</strong> <code>WHERE filed_date &lt;= D</code>, take latest-filed per <code>(cik, concept, period, dims)</code> &rarr; automates no-future-function leakage rule.</li>
+    <li><strong>Originally reported:</strong> take earliest-filed.</li>
+    <li><strong>Restatement detection:</strong> differing values across filings is itself a Track R question type.</li>
+  </ul>
+  <p>This is why <code>filed_date</code> is part of the key, not mere metadata.</p>
+
+  <h3>5.5 Concept Normalization</h3>
+  <p>Companies tag the same economic concept differently (<code>Revenues</code> vs <code>RevenueFromContractWithCustomerExcludingAssessedTax</code> vs an extension). FinTagging measured this: fine-grained concept linking peaks <strong>below 19% accuracy</strong>, and collapses to <strong>~0% F1</strong> when posed as single-step tagging over the full ~17k-concept taxonomy &mdash; agents cannot self-ground.</p>
+  <p><strong>Mitigation:</strong> Generalize the shipped <code>RATIO_TAG_MAP</code> preference-orders into a <strong>concept-normalization layer</strong> (canonical metric &rarr; ordered list of acceptable tags), and <strong>surface unresolvable facts honestly</strong> (<code>NOT_APPLICABLE</code> &mdash; e.g. banks/insurers/REITs lack <code>AssetsCurrent</code>) rather than guessing.</p>
+</section>
+
+<!-- ═══════════════ §6 PV ═══════════════ -->
+<section id="pv">
+  <h2>6. PV Services (MCP-Native)</h2>
+  <p>Expose the truth layer as callable tools &mdash; for both the agent-under-test and the grader. MCP-native because connectivity is now commoditized (MCP donated to the Linux-Foundation Agentic AI Foundation, Dec 2025); the open problem is <em>verified grounding</em>, so we ride the standard.</p>
+
+  <div class="service-grid">
+    <div class="service-card">
+      <div class="service-name">RetrieveEvidence</div>
+      <div class="service-sig">(entity, concept, period, dims?, as_of?) &rarr; facts[] + provenance</div>
+      <p class="service-used"><strong>Used by:</strong> FinSearch retrieval path. Generalizes <code>query_xbrl_filing</code>. Also returns &ldquo;relevant table&rdquo; via the statement-tree view.</p>
+    </div>
+    <div class="service-card">
+      <div class="service-name">TraceClaim</div>
+      <div class="service-sig">(claim) &rarr; source fact(s) + filing accession/section</div>
+      <p class="service-used"><strong>Used by:</strong> Per-claim provenance (verifiability #1).</p>
+    </div>
+    <div class="service-card">
+      <div class="service-name">ValidateMetric</div>
+      <div class="service-sig">(metric, inputs, claimed_value, period, as_of) &rarr; {VERIFIED | FAILED | SKIPPED | NOT_APPLICABLE, expected, variance}</div>
+      <p class="service-used"><strong>Used by:</strong> Matching + grading. Generalizes the Axiom Engine (verifiability #2, #4).</p>
+    </div>
+  </div>
+
+  <div class="callout decision">
+    <div class="callout-title">Design Split</div>
+    <p>Service design separates <strong>ingestion-time computation</strong> (expensive, once) from <strong>runtime validation</strong> (cheap, millions) &mdash; the &ldquo;ingest once, validate millions&rdquo; split.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ §7 CONSTRUCTION ═══════════════ -->
+<section id="construction">
+  <h2>7. Benchmark Construction Engine</h2>
+  <p>Templates per track; the generator walks the fact table + relationships and emits, for each case:</p>
+
+  <pre><code>(question, gold_answer, gold_fact_path[fact_id...], required_facts, K, difficulty, as_of_date)</code></pre>
+
+  <h3>Track R Templates</h3>
+  <ul>
+    <li><strong>Conditional lookup</strong> &mdash; &ldquo;find the year where X exceeds threshold, then fetch Y&rdquo;</li>
+    <li><strong>Period-over-period</strong> &mdash; &ldquo;compare metric across fiscal years&rdquo;</li>
+    <li><strong>Cross-entity</strong> &mdash; &ldquo;which S&amp;P 500 company had the highest margin in CY2024?&rdquo;</li>
+    <li><strong>Multi-constraint</strong> &mdash; combine filters, each parameterized by hop count <em>K</em></li>
+  </ul>
+
+  <h3>Track C Templates</h3>
+  <ul>
+    <li><strong>Ratio/metric derivation</strong> &mdash; ROIC, DuPont decomposition, coverage ratios</li>
+    <li><strong>Multi-step valuation</strong> &mdash; DCF, comparable analysis from real inputs</li>
+    <li><strong>Consistency-constrained computation</strong> &mdash; results must satisfy accounting identities</li>
+    <li>Calculation-linkbase arcs (e.g. <code>GrossProfit = Revenue &minus; COGS</code>) supply the <strong>gold formula</strong></li>
+  </ul>
+
+  <h3>Validity Controls (QuantEval Recipe)</h3>
+  <ul>
+    <li><strong>Difficulty control</strong> &mdash; calibrate K and formula complexity</li>
+    <li><strong>De-duplication</strong> &mdash; no semantically identical questions</li>
+    <li><strong>Leakage scan</strong> &mdash; no answers computable without the required hops</li>
+    <li><strong>Human spot-check gate</strong> &mdash; sample-based manual review</li>
+    <li>Distractors must be plausible-but-unambiguously-wrong; questions must require reasoning, not keyword matching</li>
+  </ul>
+
+  <div class="callout note">
+    <div class="callout-title">Pilot Size</div>
+    <p>~300 cases (echoing the LLM-prediction PoC) with automatic gold labels.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ §8 GRADING ═══════════════ -->
+<section id="grading">
+  <h2>8. Grading Harness</h2>
+
+  <h3>Track R Grading</h3>
+  <p>Capture the agent&rsquo;s structured tool-call trace; align it to the gold fact-path. Grade on <strong>facts reached (set/DAG equivalence), not literal tool order</strong> &mdash; a question may have multiple valid solution paths; the gold path is <em>a sufficient</em> path, not the only one.</p>
+  <p><strong>Emit:</strong> end-to-end accuracy, per-hop process accuracy, hop-efficiency.</p>
+
+  <h3>Track C Grading</h3>
+  <p><code>ValidateMetric</code> re-computes from grounded inputs + axiom consistency. Deterministic execution harness for the strategy-coding stretch sub-mode.</p>
+  <p><strong>Emit:</strong> correctness within tolerance + executability.</p>
+
+  <h3>Cross-Cutting</h3>
+  <ul>
+    <li><strong>Leakage control:</strong> as-of-date filter on the fact store (<code>filed_date &le; as_of</code>).</li>
+    <li><strong>Baseline comparison:</strong> Run each track against a vanilla agent <em>without</em> the truth layer to quantify the lift (and reproduce the 1-hop &rarr; K-hop cliff on our own data).</li>
+  </ul>
+</section>
+
+<!-- ═══════════════ §9 PHASES ═══════════════ -->
+<section id="phases">
+  <h2>9. Phased Build Sequence</h2>
+
+  <div class="callout decision">
+    <div class="callout-title">Governing Principle</div>
+    <p>Each phase ships a benchmark slice that is both its <strong>acceptance gate</strong> and a <strong>publishable artifact</strong>; the truth infra accretes only as far as the benchmark requires.</p>
+  </div>
+
+  <div class="phase-card p0">
+    <div class="phase-label">Phase 0</div>
+    <h3>Benchmark Construction Engine</h3>
+    <p><strong>Build:</strong> Templates (R + C); generator &rarr; <code>(Q, gold answer, gold path, K, difficulty, as_of)</code>; validity controls.</p>
+    <p><strong>Reuse:</strong> Fact store + relationships.</p>
+    <div class="gate">Gate: Generate ~300-case pilot with auto gold labels; human spot-check sample</div>
+    <p style="margin-top:0.5rem;font-size:0.85rem;color:var(--text-secondary)"><strong>Verifiability unlocked:</strong> #3 Path (gold path by construction)</p>
+  </div>
+
+  <div class="phase-card p1">
+    <div class="phase-label">Phase 1</div>
+    <h3>Instrument &amp; Pin Provenance</h3>
+    <p><strong>Build:</strong> Structured tool-call trace per run; stamp every returned fact with full provenance + <code>filed_date</code>.</p>
+    <p><strong>Reuse:</strong> <code>tool_wrapper.py</code>, <code>datascraper.py</code>, <code>query_xbrl_filing</code>.</p>
+    <div class="gate">Gate: Re-run 24-Q benchmark emitting trace + provenance</div>
+    <p style="margin-top:0.5rem;font-size:0.85rem;color:var(--text-secondary)"><strong>Verifiability unlocked:</strong> #1 Provenance</p>
+  </div>
+
+  <div class="phase-card p2">
+    <div class="phase-label">Phase 2</div>
+    <h3>Canonical Truth Layer v0</h3>
+    <p><strong>Build:</strong> DuckDB fact store; <code>companyfacts</code> breadth ingest of S&amp;P 500; temporal/peer relationships; <code>query_xbrl_filing &rarr; RetrieveEvidence</code>.</p>
+    <p><strong>Reuse:</strong> iXBRL parser, <code>COMPANY_ALIASES</code>, <code>RATIO_TAG_MAP</code>.</p>
+    <div class="gate">Gate: Reproduce all L1 ratio validations against the store; report coverage = companies &times; periods resolvable</div>
+    <p style="margin-top:0.5rem;font-size:0.85rem;color:var(--text-secondary)"><strong>Verifiability unlocked:</strong> #2 Value @ scale</p>
+  </div>
+
+  <div class="phase-card p3">
+    <div class="phase-label">Phase 3</div>
+    <h3>PV Services + FinSearch Wiring</h3>
+    <p><strong>Build:</strong> <code>RetrieveEvidence</code>, <code>TraceClaim</code>, <code>ValidateMetric</code> as MCP tools; route agent retrieval through them.</p>
+    <p><strong>Reuse:</strong> L1 resolver/registry.</p>
+    <div class="gate">Gate: Single-hop slice (Track R, K=1): accuracy + provenance coverage &rarr; reproduce the "&lt;80% single-hop" floor on our data</div>
+    <p style="margin-top:0.5rem;font-size:0.85rem;color:var(--text-secondary)"><strong>Verifiability unlocked:</strong> #1+#2 as services</p>
+  </div>
+
+  <div class="phase-card p4">
+    <div class="phase-label">Phase 4</div>
+    <h3>Grading Harness + Computation Engine</h3>
+    <p><strong>Build:</strong> Track R grader (trace &harr; gold-path alignment); generalize Axiom Engine &rarr; <code>ValidateMetric</code>; leakage filter; (stretch) strategy execution harness.</p>
+    <p><strong>Reuse:</strong> Axiom Engine.</p>
+    <div class="gate">Gate: Full run both tracks; report 1-hop&rarr;K-hop cliff + computation correctness vs. no-truth-layer baseline</div>
+    <p style="margin-top:0.5rem;font-size:0.85rem;color:var(--text-secondary)"><strong>Verifiability unlocked:</strong> #4 Computation</p>
+  </div>
+
+  <div class="phase-card p5">
+    <div class="phase-label">Phase 5 &mdash; Hand-off</div>
+    <h3>Cloud Scale + Leaderboard</h3>
+    <p><strong>Build:</strong> Migrate store to Neptune/Aurora/OpenSearch; public leaderboard + submission service.</p>
+    <p style="font-size:0.85rem;color:var(--text-secondary)"><em>Hand-off to product vision / grant track.</em></p>
+  </div>
+
+  <div class="callout thesis">
+    <div class="callout-title">Arc in One Line</div>
+    <p><strong>0&ndash;2</strong> turns the pipeline into a queryable, provenance-bearing service; <strong>3</strong> makes it generate its own verifiable questions; <strong>4</strong> makes it grade them.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ §10 STACK ═══════════════ -->
+<section id="stack">
+  <h2>10. Technology Stack</h2>
+
+  <p>Two organizing principles: <strong>(1) Local-first &rarr; cloud-later</strong> &mdash; build on DuckDB + local MCP until the benchmark proves value. <strong>(2) Reuse the shipped stack</strong> &mdash; extend Django + OpenAI Agents SDK + MCP/FastMCP, not a greenfield rebuild.</p>
+
+  <div class="stack-grid">
+    <div class="stack-layer">
+      <div class="layer-label">Layer 0</div>
+      <h4>Data Sources</h4>
+      <div class="stack-cols">
+        <div>
+          <div class="stack-col-label">Local / Current</div>
+          <p>SEC EDGAR <code>companyfacts</code> / <code>companyconcept</code> / <code>frames</code> APIs; bulk <code>companyfacts.zip</code>; raw iXBRL; FASB US-GAAP 2026 taxonomy</p>
+        </div>
+        <div>
+          <div class="stack-col-label">Cloud (Phase 5)</div>
+          <p>Same, mirrored into S3</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack-layer">
+      <div class="layer-label">Layer 1</div>
+      <h4>Ingestion &amp; Normalization</h4>
+      <div class="stack-cols">
+        <div>
+          <div class="stack-col-label">Local / Current</div>
+          <p>Python 3.12; <code>requests</code> + throttle; existing iXBRL parser (<code>xml.etree</code> / <code>beautifulsoup4</code>+<code>lxml</code>); config-driven concept-normalization</p>
+        </div>
+        <div>
+          <div class="stack-col-label">Cloud (Phase 5)</div>
+          <p>AWS Lambda (event-driven) + Glue (bulk transform) + Step Functions</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack-layer">
+      <div class="layer-label">Layer 2</div>
+      <h4>Canonical Truth Layer (Storage)</h4>
+      <div class="stack-cols">
+        <div>
+          <div class="stack-col-label">Local / Current</div>
+          <p><strong>DuckDB</strong> (columnar fact store) + Parquet cold storage; relationships + tree as SQL views</p>
+        </div>
+        <div>
+          <div class="stack-col-label">Cloud (Phase 5)</div>
+          <p>Amazon Aurora (tabular) + Neptune (graph) + OpenSearch (hybrid retrieval) + S3 (raw + parsed)</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack-layer">
+      <div class="layer-label">Layer 3</div>
+      <h4>PV Service Layer</h4>
+      <div class="stack-cols">
+        <div>
+          <div class="stack-col-label">Local / Current</div>
+          <p><strong>MCP-native</strong> via <code>mcp[cli]</code> + <strong>FastMCP</strong>; Django REST endpoints; native <code>openai-agents</code> <code>function_tool</code>s</p>
+        </div>
+        <div>
+          <div class="stack-col-label">Cloud (Phase 5)</div>
+          <p>API Gateway + Lambda/ECS; DynamoDB cache</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack-layer">
+      <div class="layer-label">Layer 4</div>
+      <h4>Agent Integration</h4>
+      <div class="stack-cols">
+        <div>
+          <div class="stack-col-label">Local / Current</div>
+          <p><strong>OpenAI Agents SDK</strong>; planner + skills; multi-model (OpenAI / Anthropic / Gemini); <code>tool_wrapper</code> interception</p>
+        </div>
+        <div>
+          <div class="stack-col-label">Cloud (Phase 5)</div>
+          <p>Amazon Bedrock + Step Functions (orchestration)</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack-layer">
+      <div class="layer-label">Layer 5</div>
+      <h4>Benchmark (Construct + Grade)</h4>
+      <div class="stack-cols">
+        <div>
+          <div class="stack-col-label">Local / Current</div>
+          <p>Python templating; structured trace capture; deterministic graders; <code>networkx</code> (DAG/path equivalence); QuantEval-style backtest (stretch)</p>
+        </div>
+        <div>
+          <div class="stack-col-label">Cloud (Phase 5)</div>
+          <p>SageMaker (eval at scale); public leaderboard + submission</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack-layer">
+      <div class="layer-label">Layer 6</div>
+      <h4>Observability &amp; Governance</h4>
+      <div class="stack-cols">
+        <div>
+          <div class="stack-col-label">Local / Current</div>
+          <p>Python logging; provenance + audit fields in every fact row</p>
+        </div>
+        <div>
+          <div class="stack-col-label">Cloud (Phase 5)</div>
+          <p>CloudWatch (monitoring) + CloudTrail (audit trail)</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3>What We Deliberately Do NOT Use</h3>
+  <table>
+    <thead>
+      <tr><th>Avoided</th><th>Why</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Vector-DB RAG as source of truth</td><td>We need <em>exact</em> facts with provenance, not nearest-neighbor text chunks. Vectors are a retrieval aid, never the ground truth.</td></tr>
+      <tr><td>LLM-as-judge for grading</td><td>Non-deterministic and disputable; defeats the verifiability thesis.</td></tr>
+      <tr><td><code>tag &rarr; value</code> map</td><td>Collapses the context that disambiguates facts.</td></tr>
+      <tr><td>Overwrite-on-latest fact storage</td><td>Destroys leakage control and restatement detection.</td></tr>
+      <tr><td>Cloud-first build</td><td>Premature complexity before the benchmark proves value.</td></tr>
+      <tr><td>Re-parsing iXBRL at runtime</td><td>The whole point of &ldquo;ingest once, validate millions.&rdquo;</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ═══════════════ §11 ADRs ═══════════════ -->
+<section id="adrs">
+  <h2>11. Architectural Decisions (ADRs)</h2>
+  <p>The 12 load-bearing choices &mdash; change one and the design shifts. Expand each for rationale and consequences.</p>
+
+  <div class="adr-grid">
+    <details class="adr">
+      <summary><span class="adr-tag">ADR-01</span> Context-keyed fact table, NOT tag&rarr;value</summary>
+      <div class="adr-body">
+        <p><strong>Why:</strong> One US-GAAP tag maps to many facts in a single filing (comparative years + segment/geographic dimensions). A tag&rarr;value map silently collapses the exact ambiguity verification exists to resolve.</p>
+        <p><strong>Consequence:</strong> The key is <code>(cik, concept, period_type, period_start, period_end, unit, dimensions)</code>; value carries <code>decimals</code> + provenance.</p>
+      </div>
+    </details>
+
+    <details class="adr">
+      <summary><span class="adr-tag">ADR-02</span> Flat facts are the truth; filing tree is a view</summary>
+      <div class="adr-body">
+        <p><strong>Why:</strong> A fact lives at the intersection of (entity &times; concept &times; period &times; dimensions) &mdash; 4-dimensional; a single tree forces one hierarchy and loses the others.</p>
+        <p><strong>Consequence:</strong> Store flat facts; expose period-tree and per-filing statement-tree (from the presentation linkbase) as materialized views/indexes for navigation and <code>RetrieveEvidence</code>.</p>
+      </div>
+    </details>
+
+    <details class="adr">
+      <summary><span class="adr-tag">ADR-03</span> Never overwrite on restatement</summary>
+      <div class="adr-body">
+        <p><strong>Why:</strong> A 10-K/A can report a different value for the same <code>(cik, concept, period)</code>. Overwriting destroys both as-of/leakage-control and restatement detection.</p>
+        <p><strong>Consequence:</strong> <code>filed_date</code> is part of the key; &ldquo;the&rdquo; value is an as-of query (<code>filed_date &le; D</code>, latest). Restatement becomes a benchmark question type.</p>
+      </div>
+    </details>
+
+    <details class="adr">
+      <summary><span class="adr-tag">ADR-04</span> Breadth-first companyfacts ingest; S&amp;P 500; iXBRL demoted</summary>
+      <div class="adr-body">
+        <p><strong>Why:</strong> <code>companyfacts</code> gives a company&rsquo;s full pre-parsed history with provenance in one call; aggregate facts cover most of Tracks R/C. Dimensional depth is a minority need.</p>
+        <p><strong>Consequence:</strong> Fast path to benchmark scale; the existing iXBRL parser is reserved for segment-level facts (deferred tier).</p>
+      </div>
+    </details>
+
+    <details class="adr">
+      <summary><span class="adr-tag">ADR-05</span> Local-first (DuckDB) &rarr; cloud-later</summary>
+      <div class="adr-body">
+        <p><strong>Why:</strong> Prove the benchmark&rsquo;s value before paying cloud complexity; DuckDB handles millions of facts with zero infra.</p>
+        <p><strong>Consequence:</strong> Phase 5 cloud migration is a clean hand-off, not a prerequisite for benchmark value.</p>
+      </div>
+    </details>
+
+    <details class="adr">
+      <summary><span class="adr-tag">ADR-06</span> MCP-native PV services</summary>
+      <div class="adr-body">
+        <p><strong>Why:</strong> MCP is the de-facto standard (now Linux-Foundation governed); connectivity is commoditized, verified grounding is not.</p>
+        <p><strong>Consequence:</strong> Services plug into any MCP agent; reuses the repo&rsquo;s FastMCP pattern. We compete on verification + benchmark, never on data access.</p>
+      </div>
+    </details>
+
+    <details class="adr">
+      <summary><span class="adr-tag">ADR-07</span> Concept-normalization layer</summary>
+      <div class="adr-body">
+        <p><strong>Why:</strong> Companies tag the same economic concept differently; FinTagging measured LLMs below 19% fine-grained concept-linking accuracy (and ~0% F1 as single-step full-taxonomy tagging) &mdash; agents cannot self-ground.</p>
+        <p><strong>Consequence:</strong> Canonical-metric &rarr; ordered-tag maps with explicit, honest unresolvable handling (<code>NOT_APPLICABLE</code>).</p>
+      </div>
+    </details>
+
+    <details class="adr">
+      <summary><span class="adr-tag">ADR-08</span> No LLM in the validation or grading path</summary>
+      <div class="adr-body">
+        <p><strong>Why:</strong> A verifier that hallucinates is worthless; the moat is <em>deterministic</em> checking against the primary source.</p>
+        <p><strong>Consequence:</strong> <code>ValidateMetric</code> / axiom checks / grading are pure code with <code>decimals</code>-aware tolerance; LLMs only generate, never adjudicate.</p>
+      </div>
+    </details>
+
+    <details class="adr">
+      <summary><span class="adr-tag">ADR-09</span> Dual-use substrate (retrieve &middot; verify &middot; benchmark)</summary>
+      <div class="adr-body">
+        <p><strong>Why:</strong> The same canonical layer that verifies runtime claims is the oracle that grades the benchmark and the store agents retrieve from.</p>
+        <p><strong>Consequence:</strong> One investment, three deliverables; the benchmark is a byproduct of the verification infra, not a separate build.</p>
+      </div>
+    </details>
+
+    <details class="adr">
+      <summary><span class="adr-tag">ADR-10</span> Verifiability by construction</summary>
+      <div class="adr-body">
+        <p><strong>Why:</strong> Questions generated <em>from</em> grounded facts carry their gold answer and gold fact-path automatically.</p>
+        <p><strong>Consequence:</strong> No human answer-keys, no LLM-judge ambiguity; value-, path-, and computation-verifiability are inherent to each case.</p>
+      </div>
+    </details>
+
+    <details class="adr">
+      <summary><span class="adr-tag">ADR-11</span> Grade on facts reached (set/DAG equivalence)</summary>
+      <div class="adr-body">
+        <p><strong>Why:</strong> A multi-hop question can have multiple valid solution paths; exact-sequence grading punishes correct alternates.</p>
+        <p><strong>Consequence:</strong> The gold path is <em>a sufficient</em> path; process accuracy measures intermediate facts reached, not tool-call order.</p>
+      </div>
+    </details>
+
+    <details class="adr">
+      <summary><span class="adr-tag">ADR-12</span> Decimals-aware tolerance for value matching</summary>
+      <div class="adr-body">
+        <p><strong>Why:</strong> XBRL facts carry precision (<code>decimals</code>/<code>scale</code>); a fixed tolerance produces false mismatches near zero or at coarse precision.</p>
+        <p><strong>Consequence:</strong> Tolerance = <code>max(relative, absolute)</code> scaled by the fact&rsquo;s reported precision (the shipped Numbers-Ratios convention, generalized).</p>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- ═══════════════ §12 RISKS ═══════════════ -->
+<section id="risks">
+  <h2>12. Risks &amp; Mitigations</h2>
+
+  <table class="risk-table">
+    <thead>
+      <tr><th>Risk</th><th>Why It Bites</th><th>Mitigation</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Cross-company tag inconsistency</td>
+        <td>The FinTagging concept-linking problem (&lt;19%) at ingest</td>
+        <td>Concept-normalization layer (generalized <code>RATIO_TAG_MAP</code>); honest unresolvable handling</td>
+      </tr>
+      <tr>
+        <td>Auto-generated questions trivial/ill-posed</td>
+        <td>Naive generator &rarr; no challenge or ambiguous</td>
+        <td>QuantEval recipe: difficulty control + de-dup + leakage scan + human spot-check gate</td>
+      </tr>
+      <tr>
+        <td>Multi-hop multiple valid paths</td>
+        <td>Exact-sequence grading punishes correct alternates</td>
+        <td>Grade on facts reached (set/DAG equivalence); gold path = a <em>sufficient</em> path</td>
+      </tr>
+      <tr>
+        <td>Restatements / leakage</td>
+        <td>Future-filed values leak into as-of questions</td>
+        <td>Store all filings; resolve via <code>filed_date &le; as_of</code></td>
+      </tr>
+      <tr>
+        <td>Adjacent encroachment</td>
+        <td>Anthropic finance, XBRL-MCP claim &ldquo;verified/auditable&rdquo;</td>
+        <td>Moat = independent fact-level verification of the <em>primary source</em> + the benchmark itself</td>
+      </tr>
+      <tr>
+        <td>SEC rate limits / TOS</td>
+        <td>Bulk pulls can trip fair-access</td>
+        <td><code>User-Agent</code> header, throttle ~10 req/s, prefer <code>companyfacts.zip</code></td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ═══════════════ §13 LANDSCAPE ═══════════════ -->
+<section id="landscape">
+  <h2>13. Demand &amp; Landscape Grounding</h2>
+
+  <h3>Demand Is Proven and Regulation-Forced</h3>
+  <ul>
+    <li><strong>Gartner (Jun 25, 2025):</strong> &gt;40% of agentic-AI projects will be canceled by end-2027, largely from inadequate risk controls; ~42% of <em>regulated</em> enterprises plan approval/review controls (vs 16% unregulated).</li>
+    <li><strong>EU AI Act:</strong> high-risk finance obligations (risk management, human oversight, transparency, auditability, data provenance) apply <strong>Aug 2, 2026</strong>; fines up to &euro;35M / 7% of turnover.</li>
+    <li><strong>FINOS AI Governance Framework v2.0</strong> (Nov 12, 2025): 46 risks/controls, 6 agentic-specific.</li>
+  </ul>
+
+  <h3>The Capability Gap Is Measured and Finance-Specific</h3>
+  <div class="stat-row">
+    <div class="stat-item">
+      <span class="stat-value">&lt;50%</span>
+      <span class="stat-label">Two-hop accuracy (同花顺)</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">68.9%</span>
+      <span class="stat-label">Grok-4 (FinSearchComp)</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">~55%</span>
+      <span class="stat-label">GPT-5 quant reasoning (QuantEval)</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">0%</span>
+      <span class="stat-label">LLM full-taxonomy XBRL (FinTagging)</span>
+    </div>
+  </div>
+
+  <div class="callout danger">
+    <div class="callout-title">Positioning &mdash; Where to Differentiate</div>
+    <p>MCP commoditized connectivity. XBRL-MCP servers commoditize data <em>access</em>. Anthropic&rsquo;s &ldquo;Agents for Financial Services&rdquo; (May 5, 2026) already markets &ldquo;verified/auditable.&rdquo;</p>
+    <p style="margin-top:0.5rem">The defensible layer is <strong>independent, fact-level verification against the authoritative primary source (SEC/XBRL)</strong> plus the <strong>benchmark itself</strong> &mdash; not data access, not a vendor audit log.</p>
+  </div>
+</section>
+
+<!-- ═══════════════ §14 OPEN QUESTIONS ═══════════════ -->
+<section id="open">
+  <h2>14. Open Questions</h2>
+  <ul>
+    <li><strong>Concept-normalization coverage:</strong> How many canonical metrics do we seed before generation is &ldquo;rich enough&rdquo; for a 300-case pilot?</li>
+    <li><strong>Track C strategy-coding harness:</strong> Adopt/port a QuantEval-style CTA backtest, or scope the pilot to valuation/metric-derivation only?</li>
+    <li><strong>Hop-count distribution:</strong> Target K-distribution for the pilot (how many K=2 vs K&ge;3 to expose the cliff without flooring scores)?</li>
+    <li><strong>Frame alignment:</strong> SEC <code>frames</code> periods (CY vs fiscal) vs companies&rsquo; fiscal-year-ends &mdash; normalization rule for cross-entity questions.</li>
+  </ul>
+</section>
+
+<!-- ═══════════════ §15 REFERENCES ═══════════════ -->
+<section id="references">
+  <h2>15. References</h2>
+  <table>
+    <thead>
+      <tr><th>Source</th><th>Citation</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>MCP &rarr; Linux Foundation</td><td>Agentic AI Foundation, Dec 2025</td></tr>
+      <tr><td>Gartner agentic-AI cancellations</td><td>Jun 25, 2025</td></tr>
+      <tr><td>EU AI Act Annex III</td><td>High-risk + timeline</td></tr>
+      <tr><td>FINOS AI Governance</td><td>Framework v2.0, Nov 12, 2025</td></tr>
+      <tr><td>Anthropic Finance Agents</td><td>May 5, 2026</td></tr>
+      <tr><td>FinSearchComp</td><td>arXiv:2509.13160 (Sep 16, 2025)</td></tr>
+      <tr><td>FinAgentBench</td><td>arXiv:2508.14052</td></tr>
+      <tr><td>&tau;&sup2;-bench</td><td>sierra-research/tau2-bench</td></tr>
+      <tr><td>FinTagging (concept-linking &lt;19%)</td><td>arXiv:2505.20650 (The FinAI) &middot; xbrl.org &ldquo;Beyond the Hype&rdquo;</td></tr>
+      <tr><td>SEC Inline XBRL</td><td>sec.gov/data-research/structured-data/inline-xbrl</td></tr>
+      <tr><td>QuantEval</td><td>arXiv:2601.08689v2</td></tr>
+      <tr><td>LLM 量化预测 Benchmark</td><td>Internal PoC</td></tr>
+      <tr><td>Financial Truth Infrastructure</td><td>Internal draft + Amazon V2</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ═══════════════ CROSS-CUTTING ═══════════════ -->
+<section>
+  <h2>Cross-Cutting Invariants</h2>
+  <div class="callout thesis">
+    <div class="callout-title">Three Guarantees</div>
+    <ul style="margin-top:0.25rem">
+      <li><strong>Provenance everywhere:</strong> every fact &rarr; <code>(accession, tag, period, unit, context, filed_date, taxonomy_version)</code>.</li>
+      <li><strong>Leakage control:</strong> every benchmark query and validation respects an <code>as_of</code> date via <code>filed_date</code> filtering.</li>
+      <li><strong>Determinism:</strong> validation and grading are code-enforced; the LLM is the subject, never the judge.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ═══════════════ FOOTER ═══════════════ -->
+<footer class="doc-footer">
+  <p><strong>SecureFinAI Lab</strong> &middot; XBRL Truth Infrastructure &rarr; Verifiable XBRL Benchmark &middot; Engineering Bridge Design</p>
+  <p style="margin-top:0.25rem">Companion: <em>Technology Stack &amp; Architecture Decisions</em> &middot; PRD: <em>XBRL Truth Benchmark &mdash; Product Requirements Document</em></p>
+  <p style="margin-top:0.5rem;font-size:0.8rem;color:#a8a29e">2026-05-28 &middot; Inward-facing engineering design document.</p>
+</footer>
+
+</div>
+</body>
+</html>

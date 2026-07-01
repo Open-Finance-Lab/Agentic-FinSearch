@@ -15,7 +15,6 @@ from typing import Callable, Dict, List, Optional
 from urllib.parse import quote
 
 from axioms.registry import get_claims
-from axioms.resolver import xbrl_source_url
 
 # ---------------------------------------------------------------------------
 # USER CONTRIBUTION POINT — source-card copy.
@@ -80,14 +79,22 @@ def build_xbrl_sources(
             continue
         ratios_by_filing[(ticker, period)].append(ratio)
 
+    # The Sources card links to the local SEC XBRL file (still served by the
+    # xbrl_filing_download view). Resolve the servable local filename directly via
+    # find_filing rather than xbrl_source_url, which now returns a provenance
+    # accession (not a path) — feeding that to the download view 404s. Lazy import
+    # keeps this module free of the XBRL parser until a card is actually built.
+    from mcp_server.xbrl.parser import find_filing
+    from axioms.resolver import FILINGS_DIR
+
     sources: List[Dict] = []
     for (ticker, period), ratios in ratios_by_filing.items():
-        filing_path = xbrl_source_url(ticker)
-        if not filing_path:
-            # No local filing — skip rather than emit a dead link.
+        filing = find_filing(ticker, FILINGS_DIR)
+        if not filing:
+            # No local filing to serve — skip rather than emit a dead link.
             continue
 
-        filename = PurePath(filing_path).name
+        filename = PurePath(filing).name
         api_path = f"/api/axioms/xbrl/{quote(filename)}/"
         url = absolute_uri_builder(api_path) if absolute_uri_builder else api_path
 

@@ -1,8 +1,8 @@
-"""Integration tests for the resolver against the 3 local XBRL filings.
+"""Acceptance oracle for the resolver, now backed by the canonical truth layer.
 
-Verifies that RATIO_TAG_MAP correctly pulls ground-truth values from the
-SEC filings committed under mcp_server/xbrl/filings/. The mcp_server
-shadowing workaround lives in tests/conftest.py.
+Verifies that the resolver pulls the same ground-truth ratio inputs from
+`truthlayer` (companyfacts -> DuckDB) that it previously pulled from local XBRL
+filings. The mcp_server shadowing workaround lives in tests/conftest.py.
 """
 import pytest
 
@@ -81,10 +81,9 @@ def test_applicability_missing_filing_returns_none():
     assert check_applicability("current_ratio", "NONEXISTENT") is None
 
 
-def test_xbrl_source_url_resolves():
+def test_xbrl_source_url_returns_accession():
     src = xbrl_source_url("AAPL")
-    assert src is not None
-    assert "aapl" in src.lower()
+    assert src and "-" in src        # SEC accession, e.g. '0000320193-23-000106'
 
 
 def test_xbrl_source_url_missing_filing():
