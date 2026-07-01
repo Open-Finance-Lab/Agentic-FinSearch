@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily 11:00 UTC beat for the Agentic FinSearch news heartbeat
+
+[Timer]
+OnCalendar=*-*-* 11:00:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

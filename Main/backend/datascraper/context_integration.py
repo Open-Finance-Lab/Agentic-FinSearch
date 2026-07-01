@@ -28,28 +28,14 @@ class ContextIntegration:
         self.context_manager = get_context_manager()
 
     def _get_session_id(self, request: HttpRequest) -> str:
-        """Extract or create session ID from request"""
-        import json
+        """Resolve the conversation key, bound to the signed session cookie.
 
-        session_id = request.GET.get('session_id') or request.POST.get('session_id')
-
-        if not session_id and request.method == 'POST' and request.body:
-            try:
-                body_data = json.loads(request.body)
-                session_id = body_data.get('session_id')
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                pass
-
-        if not session_id:
-            if hasattr(request, 'session'):
-                if not request.session.session_key:
-                    request.session.create()
-                session_id = request.session.session_key
-            else:
-                import uuid
-                session_id = str(uuid.uuid4())
-
-        return session_id
+        Delegates to the single shared derivation so the two request paths
+        (api.views and ContextIntegration) can never key the same conversation
+        differently. See datascraper.session_key.derive_conversation_key.
+        """
+        from .session_key import derive_conversation_key
+        return derive_conversation_key(request)
 
     def _determine_mode(self, request: HttpRequest, endpoint: str) -> ContextMode:
         """Determine the context mode based on request and endpoint"""

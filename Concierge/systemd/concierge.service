@@ -1,0 +1,23 @@
+[Unit]
+Description=Agentic FinSearch - Discord conversational chat adapter (Concierge)
+# NOTE: deployed via `systemctl --user` (see README); network-online.target does not exist
+# in the systemd *user* manager, so it is intentionally omitted. discord.py reconnects with
+# backoff if the network is not yet up, and Restart=on-failure covers an initial login crash.
+
+[Service]
+Type=simple
+WorkingDirectory=/home/deploy/fingpt/concierge
+EnvironmentFile=/home/deploy/fingpt/envs/.env.concierge
+ExecStart=/home/deploy/fingpt/concierge/.venv/bin/python -m concierge
+Restart=on-failure
+RestartSec=5
+MemoryHigh=256M
+MemoryMax=384M
+# Hardening (matches Heartbeat/systemd/finsearch-heartbeat.service): this process holds a
+# long-lived Discord bot token and writes a persistent SQLite identity store. User= is omitted
+# deliberately — a --user unit already runs as the invoking (unprivileged) user.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

@@ -174,6 +174,7 @@ class TestTechnicalAnalysisSkill:
 
 from planner.skills.web_research import WebResearchSkill
 from planner.skills.registry import SkillRegistry
+from planner.skills._catalog import READ_ONLY_DATA_TOOLS
 
 
 class TestWebResearchSkill:
@@ -181,7 +182,19 @@ class TestWebResearchSkill:
         self.skill = WebResearchSkill()
 
     def test_all_tools(self):
-        assert self.skill.tools_allowed is None
+        # SECURITY (deny-by-default): the fallback skill must NEVER return None
+        # (which the agent layer treats as "all tools"). It returns a finite,
+        # explicit allow-list of read-only data tools — the 46-name catalog.
+        tools = self.skill.tools_allowed
+        assert tools is not None
+        assert tools == list(READ_ONLY_DATA_TOOLS)
+        assert len(tools) == 46
+        # No filesystem / write tools may leak into the allow-list.
+        for forbidden in ("write_file", "read_file", "edit_file", "report_claim", "search_filings"):
+            assert forbidden not in tools
+        # list() returns a fresh copy — mutating it must not poison the catalog.
+        tools.append("__poison__")
+        assert "__poison__" not in self.skill.tools_allowed
 
     def test_max_turns(self):
         assert self.skill.max_turns == 10

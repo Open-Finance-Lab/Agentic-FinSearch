@@ -4,16 +4,26 @@ on:
   push:
     branches:
       - main
+    # Allowlist the backend image's actual inputs so unrelated changes (heartbeat, docs,
+    # the other deploy workflows) can't rebuild/restart the backend. The image is built
+    # solely from Main/backend/ (Dockerfile + that build context); the workflow file is
+    # included so its own edits still ship. Previously a broad paths-ignore let any
+    # non-heartbeat/docs change (e.g. a concierge workflow edit) bounce the backend.
+    paths:
+      - "Main/backend/**"
+      - ".github/workflows/backend-deploy.yml"
   workflow_dispatch:
 
 env:
   BACKEND_DIR: Main/backend
   PYTHON_VERSION: "3.12"
   REGISTRY: ghcr.io
-  DROPLET_HOST: agenticfinsearch.org
-  DROPLET_USER: deploy
+  # Shared droplet coordinates as repo-level Actions variables (see heartbeat/concierge),
+  # so a host/user change is one repo setting, not an edit across three workflows.
+  DROPLET_HOST: ${{ vars.DROPLET_HOST }}
+  DROPLET_USER: ${{ vars.DROPLET_USER }}
   SYSTEMD_UNIT: fingpt-api
-  RUN_TESTS: "false" # Toggle to "true" to re-enable backend tests
+  RUN_TESTS: "true" # Backend TDD suite gates deploy (P0 F-gate)
 
 jobs:
   build:
@@ -26,13 +36,14 @@ jobs:
       sha_tag: ${{ steps.meta.outputs.sha_tag }}
       main_tag: ${{ steps.meta.outputs.main_tag }}
       latest_tag: ${{ steps.meta.outputs.latest_tag }}
+      digest: ${{ steps.digest.outputs.digest }}
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
 
       - name: Install Python ${{ env.PYTHON_VERSION }}
         run: uv python install ${{ env.PYTHON_VERSION }}
@@ -60,7 +71,7 @@ jobs:
           echo "latest_tag=${IMAGE_ID}:latest" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772  # v3.4.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -82,6 +93,12 @@ jobs:
           docker push ${{ steps.meta.outputs.main_tag }}
           docker push ${{ steps.meta.outputs.latest_tag }}
 
+      - name: Capture pushed image digest
+        id: digest
+        run: |
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ steps.meta.outputs.sha_tag }})
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+
   test:
     runs-on: ubuntu-latest
     needs: build
@@ -90,7 +107,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Tests temporarily disabled
         if: ${{ env.RUN_TESTS != 'true' }}
@@ -98,7 +115,7 @@ jobs:
 
       - name: Set up uv
         if: ${{ env.RUN_TESTS == 'true' }}
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
 
       - name: Install Python ${{ env.PYTHON_VERSION }}
         if: ${{ env.RUN_TESTS == 'true' }}
@@ -112,10 +129,11 @@ jobs:
       - name: Run backend tests
         if: ${{ env.RUN_TESTS == 'true' }}
         working-directory: ${{ env.BACKEND_DIR }}
-        run: uv run python manage.py test
+        run: uv run pytest tests -q
 
   deploy:
     runs-on: ubuntu-latest
+    if: ${{ github.ref == 'refs/heads/main' }}
     needs:
       - build
       - test
@@ -138,9 +156,9 @@ jobs:
 
       - name: Deploy to Fedora droplet
         if: ${{ steps.deploy-gate.outputs.enabled == 'true' }}
-        uses: appleboy/ssh-action@v0.1.10
+        uses: appleboy/ssh-action@334f9259f2f8eb3376d33fa4c684fff373f2c2a6  # v0.1.10, SHA-pinned (holds the prod SSH key)
         env:
-          REMOTE_IMAGE: ${{ needs.build.outputs.main_tag }}
+          REMOTE_IMAGE: ${{ needs.build.outputs.digest }}
           GHCR_USERNAME: ${{ github.repository_owner }}
           GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
         with:
@@ -155,13 +173,27 @@ jobs:
             podman login ${{ env.REGISTRY }} -u "$GHCR_USERNAME" -p "$GHCR_TOKEN"
             podman pull "$REMOTE_IMAGE"
 
-            # Update systemd override to run the image we just pulled
+            # Shared rootless network so the api container reaches redis by name.
+            podman network exists fingpt-net || podman network create fingpt-net
+
+            # Redis counter store (atomic incr/decr for agent budget + ratelimit).
+            # Ephemeral cache: no persistence. --replace keeps redeploys idempotent.
+            podman run -d --name fingpt-redis --replace --restart=always \
+              --network fingpt-net \
+              --health-cmd 'redis-cli ping' --health-interval 10s --health-retries 5 \
+              docker.io/library/redis:7-alpine redis-server --save '' --appendonly no
+
+            # Update systemd override to run the image we just pulled.
+            # The image now runs as non-root uid 1001 (Dockerfile USER fingpt), so
+            # the runtime bind mount below carries the ':U' suffix: rootless podman
+            # then recursively chowns the host dir to the in-container uid, otherwise
+            # the non-root process could not write the mount.
             OVERRIDE_DIR="$HOME/.config/systemd/user/${SYSTEMD_UNIT}.service.d"
             mkdir -p "$OVERRIDE_DIR"
             cat > "$OVERRIDE_DIR/override.conf" <<EOF
             [Service]
             ExecStart=
-            ExecStart=/usr/bin/podman run --name ${SYSTEMD_UNIT} --replace --rm --cgroups=split --sdnotify=conmon -d --memory=1.7g --memory-swap=2g -v /home/deploy/fingpt/runtime:/app/runtime --publish 127.0.0.1:8000:8000 --env-file /home/deploy/fingpt/envs/.env.production ${REMOTE_IMAGE}
+            ExecStart=/usr/bin/podman run --name ${SYSTEMD_UNIT} --replace --rm --cgroups=split --sdnotify=conmon -d --memory=1.7g --memory-swap=2g --network fingpt-net -v /home/deploy/fingpt/runtime:/app/runtime:U --publish 127.0.0.1:8000:8000 --env-file /home/deploy/fingpt/envs/.env.production --env REDIS_URL=redis://fingpt-redis:6379/0 ${REMOTE_IMAGE}
             EOF
 
             systemctl --user daemon-reload
@@ -170,7 +202,7 @@ jobs:
 
       - name: Verify deployment health
         if: ${{ steps.deploy-gate.outputs.enabled == 'true' }}
-        uses: appleboy/ssh-action@v0.1.10
+        uses: appleboy/ssh-action@334f9259f2f8eb3376d33fa4c684fff373f2c2a6  # v0.1.10, SHA-pinned (holds the prod SSH key)
         with:
           host: ${{ env.DROPLET_HOST }}
           username: ${{ env.DROPLET_USER }}

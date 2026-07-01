@@ -26,6 +26,7 @@ from django.http import (
     StreamingHttpResponse,
 )
 from django.conf import settings
+from django_ratelimit import ALL
 from django_ratelimit.decorators import ratelimit
 
 from axioms.registry import get_claims
@@ -47,6 +48,11 @@ from datascraper.context_integration import (
     get_context_integration
 )
 from datascraper.url_tools import _scrape_url_impl as scrape_url
+from datascraper.session_key import derive_conversation_key
+from datascraper import ssrf_guard
+
+from api.agent_budget import agent_run_slot, BudgetExceeded, ConcurrencyExceeded
+from api.identity import get_request_identity
 
 logger = logging.getLogger(__name__)
 
@@ -95,23 +101,52 @@ def _int_env(name: str, default: int) -> int:
 
 
 def _get_session_id(request: HttpRequest) -> str:
-    """Get or create session ID for context management."""
-    custom_session_id = request.GET.get('session_id')
+    """Resolve the conversation/history key, bound to the signed session cookie.
 
-    if not custom_session_id and request.method == 'POST':
-        try:
-            body_data = json.loads(request.body)
-            custom_session_id = body_data.get('session_id')
-        except (json.JSONDecodeError, ValueError):
-            pass
+    SECURITY (P1 C-session / IDOR): the caller-supplied ``session_id`` is NEVER
+    trusted as the cache key on its own. The key is always rooted in a stable
+    per-browser id stored inside the signed-cookie session payload, and any
+    caller-supplied id is namespaced UNDER that root. See
+    ``datascraper.session_key.derive_conversation_key``.
+    """
+    return derive_conversation_key(request)
 
-    if custom_session_id:
-        return custom_session_id
 
-    if not request.session.session_key:
-        request.session.create()
+def _busy_response() -> JsonResponse:
+    """503 for an agent concurrency/daily-budget rejection (HARD limit).
 
-    return request.session.session_key
+    Root-C.3: agent_run_slot raised ConcurrencyExceeded or BudgetExceeded.
+    Returns a 503 + Retry-After so clients back off instead of hammering the
+    LLM. Always RETURN this (never raise) so the slot rejection is not masked
+    by a view's generic 500 handler.
+    """
+    resp = JsonResponse({'error': 'busy'}, status=503)
+    resp['Retry-After'] = '30'
+    return resp
+
+
+def _rate_limit_period_seconds() -> int:
+    """Worst-case seconds until the fixed-window limiter resets, parsed from API_RATE_LIMIT
+    ('<count>/<period>', e.g. '600/h' or '30/5m'), so Retry-After is an honest upper bound.
+    Falls back to 60 on any malformed value."""
+    units = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
+    try:
+        period = settings.API_RATE_LIMIT.split('/', 1)[1].strip()
+        return units[period[-1].lower()] * (int(period[:-1]) if period[:-1] else 1)
+    except (AttributeError, IndexError, KeyError, ValueError):
+        return 60
+
+
+def ratelimited(request: HttpRequest, exception=None) -> JsonResponse:
+    """RATELIMIT_VIEW target: render a per-identity rate-limit rejection as 429 Too Many
+    Requests + Retry-After, instead of django-ratelimit's default 403. ``@ratelimit(block=True)``
+    raises ``Ratelimited`` (a ``PermissionDenied`` subclass) which Django would otherwise turn
+    into a 403 Forbidden — the wrong semantic for "slow down". Wired via the settings pair
+    RATELIMIT_VIEW + RatelimitMiddleware, which catches the exception and calls this view.
+    """
+    resp = JsonResponse({'error': 'rate_limited'}, status=429)
+    resp['Retry-After'] = str(_rate_limit_period_seconds())
+    return resp
 
 
 def _build_status_frame(label: str, detail: Optional[str] = None, url: Optional[str] = None) -> bytes:
@@ -138,14 +173,14 @@ def _wrap_for_client(prose: str, session_id: str) -> str:
 
 
 @csrf_exempt
-@ratelimit(key='ip', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def has_axiom_claims(request: HttpRequest) -> JsonResponse:
     """Lightweight check: does the current session have any ratio claims
     awaiting validation? The frontend uses this to decide whether to show
     the Validate button on a response bubble.
     """
     try:
-        session_id = request.GET.get('session_id') or _get_session_id(request)
+        session_id = _get_session_id(request)
         claims = get_claims(session_id) if session_id else []
         return JsonResponse({
             'session_id': session_id,
@@ -161,7 +196,7 @@ _FILINGS_DIR_RESOLVED = FILINGS_DIR.resolve()
 
 
 @csrf_exempt
-@ratelimit(key='ip', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def xbrl_filing_download(request: HttpRequest, filename: str) -> FileResponse:
     """Serve a local SEC XBRL filing used for Layer 1 Validate.
 
@@ -187,7 +222,7 @@ def xbrl_filing_download(request: HttpRequest, filename: str) -> FileResponse:
 
 @csrf_exempt
 @require_http_methods(['POST'])
-@ratelimit(key='ip', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def validate_claims(request: HttpRequest) -> JsonResponse:
     """Layer 1 Validate: run deterministic proof over claims recorded for a session.
 
@@ -203,7 +238,7 @@ def validate_claims(request: HttpRequest) -> JsonResponse:
     except (json.JSONDecodeError, ValueError):
         return JsonResponse({'error': 'invalid JSON body'}, status=400)
 
-    session_id = body.get('session_id') or _get_session_id(request)
+    session_id = _get_session_id(request)
     if not session_id:
         return JsonResponse({'error': 'session_id required'}, status=400)
 
@@ -217,7 +252,7 @@ def validate_claims(request: HttpRequest) -> JsonResponse:
  
 
 @csrf_exempt
-@ratelimit(key='ip', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def chat_response(request: HttpRequest) -> JsonResponse:
     """
     Thinking Mode: Process user questions using LLM with available MCP tools.
@@ -255,33 +290,37 @@ def chat_response(request: HttpRequest) -> JsonResponse:
         models = [m.strip() for m in selected_models.split(',') if m.strip()]
         responses = {}
 
-        for model in models:
-            try:
-                start_time = time.time()
+        try:
+            with agent_run_slot(get_request_identity(request)):
+                for model in models:
+                    try:
+                        start_time = time.time()
 
-                response, _sources = ds.create_agent_response(
-                    user_input=question,
-                    message_list=messages,
-                    model=model,
-                    current_url=current_url,
-                    user_timezone=request.GET.get('user_timezone'),
-                    user_time=request.GET.get('user_time'),
-                    session_id=session_id,
-                )
+                        response, _sources = ds.create_agent_response(
+                            user_input=question,
+                            message_list=messages,
+                            model=model,
+                            current_url=current_url,
+                            user_timezone=request.GET.get('user_timezone'),
+                            user_time=request.GET.get('user_time'),
+                            session_id=session_id,
+                        )
 
-                responses[model] = _wrap_for_client(response, session_id)
+                        responses[model] = _wrap_for_client(response, session_id)
 
-                response_time_ms = int((time.time() - start_time) * 1000)
-                context_mgr.add_assistant_message(
-                    session_id=session_id,
-                    content=response,
-                    model=model,
-                    tools_used=[],
-                    response_time_ms=response_time_ms
-                )
+                        response_time_ms = int((time.time() - start_time) * 1000)
+                        context_mgr.add_assistant_message(
+                            session_id=session_id,
+                            content=response,
+                            model=model,
+                            tools_used=[],
+                            response_time_ms=response_time_ms
+                        )
 
-            except Exception as e:
-                responses[model] = f"Error: {_safe_error_message(e, f'model {model}')}"
+                    except Exception as e:
+                        responses[model] = f"Error: {_safe_error_message(e, f'model {model}')}"
+        except (ConcurrencyExceeded, BudgetExceeded):
+            return _busy_response()
 
         stats = context_mgr.get_session_stats(session_id)
 
@@ -308,7 +347,7 @@ def chat_response(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@ratelimit(key='ip', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def adv_response(request: HttpRequest) -> JsonResponse:
     """
     Extensive Mode: Search for information ANYWHERE on the web using web_search.
@@ -353,48 +392,52 @@ def adv_response(request: HttpRequest) -> JsonResponse:
         responses = {}
         all_sources = []
 
-        for model in models:
-            try:
-                start_time = time.time()
+        try:
+            with agent_run_slot(get_request_identity(request)):
+                for model in models:
+                    try:
+                        start_time = time.time()
 
-                response, sources = ds.create_advanced_response(
-                    user_input=question,
-                    message_list=messages,
-                    model=model,
-                    preferred_links=preferred_links,
-                    stream=False,
-                    user_timezone=request.GET.get('user_timezone'),
-                    user_time=request.GET.get('user_time')
-                )
+                        response, sources = ds.create_advanced_response(
+                            user_input=question,
+                            message_list=messages,
+                            model=model,
+                            preferred_links=preferred_links,
+                            stream=False,
+                            user_timezone=request.GET.get('user_timezone'),
+                            user_time=request.GET.get('user_time')
+                        )
 
-                responses[model] = _wrap_for_client(response, session_id)
-                all_sources.extend(sources)
+                        responses[model] = _wrap_for_client(response, session_id)
+                        all_sources.extend(sources)
 
-                if sources:
-                    integration.add_search_results(session_id, sources)
+                        if sources:
+                            integration.add_search_results(session_id, sources)
 
-                # XBRL filings must be persisted into sources_used so that the
-                # /get_source_urls/ endpoint (which backs the Sources popup) can
-                # surface them. Build here — post-agent-run — so report_claim()
-                # claims emitted during ds.create_advanced_response are visible.
-                try:
-                    xbrl_sources = build_xbrl_sources(session_id, request.build_absolute_uri)
-                except Exception as xbrl_err:
-                    logger.debug(f"XBRL source collection failed (non-critical): {xbrl_err}")
-                    xbrl_sources = []
+                        # XBRL filings must be persisted into sources_used so that the
+                        # /get_source_urls/ endpoint (which backs the Sources popup) can
+                        # surface them. Build here — post-agent-run — so report_claim()
+                        # claims emitted during ds.create_advanced_response are visible.
+                        try:
+                            xbrl_sources = build_xbrl_sources(session_id, request.build_absolute_uri)
+                        except Exception as xbrl_err:
+                            logger.debug(f"XBRL source collection failed (non-critical): {xbrl_err}")
+                            xbrl_sources = []
 
-                response_time_ms = int((time.time() - start_time) * 1000)
-                context_mgr.add_assistant_message(
-                    session_id=session_id,
-                    content=response,
-                    model=model,
-                    sources_used=merge_xbrl_sources(sources, xbrl_sources),
-                    tools_used=["web_search"],
-                    response_time_ms=response_time_ms
-                )
+                        response_time_ms = int((time.time() - start_time) * 1000)
+                        context_mgr.add_assistant_message(
+                            session_id=session_id,
+                            content=response,
+                            model=model,
+                            sources_used=merge_xbrl_sources(sources, xbrl_sources),
+                            tools_used=["web_search"],
+                            response_time_ms=response_time_ms
+                        )
 
-            except Exception as e:
-                responses[model] = f"Error: {_safe_error_message(e, f'model {model}')}"
+                    except Exception as e:
+                        responses[model] = f"Error: {_safe_error_message(e, f'model {model}')}"
+        except (ConcurrencyExceeded, BudgetExceeded):
+            return _busy_response()
 
         try:
             xbrl_sources = build_xbrl_sources(session_id, request.build_absolute_uri)
@@ -428,7 +471,7 @@ def adv_response(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@ratelimit(key='ip', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def agent_chat_response(request: HttpRequest) -> JsonResponse:
     """
     Process chat response via Agent with MCP tools (SEC-EDGAR, filesystem).
@@ -463,33 +506,37 @@ def agent_chat_response(request: HttpRequest) -> JsonResponse:
         models = [m.strip() for m in selected_models.split(',') if m.strip()]
         responses = {}
 
-        for model in models:
-            try:
-                start_time = time.time()
+        try:
+            with agent_run_slot(get_request_identity(request)):
+                for model in models:
+                    try:
+                        start_time = time.time()
 
-                response, _sources = ds.create_agent_response(
-                    user_input=question,
-                    message_list=messages,
-                    model=model,
-                    current_url=current_url,
-                    user_timezone=request.GET.get('user_timezone'),
-                    user_time=request.GET.get('user_time'),
-                    session_id=session_id,
-                )
+                        response, _sources = ds.create_agent_response(
+                            user_input=question,
+                            message_list=messages,
+                            model=model,
+                            current_url=current_url,
+                            user_timezone=request.GET.get('user_timezone'),
+                            user_time=request.GET.get('user_time'),
+                            session_id=session_id,
+                        )
 
-                responses[model] = _wrap_for_client(response, session_id)
+                        responses[model] = _wrap_for_client(response, session_id)
 
-                response_time_ms = int((time.time() - start_time) * 1000)
-                context_mgr.add_assistant_message(
-                    session_id=session_id,
-                    content=response,
-                    model=model,
-                    tools_used=[],
-                    response_time_ms=response_time_ms
-                )
+                        response_time_ms = int((time.time() - start_time) * 1000)
+                        context_mgr.add_assistant_message(
+                            session_id=session_id,
+                            content=response,
+                            model=model,
+                            tools_used=[],
+                            response_time_ms=response_time_ms
+                        )
 
-            except Exception as e:
-                responses[model] = f"Error: {_safe_error_message(e, f'model {model}')}"
+                    except Exception as e:
+                        responses[model] = f"Error: {_safe_error_message(e, f'model {model}')}"
+        except (ConcurrencyExceeded, BudgetExceeded):
+            return _busy_response()
 
         stats = context_mgr.get_session_stats(session_id)
 
@@ -516,19 +563,31 @@ def agent_chat_response(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@ratelimit(key='ip', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def chat_response_stream(request: HttpRequest) -> StreamingHttpResponse:
     """
     Thinking Mode Streaming: Process user questions using LLM with available MCP tools.
     Note: Browser automation has been removed. For web research, use Research mode.
     """
     try:
+        slot_cm = None
         question = request.GET.get('question', '')
         selected_models = request.GET.get('models', 'gpt-4o-mini')
         current_url = request.GET.get('current_url', '')
 
         if not question:
             return JsonResponse({'error': 'No question provided'}, status=400)
+
+        # Root-C.3: enter the concurrency/budget slot synchronously, BEFORE
+        # _get_session_id and before any StreamingHttpResponse exists, so an
+        # over-capacity request fails fast with 503. Ownership of release is
+        # transferred to the generator's finally once `return response` runs;
+        # until then a setup failure releases via the outer except below.
+        slot_cm = agent_run_slot(get_request_identity(request))
+        try:
+            slot_cm.__enter__()
+        except (ConcurrencyExceeded, BudgetExceeded):
+            return _busy_response()
 
         session_id = _get_session_id(request)
 
@@ -652,6 +711,12 @@ def chat_response_stream(request: HttpRequest) -> StreamingHttpResponse:
             except Exception as e:
                 error_msg = _safe_error_message(e, "streaming")
                 yield f'data: {json.dumps({"error": error_msg, "done": True})}\n\n'.encode('utf-8')
+            finally:
+                # Root-C.3: release the concurrency/budget slot on EVERY exit of
+                # the stream — normal end, mid-stream raise (handled above), and
+                # GeneratorExit on client disconnect. Not the inner asyncio
+                # cleanup finally; this is the outermost release.
+                slot_cm.__exit__(None, None, None)
 
         response = StreamingHttpResponse(
             event_stream(),
@@ -663,15 +728,23 @@ def chat_response_stream(request: HttpRequest) -> StreamingHttpResponse:
         return response
 
     except Exception as e:
+        # Setup failed after acquire but before `return response`: the generator
+        # never runs, so release here to avoid wedging the slot for _INFLIGHT_TTL.
+        if slot_cm is not None:
+            try:
+                slot_cm.__exit__(None, None, None)
+            except Exception:
+                pass
         logger.error(f"Stream error: {e}", exc_info=True)
         return JsonResponse({'error': _safe_error_message(e, request.path)}, status=500)
 
 
 @csrf_exempt
-@ratelimit(key='ip', rate=settings.API_RATE_LIMIT, method='ALL', block=True)
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def adv_response_stream(request: HttpRequest) -> StreamingHttpResponse:
     """Process streaming advanced chat response from selected models using SSE"""
     try:
+        slot_cm = None
         question = request.GET.get('question', '')
         selected_models = request.GET.get('models', 'gpt-4o-mini')
         current_url = request.GET.get('current_url', '')
@@ -687,6 +760,14 @@ def adv_response_stream(request: HttpRequest) -> StreamingHttpResponse:
 
         if not question:
             return JsonResponse({'error': 'No question provided'}, status=400)
+
+        # Root-C.3: enter the concurrency/budget slot synchronously, BEFORE
+        # _get_session_id and before any StreamingHttpResponse exists.
+        slot_cm = agent_run_slot(get_request_identity(request))
+        try:
+            slot_cm.__enter__()
+        except (ConcurrencyExceeded, BudgetExceeded):
+            return _busy_response()
 
         session_id = _get_session_id(request)
 
@@ -812,6 +893,12 @@ def adv_response_stream(request: HttpRequest) -> StreamingHttpResponse:
             except Exception as e:
                 error_msg = _safe_error_message(e, "advanced_streaming")
                 yield f'data: {json.dumps({"error": error_msg, "done": True})}\n\n'.encode('utf-8')
+            finally:
+                # Root-C.3: release the concurrency/budget slot on EVERY exit of
+                # the stream — normal end, mid-stream raise (handled above), and
+                # GeneratorExit on client disconnect. Not the inner asyncio
+                # cleanup finally; this is the outermost release.
+                slot_cm.__exit__(None, None, None)
 
         response = StreamingHttpResponse(
             event_stream(),
@@ -823,6 +910,12 @@ def adv_response_stream(request: HttpRequest) -> StreamingHttpResponse:
         return response
 
     except Exception as e:
+        # Setup failed after acquire but before `return response`: release here.
+        if slot_cm is not None:
+            try:
+                slot_cm.__exit__(None, None, None)
+            except Exception:
+                pass
         logger.error(f"Advanced stream error: {e}", exc_info=True)
         return JsonResponse({'error': _safe_error_message(e, request.path)}, status=500)
 
@@ -843,7 +936,13 @@ def auto_scrape(request: HttpRequest) -> JsonResponse:
         
         if not current_url:
             return JsonResponse({'error': 'No URL provided'}, status=400)
-            
+
+        try:
+            ssrf_guard.validate_fetch_url(current_url)
+        except ssrf_guard.UnsafeURLError as exc:
+            logger.warning(f"[SSRF] Refused auto_scrape target {current_url}: {exc}")
+            return JsonResponse({'error': 'URL refused by security policy'}, status=400)
+
         session_id = _get_session_id(request)
         
         integration = get_context_integration()

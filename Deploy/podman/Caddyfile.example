@@ -1,9 +1,12 @@
-# Example Caddyfile for FinGPT backend behind a Podman pod proxy
+# Example Caddyfile for a containerized FinGPT backend proxy (Podman)
 #
 # Replace `fingpt.example.com` with your real domain and update the email
 # so Caddy can request Let's Encrypt certificates automatically.
 #
 # This file is mounted into the Caddy container at /etc/caddy/Caddyfile.
+# `reverse_proxy fingpt-api:8000` resolves by name only when Caddy and the
+# backend share a user-defined Podman network (aardvark DNS) -- e.g. both on
+# `fingpt-net`. See Docs/production_setup.md §6 variant B.
 
 {
     email admin@example.com
@@ -14,8 +17,13 @@
 fingpt.example.com {
     encode zstd gzip
 
-    # Forward all traffic to the backend container within the same pod.
+    # Forward all traffic to the backend container on the shared Podman network.
     reverse_proxy fingpt-api:8000 {
+        # P0 Root C.1: derive the client IP from the real TCP peer and
+        # OVERRIDE any client-supplied forwarding headers so a caller cannot
+        # spoof X-Real-IP / X-Forwarded-For through the proxy.
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
         header_up X-Forwarded-Host {host}
     }

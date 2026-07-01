@@ -6,10 +6,19 @@ services:
     build: ./Main/backend
 
     ports:
-      - "8000:8000"
+      # P0 Root C.1: publish only to loopback; the host reverse proxy (Caddy)
+      # is the sole public entrypoint and sets X-Real-IP.
+      - "127.0.0.1:8000:8000"
 
     env_file:
       - ./Main/backend/.env # API keys and configuration
+
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+
+    depends_on:
+      redis:
+        condition: service_healthy
 
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/health/" ]
@@ -47,6 +56,21 @@ services:
       - ./Main/backend/prompts:/app/prompts
       - session_cache:/tmp/fingpt_cache
 
+    networks:
+      - fingpt_network
+
+  redis:
+    image: redis:7-alpine
+    # Ephemeral cache only: no RDB snapshots, no AOF. Counters live in RAM and
+    # rebuild naturally (short TTL for inflight, ~26h for daily run counts).
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
     networks:
       - fingpt_network
 

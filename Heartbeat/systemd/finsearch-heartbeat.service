@@ -1,0 +1,18 @@
+[Unit]
+Description=Agentic FinSearch news heartbeat (daily Yahoo Finance digest)
+# NOTE: network-online.target does not exist in the systemd *user* manager —
+# the script itself fails loudly (exit 2) if every feed is unreachable, and
+# the next beat (or a manual start) retries.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/fingpt/heartbeat/news_heartbeat.py --env-file %h/fingpt/envs/.env.heartbeat
+WorkingDirectory=%h/fingpt/heartbeat
+# Worst-case pipeline time (12 feeds + 8 enrichments + LLM + Discord retries)
+TimeoutStartSec=1200
+# 2 GB host already runs the 1.7G-capped API container: throttle first, then kill
+MemoryHigh=96M
+MemoryMax=128M
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true

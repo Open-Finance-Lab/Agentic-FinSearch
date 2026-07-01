@@ -339,21 +339,41 @@ class TestSyncResponseFormat:
 # ---------------------------------------------------------------------------
 
 class TestToolSourceExtraction:
-    """Test _extract_tool_sources_from_result from datascraper."""
+    """Test _extract_tool_sources_from_result from datascraper.
+
+    The real ``RunResult`` exposes tool calls via ``raw_responses[*].output``,
+    where each function-call item is an ``openai.types.responses`` object whose
+    ``.type`` is the literal ``"function_call"`` (matching the agents SDK's
+    ``ResponseFunctionToolCall``). There is NO RunItem with type
+    ``"function_call_item"``; the previous version of these tests mocked
+    ``new_items`` with that fictional type and never exercised the real code
+    path. The helpers below build the correct SDK shape.
+    """
+
+    @staticmethod
+    def _function_call(name, call_id, **args):
+        item = MagicMock()
+        item.type = "function_call"
+        item.name = name
+        item.call_id = call_id
+        item.arguments = json.dumps(args)
+        return item
+
+    @classmethod
+    def _result(cls, output_items):
+        """Build a RunResult-like mock: raw_responses[0].output = output_items."""
+        resp = MagicMock()
+        resp.output = output_items
+        result = MagicMock()
+        result.raw_responses = [resp]
+        return result
 
     def test_extracts_function_calls(self):
         from datascraper.datascraper import _extract_tool_sources_from_result
 
-        mock_item = MagicMock()
-        mock_item.type = "function_call_item"
-        mock_item.name = "get_stock_info"
-        mock_item.call_id = "call_123"
-        mock_item.arguments = json.dumps({"symbol": "AAPL"})
+        result = self._result([self._function_call("get_stock_info", "call_123", symbol="AAPL")])
 
-        mock_result = MagicMock()
-        mock_result.new_items = [mock_item]
-
-        sources = _extract_tool_sources_from_result(mock_result)
+        sources = _extract_tool_sources_from_result(result)
         assert len(sources) == 1
         assert sources[0]["tool_name"] == "get_stock_info"
         assert sources[0]["symbol"] == "AAPL"
@@ -361,63 +381,113 @@ class TestToolSourceExtraction:
     def test_deduplicates_tool_names(self):
         from datascraper.datascraper import _extract_tool_sources_from_result
 
-        items = []
-        for i in range(3):
-            item = MagicMock()
-            item.type = "function_call_item"
-            item.name = "get_stock_info"
-            item.call_id = f"call_{i}"
-            item.arguments = json.dumps({"symbol": "AAPL"})
-            items.append(item)
+        # Same call_id repeated → deduplicated to a single source.
+        items = [self._function_call("get_stock_info", "call_dup", symbol="AAPL") for _ in range(3)]
+        result = self._result(items)
 
-        mock_result = MagicMock()
-        mock_result.new_items = items
-
-        sources = _extract_tool_sources_from_result(mock_result)
-        assert len(sources) == 1  # Deduplicated
+        sources = _extract_tool_sources_from_result(result)
+        assert len(sources) == 1  # Deduplicated by call_id
 
     def test_handles_empty_result(self):
         from datascraper.datascraper import _extract_tool_sources_from_result
 
-        mock_result = MagicMock()
-        mock_result.new_items = []
-        sources = _extract_tool_sources_from_result(mock_result)
+        result = self._result([])
+        sources = _extract_tool_sources_from_result(result)
         assert sources == []
 
     def test_handles_missing_new_items(self):
         from datascraper.datascraper import _extract_tool_sources_from_result
 
-        mock_result = MagicMock(spec=[])  # No attributes
+        mock_result = MagicMock(spec=[])  # No raw_responses attribute
         sources = _extract_tool_sources_from_result(mock_result)
         assert sources == []
 
     def test_extracts_multiple_tools(self):
         from datascraper.datascraper import _extract_tool_sources_from_result
 
-        item1 = MagicMock()
-        item1.type = "function_call_item"
-        item1.name = "get_stock_info"
-        item1.call_id = "call_1"
-        item1.arguments = json.dumps({"symbol": "AAPL"})
+        item1 = self._function_call("get_stock_info", "call_1", symbol="AAPL")
+        item2 = self._function_call("get_stock_history", "call_2", symbol="MSFT", period="1mo")
 
-        item2 = MagicMock()
-        item2.type = "function_call_item"
-        item2.name = "get_stock_history"
-        item2.call_id = "call_2"
-        item2.arguments = json.dumps({"symbol": "MSFT", "period": "1mo"})
-
-        # Also include a non-function item that should be ignored
+        # A non-function item that should be ignored.
         item3 = MagicMock()
         item3.type = "tool_call_output_item"
         item3.output = "some output"
 
-        mock_result = MagicMock()
-        mock_result.new_items = [item1, item2, item3]
+        result = self._result([item1, item2, item3])
 
-        sources = _extract_tool_sources_from_result(mock_result)
+        sources = _extract_tool_sources_from_result(result)
         assert len(sources) == 2
         tool_names = {s["tool_name"] for s in sources}
         assert tool_names == {"get_stock_info", "get_stock_history"}
+
+
+# ---------------------------------------------------------------------------
+# Agent budget enforcement tests (P0 Root-C.3 — /v1 must not bypass the cap)
+# ---------------------------------------------------------------------------
+
+class TestBudgetEnforcement:
+    """/v1/chat/completions sync handler must honor agent_run_slot: a slot
+    rejection (concurrency or daily budget) returns an OpenAI-style 503 with a
+    Retry-After header, NOT a 500 and NOT an unbounded agent run."""
+
+    def _rejecting_slot(self, exc):
+        """Drop-in for agent_run_slot whose __enter__ raises."""
+        cm = MagicMock()
+        cm.__enter__.side_effect = exc
+        return MagicMock(return_value=cm)
+
+    def _sync_args(self):
+        from datascraper.unified_context_manager import ContextMode
+        context_mgr = MagicMock()
+        integration = MagicMock()
+        meta = MagicMock()
+        meta.current_url = ""
+        meta.user_timezone = None
+        meta.user_time = None
+        context_mgr.get_session_metadata.return_value = meta
+        context_mgr.get_session_stats.return_value = {"token_count": 10}
+        return context_mgr, integration, ContextMode.THINKING
+
+    def test_sync_handler_returns_503_on_concurrency(self):
+        from api.agent_budget import ConcurrencyExceeded
+        from api.openai_views import _handle_sync
+
+        context_mgr, integration, mode = self._sync_args()
+        with patch("api.openai_views.agent_run_slot",
+                   self._rejecting_slot(ConcurrencyExceeded())), \
+             patch("api.openai_views.get_request_identity", return_value="ip:1.2.3.4"), \
+             patch("datascraper.datascraper.create_agent_response") as mock_agent:
+            response = _handle_sync(
+                context_mgr, integration, "test_session",
+                "What is AAPL price?", [], "FinGPT", mode
+            )
+
+        assert response.status_code == 503
+        assert response["Retry-After"] == "30"
+        data = json.loads(response.content)
+        # OpenAI-style error shape (matches the other /v1 errors).
+        assert "error" in data
+        assert "message" in data["error"]
+        assert "type" in data["error"]
+        # The agent must NOT have been driven when the slot is rejected.
+        mock_agent.assert_not_called()
+
+    def test_sync_handler_returns_503_on_budget_exceeded(self):
+        from api.agent_budget import BudgetExceeded
+        from api.openai_views import _handle_sync
+
+        context_mgr, integration, mode = self._sync_args()
+        with patch("api.openai_views.agent_run_slot",
+                   self._rejecting_slot(BudgetExceeded())), \
+             patch("api.openai_views.get_request_identity", return_value="ip:1.2.3.4"), \
+             patch("datascraper.datascraper.create_agent_response"):
+            response = _handle_sync(
+                context_mgr, integration, "test_session",
+                "What is AAPL price?", [], "FinGPT", mode
+            )
+
+        assert response.status_code == 503
+        assert response["Retry-After"] == "30"
 
 
 # ---------------------------------------------------------------------------

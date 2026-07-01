@@ -46,6 +46,19 @@ def _defang_boundary_markers(content: str) -> str:
     return content.replace(USER_CONTEXT_CLOSE, _CLOSE_SPOOF_REPLACEMENT) \
                   .replace(USER_CONTEXT_OPEN, _OPEN_SPOOF_REPLACEMENT)
 
+
+def wrap_untrusted_tool_output(text: str, tool_name: str) -> str:
+    """Wrap a tool's result string in the SAME untrusted-data boundary used for
+    API-supplied system_prompt content (USER_CONTEXT_OPEN/CLOSE), so prompt-
+    injection text embedded in scraped/browser/MCP tool output is treated as
+    DATA, not instructions. Because the markers are identical to the
+    system_prompt block, prompts/_security.md rule 5 already governs the
+    content - no new enforcement logic is needed. Any boundary marker found
+    inside the result is defanged so the block cannot be closed from within."""
+    safe = _defang_boundary_markers(str(text))
+    return f"{USER_CONTEXT_OPEN}\n(tool result: {tool_name})\n{safe}\n{USER_CONTEXT_CLOSE}"
+
+
 # Marker in core.md where the shared security fragment is spliced in.
 # The fragment lives in prompts/_security.md so datascraper.py and
 # PromptBuilder both read the same source.

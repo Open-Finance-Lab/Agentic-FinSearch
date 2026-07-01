@@ -212,8 +212,34 @@ class MCPClientManager:
         self._log(f"[MCP DEBUG] Total tools available: {len(all_tools)}")
         return all_tools
 
-    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
-        """Executes a tool on the appropriate server with very detailed logging."""
+    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any],
+                           allowed_tools: Optional[List[str]] = None) -> Any:
+        """Executes a tool on the appropriate server with very detailed logging.
+
+        Defense-in-depth allow-list enforcement. ``allowed_tools`` is the
+        per-request allow-list captured in the agent-build closure in
+        ``mcp_client.agent`` and forwarded here AS AN ARGUMENT (never stored on
+        the manager: it is a process-wide singleton, so a manager attribute
+        would race across concurrent requests, and a ContextVar would not cross
+        the run_coroutine_threadsafe thread hop). When ``allowed_tools`` is
+        provided, any tool whose name is not allowed -- including the 14
+        DENY_ALWAYS filesystem tools -- is refused with PermissionError BEFORE
+        ``session.call_tool`` runs. ``allowed_tools=None`` means "no list
+        supplied" (internal callers) and is permitted; every agent run forwards
+        a concrete list, so that fallback is not hit in production.
+        """
+        from .tool_policy import is_allowed
+
+        if allowed_tools is not None and not is_allowed(tool_name, allowed_tools):
+            self._log(
+                f"[MCP SECURITY] BLOCKED '{tool_name}': not in the active "
+                f"allow-list for this skill",
+                force=True,
+            )
+            raise PermissionError(
+                f"Tool {tool_name} is not in the active allow-list for this skill"
+            )
+
         import json
 
         self._log("=" * 80)

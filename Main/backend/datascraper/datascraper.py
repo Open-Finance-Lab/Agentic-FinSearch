@@ -803,16 +803,19 @@ def create_advanced_response(
             return response_text, source_entries
 
     except Exception as e:
-        logging.error(f"OpenAI Responses API failed: {e}")
+        logging.error(f"OpenAI Responses API failed: {e}", exc_info=True)
         qt.flag("error", message=str(e))
         qt.complete()
+        # Return a generic message to the client; the exception detail is logged
+        # server-side above. Never surface str(e) — it can leak stack traces,
+        # file paths, or other internal details (information disclosure).
+        client_message = "I encountered an error while searching for information. Please try again."
         if stream:
-            error_message = str(e)
             async def error_gen():
-                yield f"I encountered an error while searching for information: {error_message}. Please try again.", []
+                yield client_message, []
             return error_gen()
         else:
-            return f"I encountered an error while searching for information: {str(e)}. Please try again.", []
+            return client_message, []
 
 
 async def _create_advanced_response_stream_async(
@@ -846,8 +849,10 @@ async def _create_advanced_response_stream_async(
             yield text_chunk, source_entries
 
     except Exception as e:
-        logging.error(f"Error in advanced streaming: {e}")
-        yield f"Error: {str(e)}", []
+        logging.error(f"Error in advanced streaming: {e}", exc_info=True)
+        # Generic client-facing message; detail is logged above, never surfaced
+        # to the user (information-disclosure hardening).
+        yield "I encountered an error while searching for information. Please try again.", []
 
 
 def create_advanced_response_streaming(
@@ -1059,6 +1064,7 @@ async def _create_agent_response_async(
     """
     from mcp_client.agent import create_fin_agent
     from agents import Runner, set_tracing_disabled
+    from planner.skills._catalog import READ_ONLY_DATA_TOOLS
 
     # Respect per-model tracing config (env override > model config > default True)
     _model_config = get_model_config(model)
@@ -1101,6 +1107,11 @@ async def _create_agent_response_async(
         current_url=current_url,
         user_timezone=user_timezone,
         user_time=user_time,
+        # Deny-by-default: create_fin_agent treats None/[] as ZERO tools, so the
+        # non-streaming thinking path must pass an explicit allow-list. The full
+        # read-only catalog restores the prior "all non-filesystem tools"
+        # behavior (filesystem MCP stays disabled).
+        allowed_tools=list(READ_ONLY_DATA_TOOLS),
         session_id=session_id,
     ) as agent:
         logging.info(f"[AGENT] Running agent with MCP tools")
@@ -1310,7 +1321,12 @@ def create_agent_response_stream(
             )
         except Exception as planner_err:
             logging.warning(f"[Planner] Failed ({planner_err}), falling back to default plan")
-            execution_plan = ExecutionPlan(skill_name="fallback", tools_allowed=None, max_turns=10)
+            from planner.skills._catalog import READ_ONLY_DATA_TOOLS
+            execution_plan = ExecutionPlan(
+                skill_name="fallback",
+                tools_allowed=list(READ_ONLY_DATA_TOOLS),
+                max_turns=10,
+            )
 
         logging.info(
             f"[AGENT STREAM] Plan: skill={execution_plan.skill_name} "
