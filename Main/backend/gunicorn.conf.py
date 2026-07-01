@@ -32,6 +32,13 @@ user = None
 group = None
 tmp_upload_dir = None
 
+# gunicorn 25.1+ opens a Unix control socket (default: ./gunicorn.ctl in WORKDIR /app,
+# which is root-owned) for the `gunicornc` management CLI we don't use. As the non-root
+# runtime user (uid 1001) that path is unwritable, so the arbiter logs a recurring
+# "Failed to start control socket: [Errno 13] Permission denied" warning on every start
+# and reload. Disable it: removes the noise and the unused socket's small attack surface.
+control_socket_disable = True
+
 
 # ── Memory monitoring hooks ───────────────────────────────────────
 
