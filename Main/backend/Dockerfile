@@ -41,7 +41,7 @@ COPY . .
 
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
-RUN mkdir -p /app/staticfiles /app/media /app/logs /tmp/fingpt_cache
+RUN mkdir -p /app/staticfiles /app/media /app/logs /tmp/fingpt_cache /app/truthlayer/data
 
 RUN ln -sf /ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell /usr/bin/chromium-bundled
 
@@ -54,9 +54,16 @@ RUN echo "Verifying Playwright browsers..." && \
 # Create a non-root runtime user and own ONLY the writable runtime dirs.
 # The application source under /app stays root-owned so a compromised
 # process cannot rewrite code at runtime (P0 Root A.3: no-write-under-/app).
+# /app/truthlayer/data is the one deliberate exception: entrypoint.sh builds the
+# DuckDB truth-layer store there at startup (from the root-owned, still-read-only
+# vendored companyfacts JSON) BEFORE gunicorn forks. That build runs as `fingpt`,
+# so the directory must be fingpt-writable -- otherwise duckdb.connect() aborts with
+# "Permission denied" and the container exits 1. Only the regenerable .duckdb artifact
+# is written here; no application code (.py) becomes writable, so the no-write-under-
+# /app code-integrity intent is preserved.
 RUN groupadd --system --gid 1001 fingpt \
     && useradd --system --uid 1001 --gid fingpt --no-create-home fingpt \
-    && chown -R fingpt:fingpt /app/staticfiles /app/media /app/logs /tmp/fingpt_cache
+    && chown -R fingpt:fingpt /app/staticfiles /app/media /app/logs /tmp/fingpt_cache /app/truthlayer/data
 
 USER fingpt
 
