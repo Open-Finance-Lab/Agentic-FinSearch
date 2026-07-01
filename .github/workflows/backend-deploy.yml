@@ -220,20 +220,28 @@ jobs:
               exit 1
             }
 
-            echo "Waiting 30s for service to start..."
-            sleep 30
+            # Cold start is dominated by entrypoint.sh building the XBRL truth-layer
+            # DuckDB store BEFORE gunicorn forks (~45s observed), on top of collectstatic
+            # + Playwright verification. `systemctl is-active` only proves the container
+            # launched, not that gunicorn is listening -- so poll /health/ across a window
+            # comfortably above the measured cold start (~130s) instead of a fixed ~45s
+            # wait, which raced the store build and failed the deploy even though the
+            # container was healthy. Succeeds as soon as the endpoint answers.
+            echo "Waiting 10s before first health probe..."
+            sleep 10
 
-            echo "Checking health endpoint..."
-            for i in 1 2 3; do
+            echo "Checking health endpoint (up to ~130s for cold start)..."
+            for i in $(seq 1 24); do
               if curl -sf -m 10 http://localhost:8000/health/; then
                 echo ""
-                echo "Deployment verification successful!"
+                echo "Deployment verification successful (attempt $i)!"
                 exit 0
               fi
-              echo "Attempt $i/3 failed, retrying in 5s..."
+              echo "Attempt $i/24 failed, retrying in 5s..."
               sleep 5
             done
 
             echo "ERROR: Health check failed"
             systemctl --user status "$SYSTEMD_UNIT" || true
+            journalctl --user -u "$SYSTEMD_UNIT" --no-pager -n 80 || true
             exit 1
