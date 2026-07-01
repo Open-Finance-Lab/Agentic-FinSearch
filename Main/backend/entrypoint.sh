@@ -21,15 +21,17 @@ fi
 # Ensure cache directory exists (shared across gunicorn workers)
 mkdir -p "${CACHE_FILE_PATH:-/tmp/fingpt_cache}"
 
-# Build the XBRL truth-layer store ONCE, before gunicorn forks its workers. DuckDB's
-# read-write lock is exclusive across processes, so the workers must all open the
-# store read-only — which requires it to already exist. Building here (single process,
-# connection closed immediately) avoids a cold-start lock fight between workers.
-# Gate on _store_is_current (NOT mere existence): an image-baked store built under an
-# older fact_id recipe / registry version must be rebuilt here, not lazily in a
-# concurrent post-fork window. This mirrors the request-path gate in retrieve._ensure_built.
-echo "Building XBRL truth-layer store..."
-python -c "from truthlayer import ingest, retrieve; ingest.build_from_vendored().close() if not retrieve._store_is_current() else print('truth-layer store already current')" || {
+# Ensure the XBRL truth-layer store exists ONCE, before gunicorn forks its workers.
+# DuckDB's read-write lock is exclusive across processes, so the workers must all open
+# the store read-only — which requires it to already exist. retrieve._ensure_built() is
+# a no-op fast path when a version-current store is already present (e.g. persisted on
+# the /app/runtime volume from a previous start); otherwise it builds into a private
+# temp file and atomically renames it into place, so a build killed mid-write can never
+# leave a corrupt store on the persistent volume. Its _store_is_current gate also rebuilds
+# a volume-persisted store from an older recipe/registry version rather than trusting it.
+# Single source of truth with the request-path builder.
+echo "Ensuring XBRL truth-layer store is present..."
+python -c "from truthlayer import retrieve; retrieve._ensure_built()" || {
     echo "ERROR: failed to build truth-layer store" >&2
     exit 1
 }

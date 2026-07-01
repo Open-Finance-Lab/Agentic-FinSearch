@@ -146,3 +146,21 @@ def test_store_is_current_detects_version_drift(built_store_db, monkeypatch):
     assert retrieve._store_is_current() is True
     monkeypatch.setattr(store, "FACT_ID_RECIPE_VERSION", "0000-00-00")  # simulate a bump
     assert retrieve._store_is_current() is False
+
+
+def test_db_path_honors_env_override(monkeypatch, tmp_path):
+    # Production points the built artifact at the /app/runtime volume via
+    # TRUTHLAYER_DB_PATH; dev/tests/offline default to the in-package data/ dir.
+    # DB_PATH is computed at import, so reload the module under the patched env.
+    import importlib
+
+    override = tmp_path / "custom" / "store.duckdb"
+    monkeypatch.setenv("TRUTHLAYER_DB_PATH", str(override))
+    try:
+        importlib.reload(store)
+        assert store.DB_PATH == override
+    finally:
+        # Restore the in-package default so later tests in this session are unaffected.
+        monkeypatch.delenv("TRUTHLAYER_DB_PATH", raising=False)
+        importlib.reload(store)
+    assert store.DB_PATH == store.DATA_DIR / "truthlayer.duckdb"

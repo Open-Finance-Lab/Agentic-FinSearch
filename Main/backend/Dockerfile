@@ -35,13 +35,14 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    TRUTHLAYER_DB_PATH=/app/runtime/truthlayer.duckdb
 
 COPY . .
 
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
-RUN mkdir -p /app/staticfiles /app/media /app/logs /tmp/fingpt_cache /app/truthlayer/data
+RUN mkdir -p /app/staticfiles /app/media /app/logs /tmp/fingpt_cache /app/runtime
 
 RUN ln -sf /ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell /usr/bin/chromium-bundled
 
@@ -54,16 +55,16 @@ RUN echo "Verifying Playwright browsers..." && \
 # Create a non-root runtime user and own ONLY the writable runtime dirs.
 # The application source under /app stays root-owned so a compromised
 # process cannot rewrite code at runtime (P0 Root A.3: no-write-under-/app).
-# /app/truthlayer/data is the one deliberate exception: entrypoint.sh builds the
-# DuckDB truth-layer store there at startup (from the root-owned, still-read-only
-# vendored companyfacts JSON) BEFORE gunicorn forks. That build runs as `fingpt`,
-# so the directory must be fingpt-writable -- otherwise duckdb.connect() aborts with
-# "Permission denied" and the container exits 1. Only the regenerable .duckdb artifact
-# is written here; no application code (.py) becomes writable, so the no-write-under-
-# /app code-integrity intent is preserved.
+# /app/runtime is the writable runtime-data volume mountpoint: entrypoint.sh builds the
+# regenerable DuckDB truth-layer store there (from the root-owned, still-read-only
+# vendored companyfacts JSON in the truthlayer/data package dir) BEFORE gunicorn forks, and in
+# production it is a persistent bind mount (podman -v ...:/app/runtime:U) so the store
+# survives restarts. Owning it in the image keeps it writable even with no mount
+# (compose/CI/bare docker run). Only this regenerable artifact dir is fingpt-writable;
+# no application code (.py) becomes writable, so the no-write-under-/app intent holds.
 RUN groupadd --system --gid 1001 fingpt \
     && useradd --system --uid 1001 --gid fingpt --no-create-home fingpt \
-    && chown -R fingpt:fingpt /app/staticfiles /app/media /app/logs /tmp/fingpt_cache /app/truthlayer/data
+    && chown -R fingpt:fingpt /app/staticfiles /app/media /app/logs /tmp/fingpt_cache /app/runtime
 
 USER fingpt
 
