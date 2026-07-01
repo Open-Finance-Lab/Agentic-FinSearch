@@ -409,6 +409,17 @@ def _should_proxy(route) -> bool:
     return urlparse(request.url).scheme in _ALLOWED_SCHEMES
 
 
+def _should_skip_resource(route) -> bool:
+    """True for in-browser subresource types we never need for text extraction
+    (image/media/font by default — see ``_SKIP_RESOURCE_TYPES``). Aborting them
+    cuts DNS+TLS work and egress with no effect on ``page.inner_text``; aborting
+    more requests is also strictly less egress, so there is no SSRF downside."""
+    try:
+        return route.request.resource_type in _SKIP_RESOURCE_TYPES
+    except Exception:
+        return False
+
+
 def _forward_headers(route) -> dict:
     """The browser request's headers to replay through ``safe_get``, minus the
     framing/encoding headers requests must control (see
@@ -426,20 +437,20 @@ def _forward_headers(route) -> dict:
     }
 
 
-def _proxied_response_kwargs(request_url: str, headers: dict):
-    """Fetch an intercepted in-browser GET through the IP-pinned, byte-capped
-    ``safe_get`` and return the kwargs to fulfill the Playwright route with, or
-    ``None`` to fail closed (abort). Blocking — the async guard dispatches it via
-    ``asyncio.to_thread``. Both route guards share this one fail-closed policy
-    (which exceptions abort, what gets logged, which headers fulfill) so the sync
-    and async paths cannot drift. ``headers`` are the browser's own request
-    headers (UA/Accept/...) so the IP-pinned fetch stays indistinguishable to the
-    origin."""
+def _proxied_response_kwargs(cache: "_PinnedSessionCache", request_url: str, headers: dict):
+    """Fetch an intercepted in-browser GET through the per-page IP-pinned,
+    byte-capped ``cache`` and return the kwargs to fulfill the Playwright route
+    with, or ``None`` to fail closed (abort). Blocking — the async guard
+    dispatches it via ``asyncio.to_thread``. Both route guards share this one
+    fail-closed policy (which exceptions abort, what gets logged, which headers
+    fulfill) so the sync and async paths cannot drift. ``headers`` are the
+    browser's own request headers (UA/Accept/...) so the IP-pinned fetch stays
+    indistinguishable to the origin."""
     try:
-        # safe_get validates, pins to the resolved IP, follows redirects
-        # re-validating each, and byte-caps the body — raising UnsafeURLError on
-        # any violation.
-        response = safe_get(request_url, headers=headers)
+        # cache.fetch validates, pins to the resolved IP (reusing a per-host
+        # keep-alive session), follows redirects re-validating each, and byte-caps
+        # the body — raising UnsafeURLError on any violation.
+        response = cache.fetch(request_url, headers=headers)
     except UnsafeURLError as exc:
         logger.warning(
             "[ssrf_guard] aborting in-browser request to %s: %s",
@@ -464,24 +475,30 @@ def _proxied_response_kwargs(request_url: str, headers: dict):
 async def install_route_guard(page) -> None:
     """Register an async Playwright route handler on ALL URLs that fetches each
     intercepted in-browser request (top-level navigation OR subresource) through
-    the IP-pinned, byte-capped ``safe_get`` and fulfills Chromium with the
-    buffered response. For these HTTP(S) requests Chromium therefore never opens
-    its own socket and cannot be redirected to a private address by a
-    DNS-rebinding answer.
+    a per-page IP-pinned, byte-capped, keep-alive cache and fulfills Chromium with
+    the buffered response. For these HTTP(S) requests Chromium therefore never
+    opens its own socket and cannot be redirected to a private address by a
+    DNS-rebinding answer. image/media/font requests are aborted outright (they
+    never feed text extraction); non-GET and non-http(s) requests fail closed.
 
-    MUST be called BEFORE the first ``page.goto`` in every Playwright entrypoint
-    so EVERY navigation/subresource is pinned, not just the seed URL. Non-GET and
-    non-http(s) requests fail closed (aborted). WebSocket/WebRTC are not routed
-    through ``page.route`` and are out of scope (see module docstring)."""
+    MUST be called BEFORE the first ``page.goto`` so EVERY navigation/subresource
+    is pinned, not just the seed URL. Installed centrally by the PlaywrightBrowser
+    factory. WebSocket/WebRTC are not routed through ``page.route`` and are out of
+    scope (see module docstring)."""
+    cache = _PinnedSessionCache()
+    page.on("close", lambda *_: cache.close())
 
     async def _handler(route):
+        if _should_skip_resource(route):
+            await route.abort()
+            return
         if not _should_proxy(route):
             await route.abort()
             return
-        # _proxied_response_kwargs is blocking (it calls safe_get); run it off the
-        # event loop. route.request.* is read here on the loop before dispatch.
+        # _proxied_response_kwargs is blocking (it calls cache.fetch); run it off
+        # the event loop. route.request.* is read here on the loop before dispatch.
         kwargs = await asyncio.to_thread(
-            _proxied_response_kwargs, route.request.url, _forward_headers(route)
+            _proxied_response_kwargs, cache, route.request.url, _forward_headers(route)
         )
         if kwargs is None:  # fetch was unsafe or failed — fail closed.
             await route.abort()
@@ -493,17 +510,23 @@ async def install_route_guard(page) -> None:
 
 def install_route_guard_sync(page) -> None:
     """Synchronous twin of :func:`install_route_guard` for the sync Playwright
-    fallback (``url_tools.scrape_with_playwright``). Same guarantee: every
-    in-browser GET is fulfilled from the IP-pinned ``safe_get`` so Chromium never
-    re-resolves DNS on its own socket; non-GET / non-http(s) fail closed.
+    fallback (``url_tools.scrape_with_playwright``). Same guarantees: every
+    in-browser GET is fulfilled from a per-page IP-pinned, keep-alive cache so
+    Chromium never re-resolves DNS on its own socket; image/media/font are
+    aborted outright; non-GET / non-http(s) fail closed.
 
     MUST be called BEFORE the first ``page.goto``."""
+    cache = _PinnedSessionCache()
+    page.on("close", lambda *_: cache.close())
 
     def _handler(route):
+        if _should_skip_resource(route):
+            route.abort()
+            return
         if not _should_proxy(route):
             route.abort()
             return
-        kwargs = _proxied_response_kwargs(route.request.url, _forward_headers(route))
+        kwargs = _proxied_response_kwargs(cache, route.request.url, _forward_headers(route))
         if kwargs is None:  # fetch was unsafe or failed — fail closed.
             route.abort()
             return

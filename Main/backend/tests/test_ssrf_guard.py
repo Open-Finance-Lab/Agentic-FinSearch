@@ -189,10 +189,11 @@ class RouteGuardTests(SimpleTestCase):
         "Host": "example.com",
     }
 
-    def _route(self, url, method="GET"):
+    def _route(self, url, method="GET", resource_type="document"):
         route = MagicMock()
         route.request.url = url
         route.request.method = method
+        route.request.resource_type = resource_type
         route.request.headers = dict(self._BROWSER_HEADERS)
         route.abort = AsyncMock()
         route.fulfill = AsyncMock()
@@ -209,8 +210,9 @@ class RouteGuardTests(SimpleTestCase):
 
         asyncio.run(run())
 
-    @patch("datascraper.ssrf_guard.safe_get")
-    def test_route_guard_aborts_blocked_request(self, m_get):
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_route_guard_aborts_blocked_request(self, m_cache):
+        m_get = m_cache.return_value.fetch
         m_get.side_effect = UnsafeURLError("blocked")
         route = self._route("http://evil.example.test/x")
         self._drive(route)
@@ -219,8 +221,9 @@ class RouteGuardTests(SimpleTestCase):
         # Never delegate the fetch back to Chromium (would re-resolve DNS).
         route.continue_.assert_not_awaited()
 
-    @patch("datascraper.ssrf_guard.safe_get")
-    def test_route_guard_fulfills_public_request_from_pinned_fetch(self, m_get):
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_route_guard_fulfills_public_request_from_pinned_fetch(self, m_cache):
+        m_get = m_cache.return_value.fetch
         resp = _FakeResp(
             status_code=200,
             headers={"Content-Type": "text/html", "Content-Encoding": "gzip"},
@@ -243,8 +246,9 @@ class RouteGuardTests(SimpleTestCase):
         m_get.assert_called_once()
         self.assertEqual(m_get.call_args.args[0], "http://example.com/x")
 
-    @patch("datascraper.ssrf_guard.safe_get")
-    def test_route_guard_forwards_browser_headers_to_pinned_fetch(self, m_get):
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_route_guard_forwards_browser_headers_to_pinned_fetch(self, m_cache):
+        m_get = m_cache.return_value.fetch
         # The pinned fetch must present the browser's own User-Agent (the
         # context deliberately sets a Chrome UA to avoid bot-gating); SSRF
         # safety comes from IP-pinning, not from hiding the UA. Framing/encoding
@@ -264,14 +268,25 @@ class RouteGuardTests(SimpleTestCase):
         self.assertNotIn("host", lowered)
         self.assertNotIn("accept-encoding", lowered)
 
-    @patch("datascraper.ssrf_guard.safe_get")
-    def test_route_guard_aborts_non_get(self, m_get):
-        # safe_get is GET-only; non-GET in-browser requests fail closed.
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_route_guard_aborts_non_get(self, m_cache):
+        m_get = m_cache.return_value.fetch
+        # cache.fetch is GET-only; non-GET in-browser requests fail closed.
         route = self._route("http://example.com/api", method="POST")
         self._drive(route)
         route.abort.assert_awaited_once()
         route.fulfill.assert_not_awaited()
         m_get.assert_not_called()
+
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_route_guard_aborts_skipped_resource(self, m_cache):
+        # image/media/font are aborted before any fetch — they don't feed
+        # inner_text, so we never spend DNS+TLS or egress on them.
+        route = self._route("http://example.com/logo.png", resource_type="image")
+        self._drive(route)
+        route.abort.assert_awaited_once()
+        route.fulfill.assert_not_awaited()
+        m_cache.return_value.fetch.assert_not_called()
 
 
 class SyncRouteGuardTests(SimpleTestCase):
@@ -287,10 +302,11 @@ class SyncRouteGuardTests(SimpleTestCase):
         page.route = route
         return page
 
-    def _route(self, url, method="GET"):
+    def _route(self, url, method="GET", resource_type="document"):
         route = MagicMock()
         route.request.url = url
         route.request.method = method
+        route.request.resource_type = resource_type
         route.request.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
             "Accept-Encoding": "gzip, deflate, br",
@@ -304,16 +320,18 @@ class SyncRouteGuardTests(SimpleTestCase):
         ssrf_guard.install_route_guard_sync(page)
         captured["handler"](route)
 
-    @patch("datascraper.ssrf_guard.safe_get")
-    def test_sync_guard_aborts_blocked_request(self, m_get):
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_sync_guard_aborts_blocked_request(self, m_cache):
+        m_get = m_cache.return_value.fetch
         m_get.side_effect = UnsafeURLError("blocked")
         route = self._route("http://evil.example.test/x")
         self._drive(route)
         route.abort.assert_called_once()
         route.fulfill.assert_not_called()
 
-    @patch("datascraper.ssrf_guard.safe_get")
-    def test_sync_guard_fulfills_public_request(self, m_get):
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_sync_guard_fulfills_public_request(self, m_cache):
+        m_get = m_cache.return_value.fetch
         resp = _FakeResp(status_code=200, headers={"Content-Type": "text/html"})
         resp._content = b"hi"
         m_get.return_value = resp
@@ -323,8 +341,9 @@ class SyncRouteGuardTests(SimpleTestCase):
         self.assertEqual(route.fulfill.call_args.kwargs["body"], b"hi")
         route.abort.assert_not_called()
 
-    @patch("datascraper.ssrf_guard.safe_get")
-    def test_sync_guard_forwards_browser_user_agent(self, m_get):
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_sync_guard_forwards_browser_user_agent(self, m_cache):
+        m_get = m_cache.return_value.fetch
         resp = _FakeResp(status_code=200, headers={"Content-Type": "text/html"})
         resp._content = b"hi"
         m_get.return_value = resp
@@ -337,12 +356,21 @@ class SyncRouteGuardTests(SimpleTestCase):
         self.assertNotIn("host", lowered)
         self.assertNotIn("accept-encoding", lowered)
 
-    @patch("datascraper.ssrf_guard.safe_get")
-    def test_sync_guard_aborts_non_get(self, m_get):
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_sync_guard_aborts_non_get(self, m_cache):
+        m_get = m_cache.return_value.fetch
         route = self._route("http://example.com/api", method="POST")
         self._drive(route)
         route.abort.assert_called_once()
         m_get.assert_not_called()
+
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_sync_guard_aborts_skipped_resource(self, m_cache):
+        route = self._route("http://example.com/font.woff2", resource_type="font")
+        self._drive(route)
+        route.abort.assert_called_once()
+        route.fulfill.assert_not_called()
+        m_cache.return_value.fetch.assert_not_called()
 
 
 class PinnedSessionCacheTests(SimpleTestCase):
