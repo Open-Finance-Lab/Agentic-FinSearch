@@ -318,6 +318,13 @@ class _PinnedSessionCache:
         self._lock = threading.Lock()
         # host -> (pinned_ip, session, expiry_monotonic)
         self._entries = {}
+        # Sessions displaced by a TTL re-resolve, retained (NOT closed inline)
+        # until close(): a session is returned under the lock but used outside it,
+        # so a concurrent same-host fetch may still be mid-``session.get`` on the
+        # one being displaced — closing it here would be a use-after-close (a
+        # spurious fail-closed abort of a legitimate subresource). Per page +
+        # bounded by page_lifetime/ttl per host, so retaining until close is cheap.
+        self._stale = []
 
     @staticmethod
     def _build_session(ip: str, host: str) -> requests.Session:
@@ -349,7 +356,10 @@ class _PinnedSessionCache:
             # a now-blocked host raises without evicting/replacing a good entry.
             pinned_ip = _resolve_and_pin(host)
             if entry is not None:
-                entry[1].close()
+                # Retain, don't close: a concurrent fetch may still hold this
+                # session (returned under the lock, used outside it). Closed in
+                # close() at page teardown instead — see self._stale.
+                self._stale.append(entry[1])
             session = self._build_session(pinned_ip, host)
             self._entries[host] = (pinned_ip, session, time.monotonic() + self._ttl)
             return session
@@ -378,15 +388,19 @@ class _PinnedSessionCache:
         return _follow_redirects(url, _fetch_one, max_bytes, max_redirects)
 
     def close(self) -> None:
-        """Close every cached session (its keep-alive sockets). Called when the
-        page closes."""
+        """Close every cached session (its keep-alive sockets), including those
+        displaced by a TTL re-resolve (``self._stale``). Called when the page
+        closes, by which point no fetch is still borrowing a session."""
         with self._lock:
-            for _ip, session, _exp in self._entries.values():
+            sessions = [session for _ip, session, _exp in self._entries.values()]
+            sessions.extend(self._stale)
+            for session in sessions:
                 try:
                     session.close()
                 except Exception:
                     pass
             self._entries.clear()
+            self._stale.clear()
 
 
 def _fulfill_headers(response: requests.Response) -> dict:

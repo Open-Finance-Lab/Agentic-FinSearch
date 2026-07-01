@@ -288,6 +288,24 @@ class RouteGuardTests(SimpleTestCase):
         route.fulfill.assert_not_awaited()
         m_cache.return_value.fetch.assert_not_called()
 
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_route_guard_closes_cache_on_page_close(self, m_cache):
+        # The guard must wire page.on("close", ...) -> cache.close() so the
+        # per-page sessions (including TTL-displaced ones held in _stale) are
+        # torn down when the page closes.
+        handlers = {}
+        page = MagicMock()
+
+        async def fake_route(pattern, handler):
+            pass
+
+        page.route = fake_route
+        page.on = lambda event, cb: handlers.__setitem__(event, cb)
+        asyncio.run(ssrf_guard.install_route_guard(page))
+        self.assertIn("close", handlers)
+        handlers["close"]("evt")  # simulate Playwright firing the close event
+        m_cache.return_value.close.assert_called_once()
+
 
 class SyncRouteGuardTests(SimpleTestCase):
     """install_route_guard_sync mirrors the async guard for the sync
@@ -456,6 +474,34 @@ class PinnedSessionCacheTests(SimpleTestCase):
         cache.close()
         fake.close.assert_called_once()
         self.assertEqual(cache._entries, {})
+
+    def test_ttl_reresolve_defers_closing_displaced_session(self):
+        # A session displaced by a TTL re-resolve must NOT be closed inline: a
+        # concurrent same-host fetch may still be mid-get on it (it is returned
+        # under the lock but used outside it). It is closed at page close instead.
+        cache = ssrf_guard._PinnedSessionCache(ttl=30)
+        clock = {"t": 100.0}
+        built = []
+
+        def fake_build(ip, host):
+            s = MagicMock()
+            built.append(s)
+            return s
+
+        with patch("datascraper.ssrf_guard.time.monotonic",
+                   side_effect=lambda: clock["t"]), \
+             patch.object(ssrf_guard._PinnedSessionCache, "_build_session",
+                          side_effect=fake_build), \
+             patch("datascraper.ssrf_guard._resolve_ips",
+                   side_effect=[["93.184.216.34"], ["93.184.216.34"]]):
+            cache._session_for("example.com")   # builds S0, expiry = 130
+            clock["t"] = 200.0                  # past the 30s TTL
+            cache._session_for("example.com")   # re-resolve -> builds S1, S0 displaced
+            built[0].close.assert_not_called()  # S0 NOT torn down inline
+        cache.close()
+        built[0].close.assert_called_once()     # both closed at page teardown
+        built[1].close.assert_called_once()
+        self.assertEqual(cache._stale, [])
 
 
 class AssertSafePageUrlTests(SimpleTestCase):
