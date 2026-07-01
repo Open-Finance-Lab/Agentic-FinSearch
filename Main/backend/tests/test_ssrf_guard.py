@@ -1,6 +1,8 @@
 """Tests for datascraper.ssrf_guard (P0 Root B.1 SSRF guard)."""
 import asyncio
 import socket
+import threading
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from django.test import SimpleTestCase
@@ -187,10 +189,11 @@ class RouteGuardTests(SimpleTestCase):
         "Host": "example.com",
     }
 
-    def _route(self, url, method="GET"):
+    def _route(self, url, method="GET", resource_type="document"):
         route = MagicMock()
         route.request.url = url
         route.request.method = method
+        route.request.resource_type = resource_type
         route.request.headers = dict(self._BROWSER_HEADERS)
         route.abort = AsyncMock()
         route.fulfill = AsyncMock()
@@ -207,8 +210,9 @@ class RouteGuardTests(SimpleTestCase):
 
         asyncio.run(run())
 
-    @patch("datascraper.ssrf_guard.safe_get")
-    def test_route_guard_aborts_blocked_request(self, m_get):
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_route_guard_aborts_blocked_request(self, m_cache):
+        m_get = m_cache.return_value.fetch
         m_get.side_effect = UnsafeURLError("blocked")
         route = self._route("http://evil.example.test/x")
         self._drive(route)
@@ -217,8 +221,9 @@ class RouteGuardTests(SimpleTestCase):
         # Never delegate the fetch back to Chromium (would re-resolve DNS).
         route.continue_.assert_not_awaited()
 
-    @patch("datascraper.ssrf_guard.safe_get")
-    def test_route_guard_fulfills_public_request_from_pinned_fetch(self, m_get):
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_route_guard_fulfills_public_request_from_pinned_fetch(self, m_cache):
+        m_get = m_cache.return_value.fetch
         resp = _FakeResp(
             status_code=200,
             headers={"Content-Type": "text/html", "Content-Encoding": "gzip"},
@@ -241,8 +246,9 @@ class RouteGuardTests(SimpleTestCase):
         m_get.assert_called_once()
         self.assertEqual(m_get.call_args.args[0], "http://example.com/x")
 
-    @patch("datascraper.ssrf_guard.safe_get")
-    def test_route_guard_forwards_browser_headers_to_pinned_fetch(self, m_get):
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_route_guard_forwards_browser_headers_to_pinned_fetch(self, m_cache):
+        m_get = m_cache.return_value.fetch
         # The pinned fetch must present the browser's own User-Agent (the
         # context deliberately sets a Chrome UA to avoid bot-gating); SSRF
         # safety comes from IP-pinning, not from hiding the UA. Framing/encoding
@@ -262,14 +268,43 @@ class RouteGuardTests(SimpleTestCase):
         self.assertNotIn("host", lowered)
         self.assertNotIn("accept-encoding", lowered)
 
-    @patch("datascraper.ssrf_guard.safe_get")
-    def test_route_guard_aborts_non_get(self, m_get):
-        # safe_get is GET-only; non-GET in-browser requests fail closed.
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_route_guard_aborts_non_get(self, m_cache):
+        m_get = m_cache.return_value.fetch
+        # cache.fetch is GET-only; non-GET in-browser requests fail closed.
         route = self._route("http://example.com/api", method="POST")
         self._drive(route)
         route.abort.assert_awaited_once()
         route.fulfill.assert_not_awaited()
         m_get.assert_not_called()
+
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_route_guard_aborts_skipped_resource(self, m_cache):
+        # image/media/font are aborted before any fetch — they don't feed
+        # inner_text, so we never spend DNS+TLS or egress on them.
+        route = self._route("http://example.com/logo.png", resource_type="image")
+        self._drive(route)
+        route.abort.assert_awaited_once()
+        route.fulfill.assert_not_awaited()
+        m_cache.return_value.fetch.assert_not_called()
+
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_route_guard_closes_cache_on_page_close(self, m_cache):
+        # The guard must wire page.on("close", ...) -> cache.close() so the
+        # per-page sessions (including TTL-displaced ones held in _stale) are
+        # torn down when the page closes.
+        handlers = {}
+        page = MagicMock()
+
+        async def fake_route(pattern, handler):
+            pass
+
+        page.route = fake_route
+        page.on = lambda event, cb: handlers.__setitem__(event, cb)
+        asyncio.run(ssrf_guard.install_route_guard(page))
+        self.assertIn("close", handlers)
+        handlers["close"]("evt")  # simulate Playwright firing the close event
+        m_cache.return_value.close.assert_called_once()
 
 
 class SyncRouteGuardTests(SimpleTestCase):
@@ -285,10 +320,11 @@ class SyncRouteGuardTests(SimpleTestCase):
         page.route = route
         return page
 
-    def _route(self, url, method="GET"):
+    def _route(self, url, method="GET", resource_type="document"):
         route = MagicMock()
         route.request.url = url
         route.request.method = method
+        route.request.resource_type = resource_type
         route.request.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0",
             "Accept-Encoding": "gzip, deflate, br",
@@ -302,16 +338,18 @@ class SyncRouteGuardTests(SimpleTestCase):
         ssrf_guard.install_route_guard_sync(page)
         captured["handler"](route)
 
-    @patch("datascraper.ssrf_guard.safe_get")
-    def test_sync_guard_aborts_blocked_request(self, m_get):
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_sync_guard_aborts_blocked_request(self, m_cache):
+        m_get = m_cache.return_value.fetch
         m_get.side_effect = UnsafeURLError("blocked")
         route = self._route("http://evil.example.test/x")
         self._drive(route)
         route.abort.assert_called_once()
         route.fulfill.assert_not_called()
 
-    @patch("datascraper.ssrf_guard.safe_get")
-    def test_sync_guard_fulfills_public_request(self, m_get):
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_sync_guard_fulfills_public_request(self, m_cache):
+        m_get = m_cache.return_value.fetch
         resp = _FakeResp(status_code=200, headers={"Content-Type": "text/html"})
         resp._content = b"hi"
         m_get.return_value = resp
@@ -321,8 +359,9 @@ class SyncRouteGuardTests(SimpleTestCase):
         self.assertEqual(route.fulfill.call_args.kwargs["body"], b"hi")
         route.abort.assert_not_called()
 
-    @patch("datascraper.ssrf_guard.safe_get")
-    def test_sync_guard_forwards_browser_user_agent(self, m_get):
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_sync_guard_forwards_browser_user_agent(self, m_cache):
+        m_get = m_cache.return_value.fetch
         resp = _FakeResp(status_code=200, headers={"Content-Type": "text/html"})
         resp._content = b"hi"
         m_get.return_value = resp
@@ -335,12 +374,134 @@ class SyncRouteGuardTests(SimpleTestCase):
         self.assertNotIn("host", lowered)
         self.assertNotIn("accept-encoding", lowered)
 
-    @patch("datascraper.ssrf_guard.safe_get")
-    def test_sync_guard_aborts_non_get(self, m_get):
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_sync_guard_aborts_non_get(self, m_cache):
+        m_get = m_cache.return_value.fetch
         route = self._route("http://example.com/api", method="POST")
         self._drive(route)
         route.abort.assert_called_once()
         m_get.assert_not_called()
+
+    @patch("datascraper.ssrf_guard._PinnedSessionCache")
+    def test_sync_guard_aborts_skipped_resource(self, m_cache):
+        route = self._route("http://example.com/font.woff2", resource_type="font")
+        self._drive(route)
+        route.abort.assert_called_once()
+        route.fulfill.assert_not_called()
+        m_cache.return_value.fetch.assert_not_called()
+
+
+class PinnedSessionCacheTests(SimpleTestCase):
+    """The per-page cache reuses validated DNS + keep-alive sessions per host,
+    re-validates after TTL, and never reaches a private address."""
+
+    def test_resolves_once_and_reuses_session_within_ttl(self):
+        cache = ssrf_guard._PinnedSessionCache(ttl=1000)
+        with patch("datascraper.ssrf_guard._resolve_ips",
+                   return_value=["93.184.216.34"]) as m_res:
+            s1 = cache._session_for("example.com")
+            s2 = cache._session_for("example.com")
+        self.assertIs(s1, s2)
+        m_res.assert_called_once()
+        cache.close()
+
+    def test_reresolves_and_reblocks_after_ttl(self):
+        cache = ssrf_guard._PinnedSessionCache(ttl=30)
+        clock = {"t": 100.0}
+        with patch("datascraper.ssrf_guard.time.monotonic",
+                   side_effect=lambda: clock["t"]), \
+             patch("datascraper.ssrf_guard._resolve_ips",
+                   side_effect=[["93.184.216.34"], ["127.0.0.1"]]) as m_res:
+            cache._session_for("rebind.test")     # caches; expiry = 130
+            clock["t"] = 200.0                     # past the 30s TTL
+            with self.assertRaises(UnsafeURLError):
+                cache._session_for("rebind.test")  # re-resolve -> now private -> blocked
+        self.assertEqual(m_res.call_count, 2)
+        cache.close()
+
+    def test_blocked_ip_on_miss_caches_nothing(self):
+        cache = ssrf_guard._PinnedSessionCache()
+        with patch("datascraper.ssrf_guard._resolve_ips",
+                   return_value=["169.254.169.254"]):
+            with self.assertRaises(UnsafeURLError):
+                cache._session_for("evil.test")
+        self.assertEqual(cache._entries, {})
+
+    def test_fetch_revalidates_each_redirect_host(self):
+        cache = ssrf_guard._PinnedSessionCache()
+        redirect = _FakeResp(status_code=302, location="http://h2.test/final")
+        final = _FakeResp(status_code=200, chunks=[b"ok"])
+        seen = []
+
+        def fake_session_for(host):
+            seen.append(host)
+            s = MagicMock()
+            s.get.return_value = redirect if host == "h1.test" else final
+            return s
+
+        with patch.object(cache, "_session_for", side_effect=fake_session_for):
+            resp = cache.fetch("http://h1.test/start")
+        self.assertEqual(seen, ["h1.test", "h2.test"])
+        self.assertEqual(resp._content, b"ok")
+        self.assertTrue(redirect.closed)
+
+    def test_concurrent_same_host_resolves_once(self):
+        cache = ssrf_guard._PinnedSessionCache(ttl=1000)
+
+        def slow_resolve(host):
+            time.sleep(0.02)
+            return ["93.184.216.34"]
+
+        with patch("datascraper.ssrf_guard._resolve_ips",
+                   side_effect=slow_resolve) as m_res:
+            threads = [threading.Thread(target=cache._session_for,
+                                        args=("example.com",)) for _ in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        m_res.assert_called_once()
+        cache.close()
+
+    def test_close_closes_all_sessions(self):
+        cache = ssrf_guard._PinnedSessionCache(ttl=1000)
+        fake = MagicMock()
+        with patch.object(ssrf_guard._PinnedSessionCache, "_build_session",
+                          return_value=fake), \
+             patch("datascraper.ssrf_guard._resolve_ips",
+                   return_value=["93.184.216.34"]):
+            cache._session_for("example.com")
+        cache.close()
+        fake.close.assert_called_once()
+        self.assertEqual(cache._entries, {})
+
+    def test_ttl_reresolve_defers_closing_displaced_session(self):
+        # A session displaced by a TTL re-resolve must NOT be closed inline: a
+        # concurrent same-host fetch may still be mid-get on it (it is returned
+        # under the lock but used outside it). It is closed at page close instead.
+        cache = ssrf_guard._PinnedSessionCache(ttl=30)
+        clock = {"t": 100.0}
+        built = []
+
+        def fake_build(ip, host):
+            s = MagicMock()
+            built.append(s)
+            return s
+
+        with patch("datascraper.ssrf_guard.time.monotonic",
+                   side_effect=lambda: clock["t"]), \
+             patch.object(ssrf_guard._PinnedSessionCache, "_build_session",
+                          side_effect=fake_build), \
+             patch("datascraper.ssrf_guard._resolve_ips",
+                   side_effect=[["93.184.216.34"], ["93.184.216.34"]]):
+            cache._session_for("example.com")   # builds S0, expiry = 130
+            clock["t"] = 200.0                  # past the 30s TTL
+            cache._session_for("example.com")   # re-resolve -> builds S1, S0 displaced
+            built[0].close.assert_not_called()  # S0 NOT torn down inline
+        cache.close()
+        built[0].close.assert_called_once()     # both closed at page teardown
+        built[1].close.assert_called_once()
+        self.assertEqual(cache._stale, [])
 
 
 class AssertSafePageUrlTests(SimpleTestCase):

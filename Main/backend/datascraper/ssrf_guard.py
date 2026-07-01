@@ -31,6 +31,9 @@ import ipaddress
 import logging
 import os
 import socket
+import threading
+import time
+from http.cookiejar import DefaultCookiePolicy
 from typing import List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
@@ -47,6 +50,23 @@ MAX_REDIRECTS = int(os.getenv("SCRAPE_MAX_REDIRECTS", "3"))
 _ALLOWED_SCHEMES = ("http", "https")
 _REDIRECT_STATUSES = (301, 302, 303, 307, 308)
 _STREAM_CHUNK_BYTES = 65536
+
+# In-browser subresource types the route guard aborts outright: they never feed
+# page.inner_text, so fetching them only burns DNS+TLS and egress. Deliberately
+# NOT stylesheet/script/xhr/fetch/document — dropping CSS can leak display:none
+# boilerplate into inner_text, and JS/XHR drive SPA rendering.
+_SKIP_RESOURCE_TYPES = frozenset(
+    t.strip()
+    for t in os.getenv("SCRAPE_SKIP_RESOURCE_TYPES", "image,media,font").split(",")
+    if t.strip()
+)
+# Seconds a per-page resolved+validated host entry stays usable before it must be
+# re-resolved and re-block-checked. Per-page cache scope already bounds reuse to a
+# single scrape; this is a defense-in-depth staleness ceiling.
+_DNS_CACHE_TTL = float(os.getenv("SCRAPE_DNS_CACHE_TTL", "30"))
+# Keep-alive pool size for each cached per-host pinned session, so a same-host
+# subresource burst reuses connections instead of serializing on one.
+_POOL_MAXSIZE = int(os.getenv("SCRAPE_POOL_MAXSIZE", "20"))
 
 # Response headers that must NOT be forwarded when fulfilling a Playwright route
 # from a safe_get response: requests has already decoded the body (so a stale
@@ -116,12 +136,10 @@ def _resolve_ips(host: str) -> List[str]:
     return ips
 
 
-def _check_and_resolve(url: str) -> Tuple[str, str]:
-    """Validate ``url`` and resolve it with a SINGLE DNS lookup, returning
-    ``(host, pinned_ip)``. Enforces http/https scheme, a present host, and that
-    EVERY resolved IP is publicly routable. ``pinned_ip`` is one of the IPs that
-    just passed the block-check, so safe_get can connect to exactly that address
-    with no second, rebind-vulnerable lookup."""
+def _validated_host(url: str) -> str:
+    """Enforce http/https scheme and a present host on ``url`` and return the
+    host. Raises :class:`UnsafeURLError`. DNS resolution + block-check is a
+    separate step (see :func:`_resolve_and_pin`)."""
     parsed = urlparse(url)
     if parsed.scheme not in _ALLOWED_SCHEMES:
         raise UnsafeURLError(
@@ -130,13 +148,29 @@ def _check_and_resolve(url: str) -> Tuple[str, str]:
     host = parsed.hostname
     if not host:
         raise UnsafeURLError(f"Missing host in URL {url!r}")
+    return host
+
+
+def _resolve_and_pin(host: str) -> str:
+    """Resolve ``host`` with a SINGLE DNS lookup and return its first IP after
+    verifying EVERY resolved IP is publicly routable. Raises
+    :class:`UnsafeURLError` otherwise. The returned IP just passed the
+    block-check, so a caller can pin the connection to exactly that address with
+    no second, rebind-vulnerable lookup."""
     ips = _resolve_ips(host)
     for ip in ips:
         if _is_blocked_ip(ip):
             raise UnsafeURLError(
                 f"Blocked host {host!r}: resolves to non-routable IP {ip}"
             )
-    return host, ips[0]
+    return ips[0]
+
+
+def _check_and_resolve(url: str) -> Tuple[str, str]:
+    """Validate ``url`` and resolve it with a SINGLE DNS lookup, returning
+    ``(host, pinned_ip)``."""
+    host = _validated_host(url)
+    return host, _resolve_and_pin(host)
 
 
 def validate_fetch_url(url: str) -> str:
@@ -224,6 +258,27 @@ def _enforce_byte_cap(response: requests.Response, max_bytes: int) -> requests.R
     return response
 
 
+def _follow_redirects(url, fetch_one, max_bytes, max_redirects):
+    """Drive the redirect + byte-cap loop shared by :func:`safe_get` and
+    :meth:`_PinnedSessionCache.fetch`. ``fetch_one(current_url)`` MUST return a
+    streaming, non-redirecting response whose connection is pinned to a
+    freshly-validated public IP for ``current_url``'s host — that per-hop
+    re-validation is what makes following a ``Location`` header safe. Returns the
+    final :class:`requests.Response` with a bounded, buffered body."""
+    current = url
+    for _ in range(max_redirects + 1):
+        response = fetch_one(current)
+        location = response.headers.get("Location")
+        if response.status_code in _REDIRECT_STATUSES and location:
+            response.close()
+            current = urljoin(current, location)
+            continue
+        return _enforce_byte_cap(response, max_bytes)
+    raise UnsafeURLError(
+        f"Exceeded maximum of {max_redirects} redirects starting from {url!r}"
+    )
+
+
 def safe_get(
     url: str,
     headers: Optional[dict] = None,
@@ -237,20 +292,115 @@ def safe_get(
     (original Host preserved), follows at most ``max_redirects`` hops while
     RE-VALIDATING each ``Location`` BEFORE it is fetched, streams the body, and
     aborts once Content-Length or cumulative bytes exceed ``max_bytes``. Returns
-    the final :class:`requests.Response` with a bounded, buffered body."""
-    current = url
-    for _ in range(max_redirects + 1):
+    the final :class:`requests.Response` with a bounded, buffered body. Stateless:
+    each hop builds a fresh pinned session (see ``_PinnedSessionCache`` for the
+    keep-alive variant used by the in-browser route guards)."""
+    def _fetch_one(current):
         _host, ip = _check_and_resolve(current)
-        response = _pinned_fetch(current, ip, headers, timeout)
-        location = response.headers.get("Location")
-        if response.status_code in _REDIRECT_STATUSES and location:
-            response.close()
-            current = urljoin(current, location)
-            continue
-        return _enforce_byte_cap(response, max_bytes)
-    raise UnsafeURLError(
-        f"Exceeded maximum of {max_redirects} redirects starting from {url!r}"
-    )
+        return _pinned_fetch(current, ip, headers, timeout)
+    return _follow_redirects(url, _fetch_one, max_bytes, max_redirects)
+
+
+class _PinnedSessionCache:
+    """Per-page cache of resolved+validated hosts and their keep-alive,
+    IP-pinned ``requests.Session``s, used by the Playwright route guards to skip
+    re-resolving DNS and re-handshaking TLS on every subresource.
+
+    A cached entry stores ONLY an IP that already passed the block-check, and the
+    session stays pinned to that IP, so reuse cannot reach a private address even
+    if the host later rebinds — re-resolution (and the next block-check) only
+    happens after the entry's TTL expires. Per page, NEVER global. Thread-safe:
+    the async route guard dispatches :meth:`fetch` via ``asyncio.to_thread``, so
+    concurrent same-host subresources may call it at once."""
+
+    def __init__(self, ttl: float = _DNS_CACHE_TTL):
+        self._ttl = ttl
+        self._lock = threading.Lock()
+        # host -> (pinned_ip, session, expiry_monotonic)
+        self._entries = {}
+        # Sessions displaced by a TTL re-resolve, retained (NOT closed inline)
+        # until close(): a session is returned under the lock but used outside it,
+        # so a concurrent same-host fetch may still be mid-``session.get`` on the
+        # one being displaced — closing it here would be a use-after-close (a
+        # spurious fail-closed abort of a legitimate subresource). Per page +
+        # bounded by page_lifetime/ttl per host, so retaining until close is cheap.
+        self._stale = []
+
+    @staticmethod
+    def _build_session(ip: str, host: str) -> requests.Session:
+        """A keep-alive Session whose adapter pins every connection to ``ip``
+        (Host/SNI preserved for ``host``). Its cookie jar is disabled: cookies
+        flow through Chromium (fulfilled Set-Cookie -> stored -> replayed via the
+        forwarded Cookie header), never through this session, so disabling it both
+        removes the only per-request mutable shared state (making concurrent
+        ``session.get`` thread-safe) and prevents cross-subresource cookie bleed."""
+        session = requests.Session()
+        session.cookies.set_policy(DefaultCookiePolicy(allowed_domains=[]))
+        adapter = _PinnedHTTPAdapter(
+            ip, host, pool_connections=_POOL_MAXSIZE, pool_maxsize=_POOL_MAXSIZE
+        )
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        return session
+
+    def _session_for(self, host: str) -> requests.Session:
+        """Return a keep-alive Session pinned to a freshly-validated public IP for
+        ``host``, resolving + block-checking on a cache miss or after TTL expiry.
+        Holds the lock across the whole get-or-create so a concurrent same-host
+        burst resolves exactly once."""
+        with self._lock:
+            entry = self._entries.get(host)
+            if entry is not None and time.monotonic() < entry[2]:
+                return entry[1]
+            # Miss or expired: resolve + block-check BEFORE mutating the cache, so
+            # a now-blocked host raises without evicting/replacing a good entry.
+            pinned_ip = _resolve_and_pin(host)
+            if entry is not None:
+                # Retain, don't close: a concurrent fetch may still hold this
+                # session (returned under the lock, used outside it). Closed in
+                # close() at page teardown instead — see self._stale.
+                self._stale.append(entry[1])
+            session = self._build_session(pinned_ip, host)
+            self._entries[host] = (pinned_ip, session, time.monotonic() + self._ttl)
+            return session
+
+    def fetch(
+        self,
+        url: str,
+        headers: Optional[dict] = None,
+        timeout: int = 15,
+        max_bytes: int = MAX_FETCH_BYTES,
+        max_redirects: int = MAX_REDIRECTS,
+    ) -> requests.Response:
+        """:func:`safe_get`'s redirect + byte-cap contract, but each hop reuses
+        the host's pinned keep-alive session. Validates scheme + host per hop and
+        resolves/block-checks per host (cache miss or expiry)."""
+        def _fetch_one(current):
+            host = _validated_host(current)
+            session = self._session_for(host)
+            return session.get(
+                current,
+                headers=headers,
+                timeout=timeout,
+                stream=True,
+                allow_redirects=False,
+            )
+        return _follow_redirects(url, _fetch_one, max_bytes, max_redirects)
+
+    def close(self) -> None:
+        """Close every cached session (its keep-alive sockets), including those
+        displaced by a TTL re-resolve (``self._stale``). Called when the page
+        closes, by which point no fetch is still borrowing a session."""
+        with self._lock:
+            sessions = [session for _ip, session, _exp in self._entries.values()]
+            sessions.extend(self._stale)
+            for session in sessions:
+                try:
+                    session.close()
+                except Exception:
+                    pass
+            self._entries.clear()
+            self._stale.clear()
 
 
 def _fulfill_headers(response: requests.Response) -> dict:
@@ -273,6 +423,17 @@ def _should_proxy(route) -> bool:
     return urlparse(request.url).scheme in _ALLOWED_SCHEMES
 
 
+def _should_skip_resource(route) -> bool:
+    """True for in-browser subresource types we never need for text extraction
+    (image/media/font by default — see ``_SKIP_RESOURCE_TYPES``). Aborting them
+    cuts DNS+TLS work and egress with no effect on ``page.inner_text``; aborting
+    more requests is also strictly less egress, so there is no SSRF downside."""
+    try:
+        return route.request.resource_type in _SKIP_RESOURCE_TYPES
+    except Exception:
+        return False
+
+
 def _forward_headers(route) -> dict:
     """The browser request's headers to replay through ``safe_get``, minus the
     framing/encoding headers requests must control (see
@@ -290,20 +451,20 @@ def _forward_headers(route) -> dict:
     }
 
 
-def _proxied_response_kwargs(request_url: str, headers: dict):
-    """Fetch an intercepted in-browser GET through the IP-pinned, byte-capped
-    ``safe_get`` and return the kwargs to fulfill the Playwright route with, or
-    ``None`` to fail closed (abort). Blocking — the async guard dispatches it via
-    ``asyncio.to_thread``. Both route guards share this one fail-closed policy
-    (which exceptions abort, what gets logged, which headers fulfill) so the sync
-    and async paths cannot drift. ``headers`` are the browser's own request
-    headers (UA/Accept/...) so the IP-pinned fetch stays indistinguishable to the
-    origin."""
+def _proxied_response_kwargs(cache: "_PinnedSessionCache", request_url: str, headers: dict):
+    """Fetch an intercepted in-browser GET through the per-page IP-pinned,
+    byte-capped ``cache`` and return the kwargs to fulfill the Playwright route
+    with, or ``None`` to fail closed (abort). Blocking — the async guard
+    dispatches it via ``asyncio.to_thread``. Both route guards share this one
+    fail-closed policy (which exceptions abort, what gets logged, which headers
+    fulfill) so the sync and async paths cannot drift. ``headers`` are the
+    browser's own request headers (UA/Accept/...) so the IP-pinned fetch stays
+    indistinguishable to the origin."""
     try:
-        # safe_get validates, pins to the resolved IP, follows redirects
-        # re-validating each, and byte-caps the body — raising UnsafeURLError on
-        # any violation.
-        response = safe_get(request_url, headers=headers)
+        # cache.fetch validates, pins to the resolved IP (reusing a per-host
+        # keep-alive session), follows redirects re-validating each, and byte-caps
+        # the body — raising UnsafeURLError on any violation.
+        response = cache.fetch(request_url, headers=headers)
     except UnsafeURLError as exc:
         logger.warning(
             "[ssrf_guard] aborting in-browser request to %s: %s",
@@ -328,24 +489,30 @@ def _proxied_response_kwargs(request_url: str, headers: dict):
 async def install_route_guard(page) -> None:
     """Register an async Playwright route handler on ALL URLs that fetches each
     intercepted in-browser request (top-level navigation OR subresource) through
-    the IP-pinned, byte-capped ``safe_get`` and fulfills Chromium with the
-    buffered response. For these HTTP(S) requests Chromium therefore never opens
-    its own socket and cannot be redirected to a private address by a
-    DNS-rebinding answer.
+    a per-page IP-pinned, byte-capped, keep-alive cache and fulfills Chromium with
+    the buffered response. For these HTTP(S) requests Chromium therefore never
+    opens its own socket and cannot be redirected to a private address by a
+    DNS-rebinding answer. image/media/font requests are aborted outright (they
+    never feed text extraction); non-GET and non-http(s) requests fail closed.
 
-    MUST be called BEFORE the first ``page.goto`` in every Playwright entrypoint
-    so EVERY navigation/subresource is pinned, not just the seed URL. Non-GET and
-    non-http(s) requests fail closed (aborted). WebSocket/WebRTC are not routed
-    through ``page.route`` and are out of scope (see module docstring)."""
+    MUST be called BEFORE the first ``page.goto`` so EVERY navigation/subresource
+    is pinned, not just the seed URL. Installed centrally by the PlaywrightBrowser
+    factory. WebSocket/WebRTC are not routed through ``page.route`` and are out of
+    scope (see module docstring)."""
+    cache = _PinnedSessionCache()
+    page.on("close", lambda *_: cache.close())
 
     async def _handler(route):
+        if _should_skip_resource(route):
+            await route.abort()
+            return
         if not _should_proxy(route):
             await route.abort()
             return
-        # _proxied_response_kwargs is blocking (it calls safe_get); run it off the
-        # event loop. route.request.* is read here on the loop before dispatch.
+        # _proxied_response_kwargs is blocking (it calls cache.fetch); run it off
+        # the event loop. route.request.* is read here on the loop before dispatch.
         kwargs = await asyncio.to_thread(
-            _proxied_response_kwargs, route.request.url, _forward_headers(route)
+            _proxied_response_kwargs, cache, route.request.url, _forward_headers(route)
         )
         if kwargs is None:  # fetch was unsafe or failed — fail closed.
             await route.abort()
@@ -357,17 +524,23 @@ async def install_route_guard(page) -> None:
 
 def install_route_guard_sync(page) -> None:
     """Synchronous twin of :func:`install_route_guard` for the sync Playwright
-    fallback (``url_tools.scrape_with_playwright``). Same guarantee: every
-    in-browser GET is fulfilled from the IP-pinned ``safe_get`` so Chromium never
-    re-resolves DNS on its own socket; non-GET / non-http(s) fail closed.
+    fallback (``url_tools.scrape_with_playwright``). Same guarantees: every
+    in-browser GET is fulfilled from a per-page IP-pinned, keep-alive cache so
+    Chromium never re-resolves DNS on its own socket; image/media/font are
+    aborted outright; non-GET / non-http(s) fail closed.
 
     MUST be called BEFORE the first ``page.goto``."""
+    cache = _PinnedSessionCache()
+    page.on("close", lambda *_: cache.close())
 
     def _handler(route):
+        if _should_skip_resource(route):
+            route.abort()
+            return
         if not _should_proxy(route):
             route.abort()
             return
-        kwargs = _proxied_response_kwargs(route.request.url, _forward_headers(route))
+        kwargs = _proxied_response_kwargs(cache, route.request.url, _forward_headers(route))
         if kwargs is None:  # fetch was unsafe or failed — fail closed.
             route.abort()
             return
