@@ -96,3 +96,14 @@ class DeployUserNamespaceTests(SimpleTestCase):
         # uid (1001) so the non-root process can write it.
         self.assertIn("/home/deploy/fingpt/runtime:/app/runtime:U", text)
         self.assertNotIn("/home/deploy/fingpt/runtime:/app/runtime ", text)
+
+    def test_runtime_bind_mount_selinux_relabel_for_nonroot(self):
+        text = _read(DEPLOY_WORKFLOW)
+        # The droplet is SELinux-enforcing Fedora. :U relabels OWNERSHIP (DAC) but leaves
+        # the host dir's SELinux label untouched, so the non-root container's container_t
+        # domain is denied write access (MAC) — surfacing as the same generic EACCES. The
+        # first deploy that actually WROTE the /app/runtime mount (the truth-layer store
+        # build, #322) crash-looped on "Permission denied" for exactly this reason. :Z
+        # relabels the (private, this-container-only) mount to container_file_t so the
+        # container can write it. Ownership AND SELinux must both be handled: ship :U,Z.
+        self.assertIn("/home/deploy/fingpt/runtime:/app/runtime:U,Z", text)

@@ -184,16 +184,21 @@ jobs:
               docker.io/library/redis:7-alpine redis-server --save '' --appendonly no
 
             # Update systemd override to run the image we just pulled.
-            # The image now runs as non-root uid 1001 (Dockerfile USER fingpt), so
-            # the runtime bind mount below carries the ':U' suffix: rootless podman
-            # then recursively chowns the host dir to the in-container uid, otherwise
-            # the non-root process could not write the mount.
+            # The image now runs as non-root uid 1001 (Dockerfile USER fingpt), so the
+            # runtime bind mount below needs BOTH relabel suffixes for the non-root process
+            # to write it on this SELinux-enforcing Fedora host:
+            #   :U  rootless podman recursively chowns the host dir to the in-container uid
+            #       (DAC/ownership); without it the write is EACCES.
+            #   :Z  relabels the (private) host dir to container_file_t (MAC/SELinux);
+            #       without it container_t is denied and the write is *also* EACCES -- which
+            #       crash-looped the truth-layer store build the first time a deploy actually
+            #       wrote this mount (#322). Ownership alone is not enough; both are required.
             OVERRIDE_DIR="$HOME/.config/systemd/user/${SYSTEMD_UNIT}.service.d"
             mkdir -p "$OVERRIDE_DIR"
             cat > "$OVERRIDE_DIR/override.conf" <<EOF
             [Service]
             ExecStart=
-            ExecStart=/usr/bin/podman run --name ${SYSTEMD_UNIT} --replace --rm --cgroups=split --sdnotify=conmon -d --memory=1.7g --memory-swap=2g --network fingpt-net -v /home/deploy/fingpt/runtime:/app/runtime:U --publish 127.0.0.1:8000:8000 --env-file /home/deploy/fingpt/envs/.env.production --env REDIS_URL=redis://fingpt-redis:6379/0 ${REMOTE_IMAGE}
+            ExecStart=/usr/bin/podman run --name ${SYSTEMD_UNIT} --replace --rm --cgroups=split --sdnotify=conmon -d --memory=1.7g --memory-swap=2g --network fingpt-net -v /home/deploy/fingpt/runtime:/app/runtime:U,Z --publish 127.0.0.1:8000:8000 --env-file /home/deploy/fingpt/envs/.env.production --env REDIS_URL=redis://fingpt-redis:6379/0 ${REMOTE_IMAGE}
             EOF
 
             systemctl --user daemon-reload
