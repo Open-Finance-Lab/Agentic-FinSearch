@@ -7,7 +7,7 @@ integration are all mocked, so no DB and no network are touched.
 """
 import asyncio
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from django.test import RequestFactory, SimpleTestCase
 
@@ -164,3 +164,36 @@ class AutoScrapeSinkTests(SimpleTestCase):
         mock_scrape.assert_not_called()
         mock_sid.assert_not_called()
         mock_validate.assert_called_once_with(BLOCKED)
+
+
+class PlaywrightFactoryGuardTests(SimpleTestCase):
+    """The PlaywrightBrowser factory must install the SSRF route guard on every
+    page it yields, so all three async tools are guarded centrally and a future
+    4th entrypoint cannot silently reopen the rebinding hole."""
+
+    def test_factory_installs_route_guard_on_yielded_page(self):
+        import datascraper.playwright_tools as pt
+
+        page = MagicMock(name="page")
+        context = MagicMock(name="context")
+        context.new_page = AsyncMock(return_value=page)
+        browser = MagicMock(name="browser")
+        browser.new_context = AsyncMock(return_value=context)
+        browser.close = AsyncMock()
+        playwright = MagicMock(name="playwright")
+        playwright.chromium.launch = AsyncMock(return_value=browser)
+        playwright.stop = AsyncMock()
+        ap = MagicMock()
+        ap.start = AsyncMock(return_value=playwright)
+
+        async def run():
+            with patch("playwright.async_api.async_playwright", return_value=ap), \
+                 patch("datascraper.ssrf_guard.install_route_guard",
+                       new=AsyncMock()) as mock_guard:
+                async with pt.PlaywrightBrowser() as yielded:
+                    # Installed on the yielded page BEFORE the caller's body runs
+                    # (i.e. before any goto).
+                    mock_guard.assert_awaited_once_with(page)
+                    self.assertIs(yielded, page)
+
+        asyncio.run(run())
