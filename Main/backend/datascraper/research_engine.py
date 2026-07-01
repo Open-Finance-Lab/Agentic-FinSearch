@@ -461,7 +461,18 @@ class Synthesizer:
                     if delta.content:
                         yield delta.content
             finally:
-                await stream.close()
+                # Release the stream. OpenAI's AsyncStream exposes close(); a raw async
+                # generator (e.g. a test's mock stream) exposes aclose() instead. Prefer
+                # aclose() when present, else close() -- the real SDK object has no aclose,
+                # so production still calls close() exactly as before. Best-effort: a cleanup
+                # failure must not bubble up and wrongly trigger the non-streaming fallback,
+                # since every token already streamed successfully.
+                closer = getattr(stream, "aclose", None) or getattr(stream, "close", None)
+                if closer is not None:
+                    try:
+                        await closer()
+                    except Exception:  # noqa: BLE001 -- cleanup is best-effort
+                        pass
         except Exception as exc:
             logger.warning(f"[RESEARCH] Streaming synthesis failed, falling back: {exc}")
             response = await _call_synthesis(messages=messages, model=self.model)
