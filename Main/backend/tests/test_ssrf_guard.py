@@ -1,6 +1,8 @@
 """Tests for datascraper.ssrf_guard (P0 Root B.1 SSRF guard)."""
 import asyncio
 import socket
+import threading
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from django.test import SimpleTestCase
@@ -341,6 +343,91 @@ class SyncRouteGuardTests(SimpleTestCase):
         self._drive(route)
         route.abort.assert_called_once()
         m_get.assert_not_called()
+
+
+class PinnedSessionCacheTests(SimpleTestCase):
+    """The per-page cache reuses validated DNS + keep-alive sessions per host,
+    re-validates after TTL, and never reaches a private address."""
+
+    def test_resolves_once_and_reuses_session_within_ttl(self):
+        cache = ssrf_guard._PinnedSessionCache(ttl=1000)
+        with patch("datascraper.ssrf_guard._resolve_ips",
+                   return_value=["93.184.216.34"]) as m_res:
+            s1 = cache._session_for("example.com")
+            s2 = cache._session_for("example.com")
+        self.assertIs(s1, s2)
+        m_res.assert_called_once()
+        cache.close()
+
+    def test_reresolves_and_reblocks_after_ttl(self):
+        cache = ssrf_guard._PinnedSessionCache(ttl=30)
+        clock = {"t": 100.0}
+        with patch("datascraper.ssrf_guard.time.monotonic",
+                   side_effect=lambda: clock["t"]), \
+             patch("datascraper.ssrf_guard._resolve_ips",
+                   side_effect=[["93.184.216.34"], ["127.0.0.1"]]) as m_res:
+            cache._session_for("rebind.test")     # caches; expiry = 130
+            clock["t"] = 200.0                     # past the 30s TTL
+            with self.assertRaises(UnsafeURLError):
+                cache._session_for("rebind.test")  # re-resolve -> now private -> blocked
+        self.assertEqual(m_res.call_count, 2)
+        cache.close()
+
+    def test_blocked_ip_on_miss_caches_nothing(self):
+        cache = ssrf_guard._PinnedSessionCache()
+        with patch("datascraper.ssrf_guard._resolve_ips",
+                   return_value=["169.254.169.254"]):
+            with self.assertRaises(UnsafeURLError):
+                cache._session_for("evil.test")
+        self.assertEqual(cache._entries, {})
+
+    def test_fetch_revalidates_each_redirect_host(self):
+        cache = ssrf_guard._PinnedSessionCache()
+        redirect = _FakeResp(status_code=302, location="http://h2.test/final")
+        final = _FakeResp(status_code=200, chunks=[b"ok"])
+        seen = []
+
+        def fake_session_for(host):
+            seen.append(host)
+            s = MagicMock()
+            s.get.return_value = redirect if host == "h1.test" else final
+            return s
+
+        with patch.object(cache, "_session_for", side_effect=fake_session_for):
+            resp = cache.fetch("http://h1.test/start")
+        self.assertEqual(seen, ["h1.test", "h2.test"])
+        self.assertEqual(resp._content, b"ok")
+        self.assertTrue(redirect.closed)
+
+    def test_concurrent_same_host_resolves_once(self):
+        cache = ssrf_guard._PinnedSessionCache(ttl=1000)
+
+        def slow_resolve(host):
+            time.sleep(0.02)
+            return ["93.184.216.34"]
+
+        with patch("datascraper.ssrf_guard._resolve_ips",
+                   side_effect=slow_resolve) as m_res:
+            threads = [threading.Thread(target=cache._session_for,
+                                        args=("example.com",)) for _ in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        m_res.assert_called_once()
+        cache.close()
+
+    def test_close_closes_all_sessions(self):
+        cache = ssrf_guard._PinnedSessionCache(ttl=1000)
+        fake = MagicMock()
+        with patch.object(ssrf_guard._PinnedSessionCache, "_build_session",
+                          return_value=fake), \
+             patch("datascraper.ssrf_guard._resolve_ips",
+                   return_value=["93.184.216.34"]):
+            cache._session_for("example.com")
+        cache.close()
+        fake.close.assert_called_once()
+        self.assertEqual(cache._entries, {})
 
 
 class AssertSafePageUrlTests(SimpleTestCase):

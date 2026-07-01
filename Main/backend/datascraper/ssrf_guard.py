@@ -51,6 +51,23 @@ _ALLOWED_SCHEMES = ("http", "https")
 _REDIRECT_STATUSES = (301, 302, 303, 307, 308)
 _STREAM_CHUNK_BYTES = 65536
 
+# In-browser subresource types the route guard aborts outright: they never feed
+# page.inner_text, so fetching them only burns DNS+TLS and egress. Deliberately
+# NOT stylesheet/script/xhr/fetch/document — dropping CSS can leak display:none
+# boilerplate into inner_text, and JS/XHR drive SPA rendering.
+_SKIP_RESOURCE_TYPES = frozenset(
+    t.strip()
+    for t in os.getenv("SCRAPE_SKIP_RESOURCE_TYPES", "image,media,font").split(",")
+    if t.strip()
+)
+# Seconds a per-page resolved+validated host entry stays usable before it must be
+# re-resolved and re-block-checked. Per-page cache scope already bounds reuse to a
+# single scrape; this is a defense-in-depth staleness ceiling.
+_DNS_CACHE_TTL = float(os.getenv("SCRAPE_DNS_CACHE_TTL", "30"))
+# Keep-alive pool size for each cached per-host pinned session, so a same-host
+# subresource burst reuses connections instead of serializing on one.
+_POOL_MAXSIZE = int(os.getenv("SCRAPE_POOL_MAXSIZE", "20"))
+
 # Response headers that must NOT be forwarded when fulfilling a Playwright route
 # from a safe_get response: requests has already decoded the body (so a stale
 # Content-Encoding would make Chromium try to gunzip plaintext), and the framing
@@ -282,6 +299,94 @@ def safe_get(
         _host, ip = _check_and_resolve(current)
         return _pinned_fetch(current, ip, headers, timeout)
     return _follow_redirects(url, _fetch_one, max_bytes, max_redirects)
+
+
+class _PinnedSessionCache:
+    """Per-page cache of resolved+validated hosts and their keep-alive,
+    IP-pinned ``requests.Session``s, used by the Playwright route guards to skip
+    re-resolving DNS and re-handshaking TLS on every subresource.
+
+    A cached entry stores ONLY an IP that already passed the block-check, and the
+    session stays pinned to that IP, so reuse cannot reach a private address even
+    if the host later rebinds — re-resolution (and the next block-check) only
+    happens after the entry's TTL expires. Per page, NEVER global. Thread-safe:
+    the async route guard dispatches :meth:`fetch` via ``asyncio.to_thread``, so
+    concurrent same-host subresources may call it at once."""
+
+    def __init__(self, ttl: float = _DNS_CACHE_TTL):
+        self._ttl = ttl
+        self._lock = threading.Lock()
+        # host -> (pinned_ip, session, expiry_monotonic)
+        self._entries = {}
+
+    @staticmethod
+    def _build_session(ip: str, host: str) -> requests.Session:
+        """A keep-alive Session whose adapter pins every connection to ``ip``
+        (Host/SNI preserved for ``host``). Its cookie jar is disabled: cookies
+        flow through Chromium (fulfilled Set-Cookie -> stored -> replayed via the
+        forwarded Cookie header), never through this session, so disabling it both
+        removes the only per-request mutable shared state (making concurrent
+        ``session.get`` thread-safe) and prevents cross-subresource cookie bleed."""
+        session = requests.Session()
+        session.cookies.set_policy(DefaultCookiePolicy(allowed_domains=[]))
+        adapter = _PinnedHTTPAdapter(
+            ip, host, pool_connections=_POOL_MAXSIZE, pool_maxsize=_POOL_MAXSIZE
+        )
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        return session
+
+    def _session_for(self, host: str) -> requests.Session:
+        """Return a keep-alive Session pinned to a freshly-validated public IP for
+        ``host``, resolving + block-checking on a cache miss or after TTL expiry.
+        Holds the lock across the whole get-or-create so a concurrent same-host
+        burst resolves exactly once."""
+        with self._lock:
+            entry = self._entries.get(host)
+            if entry is not None and time.monotonic() < entry[2]:
+                return entry[1]
+            # Miss or expired: resolve + block-check BEFORE mutating the cache, so
+            # a now-blocked host raises without evicting/replacing a good entry.
+            pinned_ip = _resolve_and_pin(host)
+            if entry is not None:
+                entry[1].close()
+            session = self._build_session(pinned_ip, host)
+            self._entries[host] = (pinned_ip, session, time.monotonic() + self._ttl)
+            return session
+
+    def fetch(
+        self,
+        url: str,
+        headers: Optional[dict] = None,
+        timeout: int = 15,
+        max_bytes: int = MAX_FETCH_BYTES,
+        max_redirects: int = MAX_REDIRECTS,
+    ) -> requests.Response:
+        """:func:`safe_get`'s redirect + byte-cap contract, but each hop reuses
+        the host's pinned keep-alive session. Validates scheme + host per hop and
+        resolves/block-checks per host (cache miss or expiry)."""
+        def _fetch_one(current):
+            host = _validated_host(current)
+            session = self._session_for(host)
+            return session.get(
+                current,
+                headers=headers,
+                timeout=timeout,
+                stream=True,
+                allow_redirects=False,
+            )
+        return _follow_redirects(url, _fetch_one, max_bytes, max_redirects)
+
+    def close(self) -> None:
+        """Close every cached session (its keep-alive sockets). Called when the
+        page closes."""
+        with self._lock:
+            for _ip, session, _exp in self._entries.values():
+                try:
+                    session.close()
+                except Exception:
+                    pass
+            self._entries.clear()
 
 
 def _fulfill_headers(response: requests.Response) -> dict:
