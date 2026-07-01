@@ -41,6 +41,13 @@ RL_429 = override_settings(
     # Bare pytest (no Django test runner) never calls setup_test_environment(), so 'testserver'
     # is not auto-added to ALLOWED_HOSTS; add it or CommonMiddleware raises DisallowedHost first.
     ALLOWED_HOSTS=["testserver"],
+    # These tests drive a REAL request through the full middleware stack, which includes
+    # SecurityMiddleware. With DEBUG=False (CI runs with no .env, so DJANGO_DEBUG is unset)
+    # SECURE_SSL_REDIRECT defaults True, and SecurityMiddleware 301-redirects the plain-HTTP
+    # test-client request to https BEFORE it reaches the limited view -- so the assertions below
+    # would see 301 instead of 200/429. Pin it off to keep the suite hermetic (independent of
+    # DEBUG / a local .env). We're exercising the rate-limit wiring, not the SSL redirect.
+    SECURE_SSL_REDIRECT=False,
     CACHES={
         "default": {
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
