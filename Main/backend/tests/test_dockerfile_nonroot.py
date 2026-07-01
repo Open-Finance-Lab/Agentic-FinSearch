@@ -16,7 +16,7 @@ DEPLOY_WORKFLOW = os.path.join(
     _HERE, "..", "..", "..", ".github", "workflows", "backend-deploy.yml"
 )
 
-RUNTIME_DIRS = ["/app/staticfiles", "/app/media", "/app/logs", "/tmp/fingpt_cache"]
+RUNTIME_DIRS = ["/app/staticfiles", "/app/media", "/app/logs", "/tmp/fingpt_cache", "/app/runtime"]
 
 
 def _read(path):
@@ -58,6 +58,9 @@ class DockerfileNonRootTests(SimpleTestCase):
         self.assertNotIn("chown -R fingpt:fingpt /app ", chown + " ")
         self.assertNotIn("/app/api", chown)
         self.assertNotIn("/app/.venv", chown)
+        # The store no longer builds under /app: /app/truthlayer/data (vendored
+        # snapshots) stays root-owned and read-only, restoring no-write-under-/app.
+        self.assertNotIn("/app/truthlayer/data", chown)
 
     def test_user_switch_after_last_root_run_before_entrypoint(self):
         ln_idx = self._index_of("ln -sf /ms-playwright")
@@ -71,6 +74,19 @@ class DockerfileNonRootTests(SimpleTestCase):
         self.assertGreater(user_idx, verify_idx)
         self.assertGreater(user_idx, chown_idx)
         self.assertLess(user_idx, entry_idx)
+
+    def test_store_persisted_on_runtime_volume(self):
+        # The regenerable DuckDB store must build onto the /app/runtime volume
+        # (persisted across restarts) — not the ephemeral image layer — and nothing
+        # under /app/truthlayer stays writable.
+        self.assertIn("TRUTHLAYER_DB_PATH=/app/runtime/truthlayer.duckdb", self.text)
+        mkdir_lines = [l for l in self.lines if "mkdir -p" in l and "/app/runtime" in l]
+        self.assertEqual(
+            len(mkdir_lines), 1, f"expected /app/runtime in one mkdir line, got {mkdir_lines}"
+        )
+        # /app/truthlayer/data is no longer referenced in the Dockerfile at all
+        # (the snapshots arrive via COPY and stay root-owned / read-only).
+        self.assertNotIn("/app/truthlayer/data", self.text)
 
 
 class DeployUserNamespaceTests(SimpleTestCase):
