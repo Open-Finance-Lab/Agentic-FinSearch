@@ -31,6 +31,9 @@ import ipaddress
 import logging
 import os
 import socket
+import threading
+import time
+from http.cookiejar import DefaultCookiePolicy
 from typing import List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
@@ -116,12 +119,10 @@ def _resolve_ips(host: str) -> List[str]:
     return ips
 
 
-def _check_and_resolve(url: str) -> Tuple[str, str]:
-    """Validate ``url`` and resolve it with a SINGLE DNS lookup, returning
-    ``(host, pinned_ip)``. Enforces http/https scheme, a present host, and that
-    EVERY resolved IP is publicly routable. ``pinned_ip`` is one of the IPs that
-    just passed the block-check, so safe_get can connect to exactly that address
-    with no second, rebind-vulnerable lookup."""
+def _validated_host(url: str) -> str:
+    """Enforce http/https scheme and a present host on ``url`` and return the
+    host. Raises :class:`UnsafeURLError`. DNS resolution + block-check is a
+    separate step (see :func:`_resolve_and_pin`)."""
     parsed = urlparse(url)
     if parsed.scheme not in _ALLOWED_SCHEMES:
         raise UnsafeURLError(
@@ -130,13 +131,29 @@ def _check_and_resolve(url: str) -> Tuple[str, str]:
     host = parsed.hostname
     if not host:
         raise UnsafeURLError(f"Missing host in URL {url!r}")
+    return host
+
+
+def _resolve_and_pin(host: str) -> str:
+    """Resolve ``host`` with a SINGLE DNS lookup and return its first IP after
+    verifying EVERY resolved IP is publicly routable. Raises
+    :class:`UnsafeURLError` otherwise. The returned IP just passed the
+    block-check, so a caller can pin the connection to exactly that address with
+    no second, rebind-vulnerable lookup."""
     ips = _resolve_ips(host)
     for ip in ips:
         if _is_blocked_ip(ip):
             raise UnsafeURLError(
                 f"Blocked host {host!r}: resolves to non-routable IP {ip}"
             )
-    return host, ips[0]
+    return ips[0]
+
+
+def _check_and_resolve(url: str) -> Tuple[str, str]:
+    """Validate ``url`` and resolve it with a SINGLE DNS lookup, returning
+    ``(host, pinned_ip)``."""
+    host = _validated_host(url)
+    return host, _resolve_and_pin(host)
 
 
 def validate_fetch_url(url: str) -> str:
@@ -224,6 +241,27 @@ def _enforce_byte_cap(response: requests.Response, max_bytes: int) -> requests.R
     return response
 
 
+def _follow_redirects(url, fetch_one, max_bytes, max_redirects):
+    """Drive the redirect + byte-cap loop shared by :func:`safe_get` and
+    :meth:`_PinnedSessionCache.fetch`. ``fetch_one(current_url)`` MUST return a
+    streaming, non-redirecting response whose connection is pinned to a
+    freshly-validated public IP for ``current_url``'s host — that per-hop
+    re-validation is what makes following a ``Location`` header safe. Returns the
+    final :class:`requests.Response` with a bounded, buffered body."""
+    current = url
+    for _ in range(max_redirects + 1):
+        response = fetch_one(current)
+        location = response.headers.get("Location")
+        if response.status_code in _REDIRECT_STATUSES and location:
+            response.close()
+            current = urljoin(current, location)
+            continue
+        return _enforce_byte_cap(response, max_bytes)
+    raise UnsafeURLError(
+        f"Exceeded maximum of {max_redirects} redirects starting from {url!r}"
+    )
+
+
 def safe_get(
     url: str,
     headers: Optional[dict] = None,
@@ -237,20 +275,13 @@ def safe_get(
     (original Host preserved), follows at most ``max_redirects`` hops while
     RE-VALIDATING each ``Location`` BEFORE it is fetched, streams the body, and
     aborts once Content-Length or cumulative bytes exceed ``max_bytes``. Returns
-    the final :class:`requests.Response` with a bounded, buffered body."""
-    current = url
-    for _ in range(max_redirects + 1):
+    the final :class:`requests.Response` with a bounded, buffered body. Stateless:
+    each hop builds a fresh pinned session (see ``_PinnedSessionCache`` for the
+    keep-alive variant used by the in-browser route guards)."""
+    def _fetch_one(current):
         _host, ip = _check_and_resolve(current)
-        response = _pinned_fetch(current, ip, headers, timeout)
-        location = response.headers.get("Location")
-        if response.status_code in _REDIRECT_STATUSES and location:
-            response.close()
-            current = urljoin(current, location)
-            continue
-        return _enforce_byte_cap(response, max_bytes)
-    raise UnsafeURLError(
-        f"Exceeded maximum of {max_redirects} redirects starting from {url!r}"
-    )
+        return _pinned_fetch(current, ip, headers, timeout)
+    return _follow_redirects(url, _fetch_one, max_bytes, max_redirects)
 
 
 def _fulfill_headers(response: requests.Response) -> dict:
