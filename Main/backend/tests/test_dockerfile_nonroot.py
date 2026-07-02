@@ -12,6 +12,7 @@ from django.test import SimpleTestCase
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DOCKERFILE = os.path.join(_HERE, "..", "Dockerfile")
+ENTRYPOINT_SH = os.path.join(_HERE, "..", "entrypoint.sh")
 DEPLOY_WORKFLOW = os.path.join(
     _HERE, "..", "..", "..", ".github", "workflows", "backend-deploy.yml"
 )
@@ -42,11 +43,26 @@ class DockerfileNonRootTests(SimpleTestCase):
             self.text,
         )
 
-    def test_switches_to_nonroot_user(self):
-        self.assertIn("\nUSER fingpt\n", self.text)
+    def test_app_drops_to_nonroot_via_entrypoint_root_init_drop(self):
+        # Root-init-drop: PID1 must be root-in-userns to load the SSRF egress firewall
+        # (nft needs CAP_NET_ADMIN), so the Dockerfile deliberately has NO `USER` line;
+        # entrypoint.sh drops to the non-root uid1001 (fingpt) via setpriv, removing
+        # NET_ADMIN from the bounding set + setting no_new_privs, BEFORE running the app.
+        # The no-write-under-/app posture holds: the long-running app is uid1001.
+        self.assertNotIn("\nUSER ", self.text, "Dockerfile must NOT set a USER (root-init-drop)")
+        entry = _read(ENTRYPOINT_SH)
+        self.assertIn("setpriv", entry)
+        self.assertIn("--reuid=1001", entry)
+        self.assertIn("--regid=1001", entry)
+        self.assertIn("--bounding-set=-net_admin", entry)
+        self.assertIn("--no-new-privs", entry)
 
     def test_chown_only_runtime_dirs_not_whole_tree(self):
-        chown_lines = [l for l in self.lines if "chown" in l]
+        # Count only actual chown COMMANDS, not prose in comments (the root-init-drop
+        # comment block legitimately mentions chowning the runtime mount).
+        chown_lines = [
+            l for l in self.lines if "chown" in l and not l.strip().startswith("#")
+        ]
         self.assertEqual(
             len(chown_lines), 1, f"expected exactly one chown line, got {chown_lines}"
         )
@@ -62,18 +78,17 @@ class DockerfileNonRootTests(SimpleTestCase):
         # snapshots) stays root-owned and read-only, restoring no-write-under-/app.
         self.assertNotIn("/app/truthlayer/data", chown)
 
-    def test_user_switch_after_last_root_run_before_entrypoint(self):
+    def test_chown_after_last_root_run_before_entrypoint(self):
         ln_idx = self._index_of("ln -sf /ms-playwright")
         verify_idx = self._index_of("Chromium browser found")
         chown_idx = self._index_of("chown -R fingpt:fingpt")
-        user_idx = self._index_of("USER fingpt")
         entry_idx = self._index_of('ENTRYPOINT ["/app/entrypoint.sh"]')
-        # USER comes after the last root RUN (the /usr/bin symlink + browser verify)
-        # and after the chown, then immediately before ENTRYPOINT.
-        self.assertGreater(user_idx, ln_idx)
-        self.assertGreater(user_idx, verify_idx)
-        self.assertGreater(user_idx, chown_idx)
-        self.assertLess(user_idx, entry_idx)
+        # The chown comes after the last root RUN (the /usr/bin symlink + browser verify)
+        # and before ENTRYPOINT. There is no Dockerfile USER line (root-init-drop): the
+        # privilege drop to uid1001 happens at runtime in entrypoint.sh via setpriv.
+        self.assertGreater(chown_idx, ln_idx)
+        self.assertGreater(chown_idx, verify_idx)
+        self.assertLess(chown_idx, entry_idx)
 
     def test_store_persisted_on_runtime_volume(self):
         # The regenerable DuckDB store must build onto the /app/runtime volume
