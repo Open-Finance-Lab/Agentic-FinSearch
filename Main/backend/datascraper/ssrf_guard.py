@@ -14,8 +14,11 @@ request through ``safe_get`` (IP-pinned, byte-capped) and ``route.fulfill`` the
 buffered response, so Chromium never opens its own connection for the HTTP(S)
 requests ``page.route`` intercepts. Non-GET and non-http(s) in-browser requests
 fail closed (aborted), as ``safe_get`` only serves pinned GETs. (WebSocket /
-WebRTC are NOT intercepted by ``page.route`` and remain a separate, pre-existing
-gap — out of scope here.)
+WebRTC are NOT intercepted by ``page.route``; that gap is closed for
+private/link-local/metadata destinations at the netns layer by the egress
+firewall — see ops/egress_firewall.py, which deliberately still accepts
+own-subnet + public egress — with ``DISABLE_WEBRTC_JS`` below as best-effort
+surface reduction on top.)
 
 Public contract (do not rename):
     UnsafeURLError
@@ -25,6 +28,7 @@ Public contract (do not rename):
     install_route_guard(page)      (async, Playwright)
     install_route_guard_sync(page) (sync, Playwright)
     assert_safe_page_url(page)     (async, Playwright)
+    DISABLE_WEBRTC_JS              (init-script string, Playwright)
 """
 import asyncio
 import ipaddress
@@ -67,6 +71,19 @@ _DNS_CACHE_TTL = float(os.getenv("SCRAPE_DNS_CACHE_TTL", "30"))
 # Keep-alive pool size for each cached per-host pinned session, so a same-host
 # subresource burst reuses connections instead of serializing on one.
 _POOL_MAXSIZE = int(os.getenv("SCRAPE_POOL_MAXSIZE", "20"))
+
+# Best-effort WebRTC surface reduction (NOT a boundary): a text scraper needs no WebRTC,
+# and page.route cannot intercept it (Chromium egresses it on its own socket). Installed
+# as a pre-navigation init script by BOTH scraper paths (the playwright_tools async
+# factory and the url_tools sync fallback) — defined once HERE so the two paths cannot
+# drift. Paired with --disable-quic on the launch args. A fresh realm could re-obtain
+# the deleted constructor, so the netns egress firewall (ops/egress_firewall.py) remains
+# the actual boundary; this only shrinks the surface for the public-egress residual.
+DISABLE_WEBRTC_JS = (
+    "delete window.RTCPeerConnection;"
+    "delete window.webkitRTCPeerConnection;"
+    "delete window.RTCDataChannel;"
+)
 
 # Response headers that must NOT be forwarded when fulfilling a Playwright route
 # from a safe_get response: requests has already decoded the body (so a stale

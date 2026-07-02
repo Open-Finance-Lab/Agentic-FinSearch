@@ -20,16 +20,6 @@ from datascraper import ssrf_guard
 
 logger = logging.getLogger(__name__)
 
-# Best-effort surface reduction for the SSRF egress firewall (NOT a boundary; matches
-# datascraper.playwright_tools): delete RTCPeerConnection to curb WebRTC egress on
-# Chromium's own socket, which page.route cannot intercept. Paired with --disable-quic.
-# The netns egress firewall is the real boundary.
-_DISABLE_WEBRTC_JS = (
-    "delete window.RTCPeerConnection;"
-    "delete window.webkitRTCPeerConnection;"
-    "delete window.RTCDataChannel;"
-)
-
 backend_dir = Path(__file__).resolve().parent.parent
 load_dotenv(backend_dir / '.env')
 
@@ -225,10 +215,10 @@ def scrape_with_playwright(url: str) -> str:
                 # seed-only validate_fetch_url checks leave open. Must precede
                 # the first navigation.
                 ssrf_guard.install_route_guard_sync(page)
-                # WebRTC hardening (see _DISABLE_WEBRTC_JS): remove RTCPeerConnection in
-                # every frame so a scraped page cannot open WebRTC on Chromium's own
-                # socket. Must precede the first navigation.
-                page.add_init_script(_DISABLE_WEBRTC_JS)
+                # WebRTC hardening (see ssrf_guard.DISABLE_WEBRTC_JS): remove
+                # RTCPeerConnection in every frame so a scraped page cannot open WebRTC
+                # on Chromium's own socket. Must precede the first navigation.
+                page.add_init_script(ssrf_guard.DISABLE_WEBRTC_JS)
 
                 logger.info(f"Playwright scraping: {url}")
                 page.goto(url, timeout=30000, wait_until="domcontentloaded")

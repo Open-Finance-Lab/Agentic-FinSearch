@@ -181,6 +181,12 @@ jobs:
             # --replace) BEFORE the pre-cutover gate so (a) the firewall self-test has redis
             # up on fingpt-net, and (b) an ABORTED deploy does not bounce the live redis /
             # wipe counters for the still-serving old container.
+            # TRADE-OFF of start-if-absent: the running container stays FROZEN on whatever
+            # redis:7-alpine image it was created from -- deploys never pick up redis image
+            # updates (security patches included). To upgrade redis, run on the droplet:
+            #   podman pull docker.io/library/redis:7-alpine && podman rm -f fingpt-redis
+            # then let the next deploy (or a re-run of this one) recreate it. Counters are
+            # ephemeral by design, so the wipe is acceptable when done deliberately.
             if ! podman container exists fingpt-redis; then
               podman run -d --name fingpt-redis --restart=always \
                 --network fingpt-net \

@@ -239,6 +239,9 @@ class ChromiumEgressHardeningTests(SimpleTestCase):
         self.assertIn("--disable-quic", args)
         page.add_init_script.assert_awaited()
         script = page.add_init_script.await_args.args[0]
+        # Exact equality with the SHARED constant (single-sourced in ssrf_guard), not
+        # just a substring: pins that this path cannot drift onto a local copy.
+        self.assertEqual(script, ssrf_guard.DISABLE_WEBRTC_JS)
         self.assertIn("RTCPeerConnection", script)
 
     def test_sync_path_disables_webrtc_and_quic(self):
@@ -280,6 +283,9 @@ class ChromiumEgressHardeningTests(SimpleTestCase):
         self.assertIn("--disable-quic", launch_kwargs.get("args", []))
         page.add_init_script.assert_called_once()
         script = page.add_init_script.call_args.args[0]
+        # Same shared-constant pin as the async path: both scrapers must install THE
+        # ssrf_guard.DISABLE_WEBRTC_JS object, not a reintroduced local copy.
+        self.assertEqual(script, ssrf_guard.DISABLE_WEBRTC_JS)
         self.assertIn("RTCPeerConnection", script)
         self.assertIn("goto_at_init", order)
         self.assertFalse(order["goto_at_init"], "add_init_script must precede page.goto")

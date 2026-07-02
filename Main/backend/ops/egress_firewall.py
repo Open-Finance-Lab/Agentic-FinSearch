@@ -43,6 +43,14 @@ _V4_DROP = (
 # IPv6 destinations (constant, emitted unconditionally: the netns always has ::1 and a
 # fe80:: on the veth). ::ffff:0.0.0.0/96 is intentionally omitted -- v4-mapped
 # destinations egress as real IPv4 packets caught by _V4_DROP.
+# FUTURE-IPv6 FOOTGUN: ff00::/8 (all multicast) + fe80::/10 in an OUTPUT-hook drop also
+# swallow NDP (solicits egress to ff02:: solicited-node multicast; adverts unicast back
+# to the solicitor's fe80::), so if fingpt-net ever gains IPv6, neighbor resolution
+# fails and v6 silently dies -- the own-v6 accept alone cannot save it. When enabling v6, add an
+# icmpv6 carve-out BEFORE these drops, scoped to NDP (roughly:
+# ``meta l4proto icmpv6 icmpv6 type { nd-router-solicit, nd-router-advert,
+# nd-neighbor-solicit, nd-neighbor-advert } accept``). Harmless today: fingpt-net is
+# v4-only, so no v6 traffic exists to break.
 _V6_DROP = ("::1/128", "::/128", "fc00::/7", "fe80::/10", "ff00::/8", "64:ff9b::/96")
 
 # A discovered own-v6 subnet must be a real ULA (fc00::/7) or GUA (2000::/3) the container
@@ -174,8 +182,14 @@ def _self_test():
         dns_ok = False
     redis_ok = False
     if dns_ok:
+        # timeout=1 (not _tcp_ok's default 3): redis is same-subnet, so a live connect
+        # answers in ms and a dead-but-routable one RSTs instantly; only silent packet
+        # loss burns the full timeout. Bounds this ADVISORY leg's worst case to
+        # 6*(1+1)=12s of boot (vs 24s at timeout=3) inside the ~130s deploy health
+        # window. Rarely even reached: a stopped redis container usually fails DNS
+        # above (aardvark-dns only answers for running containers), skipping the loop.
         for _ in range(6):  # tolerate redis cold start (~5s window)
-            if _tcp_ok(host, port):
+            if _tcp_ok(host, port, timeout=1):
                 redis_ok = True
                 break
             time.sleep(1)

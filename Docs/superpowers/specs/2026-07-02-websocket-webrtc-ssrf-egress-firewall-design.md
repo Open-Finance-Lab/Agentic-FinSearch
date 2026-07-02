@@ -172,6 +172,10 @@ Deliberate choices, each from the design review:
     resolver) → else non-zero.
   - `fingpt-redis:6379` TCP connect **must succeed** within a short retry window (~5×1s, tolerating
     redis's own cold start) → else non-zero.
+  - **AMENDED at implementation:** the DNS + redis legs shipped as **advisory (WARN, exit 0)**, not
+    fatal — the prior entrypoint had zero redis/DNS boot dependency, so a fatal leg would let a
+    redis blip at reboot fail-close a correct firewall (see `_self_test`'s docstring for the full
+    rationale). Only the metadata leg is fatal.
 - `ops/__init__.py` (new, empty) so `python -m ops.egress_firewall` resolves from WORKDIR `/app`.
 
 ### Dockerfile changes

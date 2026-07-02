@@ -34,6 +34,8 @@ if [ "$(id -u)" = "0" ]; then
     chown -R fingpt:fingpt /app/runtime
     # Marker (env survives setpriv) so the app phase can refuse to serve if it was ever
     # reached WITHOUT this root-init firewall load (e.g. a mistaken non-root PID1 start).
+    # A MISTAKE-GUARD ONLY, not a security boundary: trivially spoofable via -e/--env-file,
+    # and uid1001 cannot verify the table for real (nft list itself needs NET_ADMIN).
     export EGRESS_FW_LOADED=1
     # Drop to uid1001, remove NET_ADMIN from the BOUNDING set (so a compromised app
     # cannot re-arm/flush the firewall), set no_new_privs, and re-exec self as fingpt.
