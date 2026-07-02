@@ -171,6 +171,80 @@ class DeployUserNamespaceTests(SimpleTestCase):
         self.assertGreater(flag_idx, setpriv_idx)
         self.assertLess(flag_idx, store_idx)
 
+    def test_image_retirement_keeps_new_and_rollback_target_only(self):
+        # Deploys pull by DIGEST, so superseded images keep a repo@sha256 name, are
+        # never "dangling", and plain `podman image prune -f` skips them forever
+        # (~3.3GB piled up per deploy; 10 deep when first cleaned by hand 2026-07-03).
+        # The deploy must retire them explicitly, keeping exactly the just-deployed
+        # image and PREV_IMAGE (the documented manual-rollback target).
+        wf = _read(DEPLOY_WORKFLOW)
+        script = wf[wf.index("Deploy to Fedora droplet"):wf.index("Verify deployment health")]
+        # Both keeps spelled on the case guard itself, not merely defined somewhere.
+        self.assertIn('"$KEEP_NEW"|"$KEEP_PREV")', script)
+        # Retirement is scoped to the backend repo -- it must never be able to touch
+        # redis or other infra images.
+        self.assertIn('REPO="${REMOTE_IMAGE%%@*}"', script)
+        self.assertIn('--filter "reference=${REPO}"', script)
+        # Degenerate keep sets must SKIP retirement, not delete "everything else":
+        # a same-digest job re-run (KEEP_NEW == KEEP_PREV), a deploy while the
+        # container is absent (PREV_IMAGE=unknown: first deploy, or a crash-looped
+        # unit whose --rm removed the container), or a failed keep resolution would
+        # otherwise collapse the keep set and delete the last-known-good image
+        # precisely when a rollback is most likely needed.
+        self.assertIn('if [ "$PREV_IMAGE" = "unknown" ]', script)
+        self.assertIn('elif [ "$KEEP_NEW" = "$KEEP_PREV" ]', script)
+        self.assertEqual(script.count("skipping image retirement"), 4)
+        # Keeps are compared in FULL-Id space: `podman images` emits SHORT 12-char
+        # ids, so each must be normalized via inspect before the case guard --
+        # casing on "$short" directly would match nothing and retire everything
+        # (the rollback target included) while the deploy stayed green.
+        self.assertIn(
+            """img=$(podman image inspect --format '{{.Id}}' "$short" 2>/dev/null) || continue""",
+            script,
+        )
+        self.assertIn('case "$img" in', script)
+        # Post-cutover fail-open: a refused removal must WARN and continue -- under
+        # the script's set -euo pipefail an unguarded refusal reds a deploy that has
+        # already cut over AND skips the Verify-deployment-health step.
+        self.assertIn('podman rmi "$short" || echo "WARN: could not remove', script)
+        # Fail-safe placement: keep-set derivation precedes any removal, PREV_IMAGE
+        # is recorded from the still-running container BEFORE cutover, and the whole
+        # block sits after the pull (hoisted above it, the inspect of a not-yet-
+        # present digest would abort every deploy) and after cutover.
+        self.assertLess(script.index("KEEP_NEW="), script.index("podman rmi"))
+        self.assertLess(script.index("KEEP_PREV="), script.index("podman rmi"))
+        self.assertLess(script.index("PREV_IMAGE="), script.index("systemctl --user restart"))
+        self.assertLess(script.index('podman pull "$REMOTE_IMAGE"'), script.index("KEEP_NEW="))
+        self.assertLess(script.index("systemctl --user restart"), script.index("podman rmi"))
+
+    def test_image_retirement_never_forces_and_never_prunes_all(self):
+        # Forced removal can take out RUNNING containers; pruning all unused images
+        # deletes the rollback target outright, and a time-window filter ages by
+        # BUILD time, so any deploy gap longer than the window deletes it too.
+        # Regexes over non-comment lines, not literal substrings: literals missed
+        # `--force`, `-f -a`, the double-quoted `--filter "until=...` (the script's
+        # own quoting style), and `--filter=until=...`.
+        wf = _read(DEPLOY_WORKFLOW)
+        code = "\n".join(
+            l for l in wf.splitlines() if not l.lstrip().startswith("#")
+        )
+        self.assertIsNone(re.search(r"\brmi\b[^\n]*(\s-\w*f\b|\s--force\b)", code))
+        self.assertIsNone(re.search(r"\bprune\b[^\n]*(\s-\w*a\b|\s--all\b)", code))
+        self.assertIsNone(re.search(r"""--filter[= ]["']?until""", code))
+
+    def test_deploy_job_serialized_by_concurrency_group(self):
+        # Without serialization, two quick-succession merges run overlapping deploy
+        # scripts against the same droplet: they can land out of order, and the
+        # retirement loop of one can rmi the other's freshly pulled (still
+        # container-less) image mid-cutover, forcing a multi-GB re-pull inside
+        # ExecStart against the health window. Same stanza the concierge and
+        # heartbeat deploy jobs already carry.
+        wf = _read(DEPLOY_WORKFLOW)
+        deploy_job = wf[wf.index("\n  deploy:"):wf.index("Deploy to Fedora droplet")]
+        self.assertIn("concurrency:", deploy_job)
+        self.assertIn("group: backend-deploy", deploy_job)
+        self.assertIn("cancel-in-progress: false", deploy_job)
+
     def test_runtime_bind_mount_selinux_relabel_for_nonroot(self):
         text = _read(DEPLOY_WORKFLOW)
         # The droplet is SELinux-enforcing Fedora. :U relabels OWNERSHIP (DAC) but leaves

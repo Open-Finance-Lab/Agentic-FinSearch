@@ -125,6 +125,13 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     if: ${{ github.ref == 'refs/heads/main' }}
+    # Serialize deploys so two merges in quick succession can't land out of order,
+    # leave the droplet on the older commit, or -- now that superseded images are
+    # retired below -- rmi an in-flight peer's freshly pulled, still container-less
+    # image mid-cutover (same stanza as the concierge/heartbeat deploy jobs).
+    concurrency:
+      group: backend-deploy
+      cancel-in-progress: false
     needs:
       - build
       - test
@@ -234,6 +241,47 @@ jobs:
 
             systemctl --user daemon-reload
             systemctl --user restart "$SYSTEMD_UNIT"
+
+            # Retire superseded backend images. The pull above is BY DIGEST, so every
+            # old image keeps a repo@sha256 name, is never "dangling", and the plain
+            # image prune below skips it forever (~3.3GB accumulated per deploy; 10
+            # deep when first cleaned by hand, 2026-07-03). Keep exactly two: the
+            # image just deployed and PREV_IMAGE (the manual rollback target recorded
+            # above). Do NOT swap this for pruning ALL unused images or a time-window
+            # filter: the first deletes the rollback target outright, the second ages
+            # it by BUILD time, so any deploy gap longer than the window deletes it
+            # too. Retirement runs ONLY when the keep set has two DISTINCT resolvable
+            # members: on a first deploy / absent container (PREV_IMAGE=unknown -- a
+            # crash-looped unit's --rm leaves no container), a same-digest job re-run
+            # (KEEP_NEW == KEEP_PREV), or a failed keep resolution, deleting
+            # "everything else" would take the last-known-good image precisely when a
+            # rollback is most likely needed -- those paths skip, loudly. Removals
+            # are unforced (force can remove RUNNING containers) and fail OPEN to
+            # accumulation: a refusal warns and continues, never failing a deploy
+            # that has already cut over (set -e is in force). reference= matching
+            # digest-named images, short-ID resolution, and multi-name rmi refusal
+            # were validated live on the droplet's podman 5.6.2 before this shipped.
+            REPO="${REMOTE_IMAGE%%@*}"
+            if [ "$PREV_IMAGE" = "unknown" ]; then
+              echo "No previous container recorded; skipping image retirement"
+            elif ! KEEP_NEW=$(podman image inspect --format '{{.Id}}' "$REMOTE_IMAGE"); then
+              echo "WARN: cannot resolve just-deployed image ${REMOTE_IMAGE}; skipping image retirement"
+            elif ! KEEP_PREV=$(podman image inspect --format '{{.Id}}' "$PREV_IMAGE"); then
+              echo "WARN: cannot resolve rollback target ${PREV_IMAGE}; skipping image retirement"
+            elif [ "$KEEP_NEW" = "$KEEP_PREV" ]; then
+              echo "Redeploy of the already-running image; skipping image retirement"
+            else
+              for short in $(podman images --filter "reference=${REPO}" --format '{{.ID}}' | sort -u); do
+                img=$(podman image inspect --format '{{.Id}}' "$short" 2>/dev/null) || continue
+                case "$img" in
+                  "$KEEP_NEW"|"$KEEP_PREV") ;;
+                  *)
+                    echo "Retiring superseded image ${short}"
+                    podman rmi "$short" || echo "WARN: could not remove ${short}; leaving in place"
+                    ;;
+                esac
+              done
+            fi
             podman image prune -f
 
       - name: Verify deployment health
