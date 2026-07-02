@@ -5,6 +5,12 @@ services:
   api:
     build: ./Main/backend
 
+    # Required: entrypoint.sh loads the SSRF egress firewall (nft) into the container
+    # netns at startup, which needs CAP_NET_ADMIN. Without it the fail-closed entrypoint
+    # aborts and the container never serves. Mirrors --cap-add=NET_ADMIN in prod.
+    cap_add:
+      - NET_ADMIN
+
     ports:
       # P0 Root C.1: publish only to loopback; the host reverse proxy (Caddy)
       # is the sole public entrypoint and sets X-Real-IP.
