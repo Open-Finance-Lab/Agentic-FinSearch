@@ -92,9 +92,9 @@ def test_override_env_suppresses_v6_discovery(monkeypatch):
 # Parity vs ssrf_guard: the two "what is private" definitions must not silently diverge.
 # CPython's address properties miss two kinds of firewall-dropped space: all of
 # 100.64/10 (CGNAT: neither private nor global to IANA) and the two globally-reachable
-# anycast carve-outs inside 192.0.0.0/24 (192.0.0.9 PCP, 192.0.0.10 NAT64/DNS64
-# discovery, per the post-CVE-2024-4032 registry alignment); ssrf_guard blocks both
-# ranges explicitly (_EXTRA_BLOCKED_NETS).
+# anycast carve-outs inside 192.0.0.0/24 (192.0.0.9 PCP, 192.0.0.10 TURN, per the
+# post-CVE-2024-4032 registry alignment); ssrf_guard blocks both ranges explicitly
+# (_EXTRA_BLOCKED_NETS).
 _DANGEROUS = [
     "169.254.169.254", "10.1.2.3", "172.16.5.5", "192.168.1.1", "127.0.0.1",
     "0.0.0.0", "255.255.255.255", "198.18.0.1", "192.0.0.170", "240.0.0.1",
@@ -115,14 +115,17 @@ def test_every_firewall_drop_range_blocked_http_side():
     # Structural parity, the reverse direction of the sample list above: EVERY
     # range the netns firewall drops must also be blocked by ssrf_guard in-process,
     # so a range added to _V4_DROP/_V6_DROP can never silently stay fetchable at
-    # the HTTP layer. Ranges up to /16 are enumerated EXHAUSTIVELY (~0.6s total):
+    # the HTTP layer. Ranges up to /15 are enumerated EXHAUSTIVELY (~1.4s total):
     # IANA carve-outs are single addresses inside small special-purpose blocks
     # (192.0.0.9/.10 hid from first/middle/last sampling exactly this way), so
-    # sampling a small range proves nothing. Larger ranges get first/middle/last;
-    # their known carve-outs are none, and full enumeration is infeasible.
+    # sampling a small range proves nothing. The /15 threshold covers every
+    # special-purpose block in the drop lists (198.18.0.0/15 is the largest);
+    # what remains -- RFC1918 /12 and /8s, the /4s, the huge v6 blocks -- gets
+    # first/middle/last: no registry carve-outs exist there, and enumeration
+    # genuinely is infeasible (the /12 alone costs ~6s, a /8 ~90s).
     for cidr in _V4_DROP + _V6_DROP:
         net = ipaddress.ip_network(cidr)
-        if net.num_addresses <= 65536:
+        if net.num_addresses <= 131072:
             addrs = iter(net)
         else:
             addrs = iter({net.network_address, net.broadcast_address,

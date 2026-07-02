@@ -74,7 +74,7 @@ class NormalizeAndBlockTests(SimpleTestCase):
 
     def test_blocks_ietf_protocol_anycast_carveouts(self):
         # CPython (post CVE-2024-4032 IANA alignment) carves 192.0.0.9 (PCP
-        # anycast) and 192.0.0.10 (NAT64/DNS64 discovery) out of the otherwise
+        # anycast) and 192.0.0.10 (TURN anycast) out of the otherwise
         # is_private 192.0.0.0/24, so the property checks alone let exactly
         # those two through -- the explicit range must cover the whole /24.
         for ip in ("192.0.0.9", "192.0.0.10", "::ffff:192.0.0.9"):

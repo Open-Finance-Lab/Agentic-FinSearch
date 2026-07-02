@@ -123,7 +123,7 @@ class UnsafeURLError(ValueError):
 #     nor globally reachable, so is_private and is_reserved are both False.
 #   192.0.0.0/24  -- is_private EXCEPT the two globally-reachable anycast carve-outs
 #     CPython added in the post-CVE-2024-4032 IANA alignment: 192.0.0.9 (PCP,
-#     RFC 7723) and 192.0.0.10 (NAT64/DNS64 discovery, RFC 8155). A scraper has no
+#     RFC 7723) and 192.0.0.10 (TURN anycast, RFC 8155). A scraper has no
 #     business at either, and the firewall drops the whole /24, so block it whole.
 # Full-range parity with the firewall (exhaustive for small ranges) is pinned by
 # tests/test_egress_firewall.py::test_every_firewall_drop_range_blocked_http_side.
