@@ -14,11 +14,12 @@ from datascraper import ssrf_guard
 
 logger = logging.getLogger(__name__)
 
-# Defense-in-depth for the SSRF egress firewall: a text scraper needs neither WebRTC
-# nor QUIC. Removing the RTCPeerConnection constructors in every frame prevents page JS
-# from opening WebRTC (ICE/STUN over UDP) at all; --disable-quic (a launch arg) drops
-# QUIC/HTTP3. The netns egress firewall remains the actual boundary; this only shrinks
-# the surface for the documented public-egress residual. See ops/egress_firewall.py.
+# Best-effort surface reduction for the SSRF egress firewall (NOT a boundary): a text
+# scraper needs neither WebRTC nor QUIC. Deleting the RTCPeerConnection constructors before
+# page scripts run stops the common WebRTC path (ICE/STUN over UDP); --disable-quic (a
+# launch arg) drops QUIC/HTTP3. The netns egress firewall remains the actual boundary
+# (a fresh realm could re-obtain the constructor); this only shrinks the surface for the
+# documented public-egress residual. See ops/egress_firewall.py.
 _DISABLE_WEBRTC_JS = (
     "delete window.RTCPeerConnection;"
     "delete window.webkitRTCPeerConnection;"
@@ -63,10 +64,9 @@ async def PlaywrightBrowser(timeout: int = 30000):
         # async entrypoints (and any future one) are pinned without each having
         # to remember the call. See datascraper.ssrf_guard.install_route_guard.
         await ssrf_guard.install_route_guard(page)
-        # WebRTC hardening: remove RTCPeerConnection in every frame before page
-        # scripts run, so a scraped page cannot open WebRTC on Chromium's own socket
-        # (which page.route/route guard cannot intercept). Defense-in-depth alongside
-        # the netns egress firewall + --disable-quic launch arg.
+        # WebRTC hardening (best-effort, not a boundary): remove RTCPeerConnection before
+        # page scripts run to curb WebRTC egress on Chromium's own socket (which the route
+        # guard cannot intercept). The netns egress firewall is the real boundary.
         await page.add_init_script(_DISABLE_WEBRTC_JS)
 
         yield page

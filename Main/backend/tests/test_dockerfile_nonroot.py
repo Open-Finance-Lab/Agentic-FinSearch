@@ -16,6 +16,7 @@ ENTRYPOINT_SH = os.path.join(_HERE, "..", "entrypoint.sh")
 DEPLOY_WORKFLOW = os.path.join(
     _HERE, "..", "..", "..", ".github", "workflows", "backend-deploy.yml"
 )
+COMPOSE = os.path.join(_HERE, "..", "..", "..", "docker-compose.yml")
 
 RUNTIME_DIRS = ["/app/staticfiles", "/app/media", "/app/logs", "/tmp/fingpt_cache", "/app/runtime"]
 
@@ -56,6 +57,31 @@ class DockerfileNonRootTests(SimpleTestCase):
         self.assertIn("--regid=1001", entry)
         self.assertIn("--bounding-set=-net_admin", entry)
         self.assertIn("--no-new-privs", entry)
+
+    def test_privilege_drop_is_last_statement_of_root_init_block(self):
+        # Structural: the root-init `if [ id -u == 0 ]` block must END with the setpriv
+        # exec, and NO app-phase work (gunicorn/collectstatic/truthlayer/OPENAI gate) may
+        # run inside it -- else the app would run as root. Substring presence is not enough
+        # (dropping `exec` or hoisting an app line above setpriv keeps all substrings).
+        lines = _read(ENTRYPOINT_SH).splitlines()
+        start = next(i for i, l in enumerate(lines) if "id -u" in l and "then" in l)
+        end = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == "fi")
+        logical, buf = [], ""
+        for l in lines[start + 1:end]:
+            s = l.strip()
+            if not s or s.startswith("#"):
+                continue
+            buf += ((" " if buf else "") + s.rstrip("\\").strip())
+            if not l.rstrip().endswith("\\"):
+                logical.append(buf)
+                buf = ""
+        self.assertTrue(logical[-1].startswith("exec setpriv"), logical[-1])
+        self.assertIn('-- "$0" "$@"', logical[-1])
+        self.assertIn("--bounding-set=-net_admin", logical[-1])
+        self.assertIn("--no-new-privs", logical[-1])
+        joined = "\n".join(logical)
+        for marker in ("gunicorn", "collectstatic", "truthlayer", "REQUIRE_OPENAI_API_KEY"):
+            self.assertNotIn(marker, joined, f"app-phase marker {marker!r} inside root block")
 
     def test_chown_only_runtime_dirs_not_whole_tree(self):
         # Count only actual chown COMMANDS, not prose in comments (the root-init-drop
@@ -111,6 +137,23 @@ class DeployUserNamespaceTests(SimpleTestCase):
         # uid (1001) so the non-root process can write it.
         self.assertIn("/home/deploy/fingpt/runtime:/app/runtime:U", text)
         self.assertNotIn("/home/deploy/fingpt/runtime:/app/runtime ", text)
+
+    def test_execstart_podman_run_has_net_admin_cap(self):
+        # --cap-add=NET_ADMIN is load-bearing (root-in-userns needs it to load nft) and
+        # must be on the ExecStart podman run line SPECIFICALLY -- a whole-file assertIn
+        # would pass if only the pre-cutover validation kept it while ExecStart dropped it.
+        text = _read(DEPLOY_WORKFLOW)
+        execstart = [l for l in text.splitlines() if "--name ${SYSTEMD_UNIT}" in l and "podman run" in l]
+        self.assertTrue(execstart, "ExecStart podman run line not found")
+        for l in execstart:
+            self.assertIn("--cap-add=NET_ADMIN", l)
+
+    def test_compose_api_service_has_net_admin_cap(self):
+        import yaml
+        with open(COMPOSE, "r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+        caps = data["services"]["api"].get("cap_add", [])
+        self.assertIn("NET_ADMIN", caps)
 
     def test_runtime_bind_mount_selinux_relabel_for_nonroot(self):
         text = _read(DEPLOY_WORKFLOW)

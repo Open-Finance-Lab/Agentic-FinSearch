@@ -17,23 +17,35 @@ if [ "$(id -u)" = "0" ]; then
         || { echo "FATAL: egress ruleset missing metadata drop sentinel" >&2; exit 1; }
     grep -qE 'ip6? daddr [0-9a-fA-F].* accept' "$RULES" \
         || { echo "FATAL: egress ruleset missing own-subnet accept" >&2; exit 1; }
+    # Record metadata reachability BEFORE load so the self-test's "unreachable" result is
+    # a true reachable->blocked transition on cloud, not a vacuous pass off-cloud.
+    if python -m ops.egress_firewall --metadata-reachable; then META_BEFORE=1; else META_BEFORE=0; fi
     nft -f "$RULES" \
         || { echo "FATAL: nft failed to load egress ruleset" >&2; exit 1; }
     rm -f "$RULES"
     nft list table inet ssrf_egress >/dev/null 2>&1 \
         || { echo "FATAL: ssrf_egress table absent after load" >&2; exit 1; }
-    # Active proof the DROP bites AND the own-subnet accept did not strand redis/DNS.
-    python -m ops.egress_firewall --self-test \
+    # Active proof the DROP bites (fatal); redis/DNS reachability is advisory (non-fatal)
+    # so a redis blip at reboot cannot fail-close a correct firewall.
+    METADATA_WAS_REACHABLE="$META_BEFORE" python -m ops.egress_firewall --self-test \
         || { echo "FATAL: egress firewall self-test failed" >&2; exit 1; }
     echo "SSRF egress firewall loaded and self-tested."
     # :U chowned the runtime mount to root (PID1 is root); hand it to the app user.
     chown -R fingpt:fingpt /app/runtime
+    # Marker (env survives setpriv) so the app phase can refuse to serve if it was ever
+    # reached WITHOUT this root-init firewall load (e.g. a mistaken non-root PID1 start).
+    export EGRESS_FW_LOADED=1
     # Drop to uid1001, remove NET_ADMIN from the BOUNDING set (so a compromised app
     # cannot re-arm/flush the firewall), set no_new_privs, and re-exec self as fingpt.
     exec setpriv --reuid=1001 --regid=1001 --init-groups \
          --bounding-set=-net_admin --no-new-privs -- "$0" "$@"
 fi
 # ---- app phase (uid 1001) continues below, unchanged ----
+
+# Fail closed if the app phase is ever reached without the root-init firewall load
+# (defends Decision 2: never serve with the SSRF egress firewall absent).
+[ "${EGRESS_FW_LOADED:-}" = "1" ] \
+    || { echo "FATAL: app phase reached without egress firewall (non-root PID1?)" >&2; exit 1; }
 
 REQUIRE_OPENAI_API_KEY="${REQUIRE_OPENAI_API_KEY:-1}"
 

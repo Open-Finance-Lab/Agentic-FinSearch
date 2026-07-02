@@ -20,9 +20,10 @@ from datascraper import ssrf_guard
 
 logger = logging.getLogger(__name__)
 
-# Defense-in-depth for the SSRF egress firewall (matches datascraper.playwright_tools):
-# remove RTCPeerConnection in every frame so a scraped page cannot open WebRTC on
+# Best-effort surface reduction for the SSRF egress firewall (NOT a boundary; matches
+# datascraper.playwright_tools): delete RTCPeerConnection to curb WebRTC egress on
 # Chromium's own socket, which page.route cannot intercept. Paired with --disable-quic.
+# The netns egress firewall is the real boundary.
 _DISABLE_WEBRTC_JS = (
     "delete window.RTCPeerConnection;"
     "delete window.webkitRTCPeerConnection;"

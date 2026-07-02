@@ -45,6 +45,11 @@ _V4_DROP = (
 # destinations egress as real IPv4 packets caught by _V4_DROP.
 _V6_DROP = ("::1/128", "::/128", "fc00::/7", "fe80::/10", "ff00::/8", "64:ff9b::/96")
 
+# A discovered own-v6 subnet must be a real ULA (fc00::/7) or GUA (2000::/3) the container
+# owns -- symmetric with _valid_own's v4 nesting check. (Cross-version subnet_of raises, so
+# v6 cannot reuse the v4 broad-RFC1918 list.)
+_BROAD_V6 = (ipaddress.ip_network("fc00::/7"), ipaddress.ip_network("2000::/3"))
+
 _METADATA = ("169.254.169.254", 80)
 
 
@@ -110,15 +115,16 @@ def discover_own_v4():
 
 def discover_own_v6():
     """Global-scope IPv6 subnets the container owns (empty on a v4-only network like
-    fingpt-net). Accepted as-is so same-net v6 peers stay reachable; the v6 drop block
-    still covers every OTHER v6 range."""
+    fingpt-net). Constrained to real ULA/GUA the container owns (symmetric with the v4
+    nesting check) so same-net v6 peers stay reachable; the v6 drop block still covers
+    every OTHER v6 range."""
     good = []
     for c in _ip_addr_cidrs("-6"):
         try:
             net = ipaddress.ip_network(c, strict=False)
         except ValueError:
             continue
-        if net.version == 6:
+        if net.version == 6 and any(net.subnet_of(b) for b in _BROAD_V6):
             good.append(net)
     return good
 
@@ -137,25 +143,46 @@ def _tcp_ok(host, port, timeout=3):
 
 
 def _self_test():
-    """Prove the firewall is actually enforcing before the app serves. A syntactically
-    valid but wrong ruleset loads fine (nft exit 0) and passes the static /health/ gate,
-    so nft's exit code alone is NOT fail-closed -- this active check is."""
+    """Prove the firewall's DROP is enforcing before the app serves.
+
+    SECURITY-CRITICAL leg (fatal): the metadata IP must be UNREACHABLE after load. This
+    is a sound "the drop bites" proof only where the target is otherwise routable (the
+    prod droplet + the deploy pre-cutover gate). The caller passes METADATA_WAS_REACHABLE
+    so an unreachable result is treated as a true reachable->blocked transition on cloud,
+    and flagged INCONCLUSIVE (warn, not proof) off-cloud (e.g. `docker compose up`), where
+    169.254.169.254 is not served.
+
+    AVAILABILITY legs (WARN, non-fatal): DNS + redis reachability. The prior entrypoint
+    had NO redis/DNS boot dependency (redis is a request-time soft dependency), so making
+    them fatal would regress resilience -- a redis blip at reboot could fail-close a
+    correct firewall. The own-subnet accept's PRESENCE is already guarded upstream (main()
+    fails loud on empty discovery; entrypoint greps for the accept line), so these legs
+    are observability, not a boot gate."""
     if _tcp_ok(*_METADATA):
         sys.stderr.write("FATAL self-test: 169.254.169.254 reachable; egress firewall not enforcing\n")
         return 1
+    if os.getenv("METADATA_WAS_REACHABLE") == "0":
+        sys.stderr.write(
+            "WARN self-test: metadata target was not routable pre-load; the drop-bites "
+            "proof is INCONCLUSIVE on this host (expected off-cloud, e.g. dev compose)\n"
+        )
     host, port = _redis_host_port()
     try:
         socket.gethostbyname(host)
+        dns_ok = True
     except OSError:
-        sys.stderr.write(f"FATAL self-test: cannot resolve {host!r}; DNS egress blocked\n")
-        return 1
-    for _ in range(6):  # tolerate redis cold start (~5s window)
-        if _tcp_ok(host, port):
-            break
-        time.sleep(1)
-    else:
-        sys.stderr.write(f"FATAL self-test: {host}:{port} unreachable; own-subnet accept broken\n")
-        return 1
+        dns_ok = False
+    redis_ok = False
+    if dns_ok:
+        for _ in range(6):  # tolerate redis cold start (~5s window)
+            if _tcp_ok(host, port):
+                redis_ok = True
+                break
+            time.sleep(1)
+    if not dns_ok:
+        sys.stderr.write(f"WARN self-test: cannot resolve {host!r} (DNS/redis may be down); continuing\n")
+    elif not redis_ok:
+        sys.stderr.write(f"WARN self-test: {host}:{port} unreachable (redis may be down); continuing\n")
     return 0
 
 
@@ -170,6 +197,10 @@ def _emit():
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    if "--metadata-reachable" in argv:
+        # For the caller's before/after transition proof: exit 0 iff the metadata IP is
+        # reachable right now (run this BEFORE loading the ruleset).
+        return 0 if _tcp_ok(*_METADATA) else 1
     if "--self-test" in argv:
         return _self_test()
     return _emit()

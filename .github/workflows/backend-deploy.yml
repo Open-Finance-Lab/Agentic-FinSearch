@@ -177,13 +177,18 @@ jobs:
             podman network exists fingpt-net || podman network create fingpt-net
 
             # Redis counter store (atomic incr/decr for agent budget + ratelimit).
-            # Ephemeral cache: no persistence. --replace keeps redeploys idempotent.
-            # Started BEFORE the pre-cutover validation so the firewall self-test (which
-            # asserts redis + DNS are reachable) has redis up on fingpt-net.
-            podman run -d --name fingpt-redis --replace --restart=always \
-              --network fingpt-net \
-              --health-cmd 'redis-cli ping' --health-interval 10s --health-retries 5 \
-              docker.io/library/redis:7-alpine redis-server --save '' --appendonly no
+            # Ephemeral cache: no persistence. Started idempotently (start-if-absent, not
+            # --replace) BEFORE the pre-cutover gate so (a) the firewall self-test has redis
+            # up on fingpt-net, and (b) an ABORTED deploy does not bounce the live redis /
+            # wipe counters for the still-serving old container.
+            if ! podman container exists fingpt-redis; then
+              podman run -d --name fingpt-redis --restart=always \
+                --network fingpt-net \
+                --health-cmd 'redis-cli ping' --health-interval 10s --health-retries 5 \
+                docker.io/library/redis:7-alpine redis-server --save '' --appendonly no
+            else
+              podman start fingpt-redis >/dev/null 2>&1 || true
+            fi
 
             # Pre-cutover firewall validation: prove the NEW image can generate + load the
             # SSRF egress ruleset and pass its self-test on fingpt-net BEFORE the systemctl
@@ -197,9 +202,10 @@ jobs:
                 set -eu
                 RULES=$(mktemp)
                 python -m ops.egress_firewall > "$RULES"
+                if python -m ops.egress_firewall --metadata-reachable; then MB=1; else MB=0; fi
                 nft -f "$RULES"
                 nft list table inet ssrf_egress >/dev/null
-                python -m ops.egress_firewall --self-test
+                METADATA_WAS_REACHABLE=$MB python -m ops.egress_firewall --self-test
               ' || { echo "ERROR: egress firewall pre-cutover validation FAILED; aborting deploy (old container left serving)"; exit 1; }
             echo "Egress firewall pre-cutover validation passed."
 

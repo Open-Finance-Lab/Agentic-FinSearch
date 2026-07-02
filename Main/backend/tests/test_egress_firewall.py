@@ -6,12 +6,15 @@ depend on the runner's interfaces.
 """
 import ipaddress
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import ops.egress_firewall as ef
 from ops.egress_firewall import (
     _V4_DROP,
     _V6_DROP,
@@ -103,3 +106,64 @@ def test_subprocess_invocation_is_hermetic():
     assert r.returncode == 0, r.stderr
     assert "table inet ssrf_egress" in r.stdout
     assert "169.254.0.0/16" in r.stdout
+
+
+# --- discovery parser (security-load-bearing; the override tests above bypass it) ---
+
+def _patch_ip(monkeypatch, stdout):
+    monkeypatch.setattr(ef.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout=stdout))
+    monkeypatch.delenv("EGRESS_OWN_SUBNET", raising=False)
+
+
+def test_discover_own_v4_parses_real_ip_output(monkeypatch):
+    # brd token, secondary addr on a second interface — the parser must pick the CIDR
+    # right after each 'inet', not the brd address or the ifname column.
+    sample = (
+        "2: eth0    inet 10.89.0.26/24 brd 10.89.0.255 scope global eth0\\       valid_lft forever\n"
+        "3: eth1    inet 172.20.0.5/16 brd 172.20.255.255 scope global eth1\\       valid_lft forever\n"
+    )
+    _patch_ip(monkeypatch, sample)
+    assert [str(n) for n in discover_own_v4()] == ["10.89.0.0/24", "172.20.0.0/16"]
+
+
+def test_discover_own_v4_rejects_rogue_special_scope_global(monkeypatch):
+    # A rogue link-local/metadata route showing as scope global must NOT become an accept.
+    sample = (
+        "2: eth0 inet 10.89.0.26/24 brd 10.89.0.255 scope global eth0\n"
+        "3: eth1 inet 169.254.10.5/16 scope global eth1\n"
+    )
+    _patch_ip(monkeypatch, sample)
+    assert [str(n) for n in discover_own_v4()] == ["10.89.0.0/24"]
+
+
+def test_self_test_metadata_reachable_is_fatal(monkeypatch):
+    monkeypatch.setattr(ef, "_tcp_ok", lambda h, p, timeout=3: h == "169.254.169.254")
+    assert ef._self_test() == 1
+
+
+def test_self_test_redis_and_dns_down_is_nonfatal(monkeypatch):
+    # metadata blocked (good) but redis/DNS down -> WARN + continue (0), matching the
+    # prior entrypoint's zero redis-boot-dependency (no resilience regression).
+    monkeypatch.setattr(ef, "_tcp_ok", lambda h, p, timeout=3: False)
+
+    def _boom(_):
+        raise OSError("no dns")
+
+    monkeypatch.setattr(ef.socket, "gethostbyname", _boom)
+    assert ef._self_test() == 0
+
+
+def test_self_test_passes_when_blocked_and_infra_up(monkeypatch):
+    monkeypatch.setattr(ef, "_tcp_ok", lambda h, p, timeout=3: h != "169.254.169.254")
+    monkeypatch.setattr(ef.socket, "gethostbyname", lambda h: "10.89.0.5")
+    assert ef._self_test() == 0
+
+
+def test_entrypoint_grep_sentinels_match_generated_ruleset():
+    # The entrypoint's own-subnet-accept grep pattern must match what the generator emits.
+    entry = (Path(__file__).resolve().parent.parent / "entrypoint.sh").read_text()
+    rs = build_egress_ruleset(["10.89.0.0/24"])
+    assert "169.254.0.0/16" in entry and "169.254.0.0/16" in rs
+    m = re.search(r"grep -qE '([^']+)'", entry)
+    assert m, "own-subnet accept 'grep -qE' pattern not found in entrypoint.sh"
+    assert re.search(m.group(1), rs), f"entrypoint grep {m.group(1)!r} does not match ruleset"

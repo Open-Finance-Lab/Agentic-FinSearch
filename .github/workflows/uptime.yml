@@ -20,13 +20,17 @@ jobs:
       - name: Curl public health endpoint
         run: |
           set -euo pipefail
-          for i in 1 2 3; do
-            if curl -fsS -m 15 https://agenticfinsearch.org/health/ >/dev/null; then
+          # ~180s budget: comfortably past the documented ~130s deploy cold start (the
+          # entrypoint builds the XBRL store before gunicorn listens, behind a --replace
+          # swap), so a tick landing in a deploy window catches recovery instead of crying
+          # wolf. A genuinely dead endpoint (>180s) still alerts.
+          for i in $(seq 1 9); do
+            if curl -fsS -m 10 https://agenticfinsearch.org/health/ >/dev/null; then
               echo "healthy (attempt $i)"
               exit 0
             fi
-            echo "attempt $i failed; retrying in 20s..."
+            echo "attempt $i/9 failed; retrying in 20s..."
             sleep 20
           done
-          echo "::error::agenticfinsearch.org/health/ is DOWN after 3 attempts"
+          echo "::error::agenticfinsearch.org/health/ is DOWN after 9 attempts (~180s)"
           exit 1

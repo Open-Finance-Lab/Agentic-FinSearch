@@ -243,7 +243,43 @@ class ChromiumEgressHardeningTests(SimpleTestCase):
 
     def test_sync_path_disables_webrtc_and_quic(self):
         import datascraper.url_tools as ut
-        text = open(ut.__file__, "r", encoding="utf-8").read()
-        self.assertIn("--disable-quic", text)
-        self.assertIn("add_init_script", text)
-        self.assertIn("RTCPeerConnection", text)
+
+        page = MagicMock()
+        page.url = "http://example.com/x"
+        ctx = MagicMock()
+        ctx.new_page.return_value = page
+        browser = MagicMock()
+        browser.new_context.return_value = ctx
+        launch_kwargs = {}
+
+        def _launch(**kwargs):
+            launch_kwargs.update(kwargs)
+            return browser
+
+        p = MagicMock()
+        p.chromium.launch.side_effect = _launch
+        sp_cm = MagicMock()
+        sp_cm.__enter__.return_value = p
+
+        # Record whether goto had already run at the instant the init script is installed;
+        # it MUST precede navigation or it is inert on the seed page.
+        order = {}
+
+        def _record_init(script):
+            order["goto_at_init"] = page.goto.called
+
+        page.add_init_script.side_effect = _record_init
+
+        with patch("datascraper.ssrf_guard.validate_fetch_url", side_effect=lambda u: u), \
+             patch("datascraper.ssrf_guard.install_route_guard_sync"), \
+             patch("datascraper.url_tools._extract_article_text", return_value="hello world"), \
+             patch("datascraper.url_tools._dismiss_cookie_consent"), \
+             patch("playwright.sync_api.sync_playwright", return_value=sp_cm):
+            ut.scrape_with_playwright("http://example.com/x")
+
+        self.assertIn("--disable-quic", launch_kwargs.get("args", []))
+        page.add_init_script.assert_called_once()
+        script = page.add_init_script.call_args.args[0]
+        self.assertIn("RTCPeerConnection", script)
+        self.assertIn("goto_at_init", order)
+        self.assertFalse(order["goto_at_init"], "add_init_script must precede page.goto")
