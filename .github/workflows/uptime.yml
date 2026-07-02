@@ -1,0 +1,32 @@
+name: Uptime Monitor
+
+# Deploy-independent liveness: the backend fail-closes on a bad egress-firewall load,
+# and a load can fail on a reboot/OOM/kernel update WITHOUT a deploy (which re-runs the
+# entrypoint). This cron curls the PUBLIC endpoint so such an outage is caught within
+# minutes instead of by a user. Zero-infra fallback; GitHub may delay scheduled runs and
+# disables schedules after 60 days of repo inactivity.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Curl public health endpoint
+        run: |
+          set -euo pipefail
+          for i in 1 2 3; do
+            if curl -fsS -m 15 https://agenticfinsearch.org/health/ >/dev/null; then
+              echo "healthy (attempt $i)"
+              exit 0
+            fi
+            echo "attempt $i failed; retrying in 20s..."
+            sleep 20
+          done
+          echo "::error::agenticfinsearch.org/health/ is DOWN after 3 attempts"
+          exit 1
