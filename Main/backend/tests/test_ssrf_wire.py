@@ -175,6 +175,7 @@ class PlaywrightFactoryGuardTests(SimpleTestCase):
         import datascraper.playwright_tools as pt
 
         page = MagicMock(name="page")
+        page.add_init_script = AsyncMock()
         context = MagicMock(name="context")
         context.new_page = AsyncMock(return_value=page)
         browser = MagicMock(name="browser")
@@ -197,3 +198,52 @@ class PlaywrightFactoryGuardTests(SimpleTestCase):
                     self.assertIs(yielded, page)
 
         asyncio.run(run())
+
+
+class ChromiumEgressHardeningTests(SimpleTestCase):
+    """WebRTC/QUIC are disabled at the Chromium layer (defense-in-depth for the netns
+    egress firewall) in BOTH the async factory and the sync fallback: --disable-quic on
+    the launch args, and an init script that removes RTCPeerConnection so page JS cannot
+    open WebRTC at all."""
+
+    def test_async_factory_disables_webrtc_and_quic(self):
+        import datascraper.playwright_tools as pt
+
+        page = MagicMock(name="page")
+        page.add_init_script = AsyncMock()
+        context = MagicMock(name="context")
+        context.new_page = AsyncMock(return_value=page)
+        browser = MagicMock(name="browser")
+        browser.new_context = AsyncMock(return_value=context)
+        browser.close = AsyncMock()
+        launch_kwargs = {}
+
+        async def _launch(**kwargs):
+            launch_kwargs.update(kwargs)
+            return browser
+
+        playwright = MagicMock(name="playwright")
+        playwright.chromium.launch = AsyncMock(side_effect=_launch)
+        playwright.stop = AsyncMock()
+        ap = MagicMock()
+        ap.start = AsyncMock(return_value=playwright)
+
+        async def run():
+            with patch("playwright.async_api.async_playwright", return_value=ap), \
+                 patch("datascraper.ssrf_guard.install_route_guard", new=AsyncMock()):
+                async with pt.PlaywrightBrowser():
+                    pass
+
+        asyncio.run(run())
+        args = launch_kwargs.get("args", [])
+        self.assertIn("--disable-quic", args)
+        page.add_init_script.assert_awaited()
+        script = page.add_init_script.await_args.args[0]
+        self.assertIn("RTCPeerConnection", script)
+
+    def test_sync_path_disables_webrtc_and_quic(self):
+        import datascraper.url_tools as ut
+        text = open(ut.__file__, "r", encoding="utf-8").read()
+        self.assertIn("--disable-quic", text)
+        self.assertIn("add_init_script", text)
+        self.assertIn("RTCPeerConnection", text)

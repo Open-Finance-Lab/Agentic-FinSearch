@@ -20,6 +20,15 @@ from datascraper import ssrf_guard
 
 logger = logging.getLogger(__name__)
 
+# Defense-in-depth for the SSRF egress firewall (matches datascraper.playwright_tools):
+# remove RTCPeerConnection in every frame so a scraped page cannot open WebRTC on
+# Chromium's own socket, which page.route cannot intercept. Paired with --disable-quic.
+_DISABLE_WEBRTC_JS = (
+    "delete window.RTCPeerConnection;"
+    "delete window.webkitRTCPeerConnection;"
+    "delete window.RTCDataChannel;"
+)
+
 backend_dir = Path(__file__).resolve().parent.parent
 load_dotenv(backend_dir / '.env')
 
@@ -202,7 +211,7 @@ def scrape_with_playwright(url: str) -> str:
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
+            browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-quic'])
             try:
                 context = browser.new_context(
                     user_agent=HEADERS['User-Agent'],
@@ -215,6 +224,10 @@ def scrape_with_playwright(url: str) -> str:
                 # seed-only validate_fetch_url checks leave open. Must precede
                 # the first navigation.
                 ssrf_guard.install_route_guard_sync(page)
+                # WebRTC hardening (see _DISABLE_WEBRTC_JS): remove RTCPeerConnection in
+                # every frame so a scraped page cannot open WebRTC on Chromium's own
+                # socket. Must precede the first navigation.
+                page.add_init_script(_DISABLE_WEBRTC_JS)
 
                 logger.info(f"Playwright scraping: {url}")
                 page.goto(url, timeout=30000, wait_until="domcontentloaded")
