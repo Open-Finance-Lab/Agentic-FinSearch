@@ -11,6 +11,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     python3.12-venv \
     python3.12-dev \
     nodejs \
+    nftables \
+    iproute2 \
+    util-linux \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -52,21 +55,23 @@ RUN echo "Verifying Playwright browsers..." && \
     test -d /ms-playwright/chromium_headless_shell-* && \
     echo "✓ Chromium browser found at /ms-playwright"
 
-# Create a non-root runtime user and own ONLY the writable runtime dirs.
-# The application source under /app stays root-owned so a compromised
-# process cannot rewrite code at runtime (P0 Root A.3: no-write-under-/app).
+# Create the non-root runtime user and own ONLY the writable runtime dirs.
+# The application source under /app stays root-owned so a compromised process cannot
+# rewrite code at runtime (P0 Root A.3: no-write-under-/app). PID1 (entrypoint.sh) runs
+# as root-IN-USERNS -- rootless podman keeps that host-unprivileged -- solely to load the
+# SSRF egress firewall (needs CAP_NET_ADMIN) and chown the runtime mount, then
+# setpriv-drops to fingpt (uid1001, NET_ADMIN removed from the bounding set, no_new_privs)
+# so the long-running app is non-root and cannot flush its own firewall. The
+# no-write-under-/app intent holds: the app process is uid1001 and /app is root-owned;
+# only the brief pre-app init is root and it writes nothing under /app except chowning the
+# designated writable runtime mount (see entrypoint.sh; there is deliberately no USER line).
 # /app/runtime is the writable runtime-data volume mountpoint: entrypoint.sh builds the
-# regenerable DuckDB truth-layer store there (from the root-owned, still-read-only
-# vendored companyfacts JSON in the truthlayer/data package dir) BEFORE gunicorn forks, and in
-# production it is a persistent bind mount (podman -v ...:/app/runtime:U) so the store
-# survives restarts. Owning it in the image keeps it writable even with no mount
-# (compose/CI/bare docker run). Only this regenerable artifact dir is fingpt-writable;
-# no application code (.py) becomes writable, so the no-write-under-/app intent holds.
+# regenerable DuckDB truth-layer store there BEFORE gunicorn forks; in production it is a
+# persistent bind mount (podman -v ...:/app/runtime:U,Z) so the store survives restarts.
+# Owning these dirs in the image keeps them writable with no mount (compose/CI/bare run).
 RUN groupadd --system --gid 1001 fingpt \
     && useradd --system --uid 1001 --gid fingpt --no-create-home fingpt \
     && chown -R fingpt:fingpt /app/staticfiles /app/media /app/logs /tmp/fingpt_cache /app/runtime
-
-USER fingpt
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 
