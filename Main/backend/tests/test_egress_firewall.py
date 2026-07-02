@@ -90,13 +90,15 @@ def test_override_env_suppresses_v6_discovery(monkeypatch):
 
 
 # Parity vs ssrf_guard: the two "what is private" definitions must not silently diverge.
-# 100.64/10 (CGNAT) is deliberately EXCLUDED: the firewall drops it, but ssrf_guard's
-# ipaddress-based check does NOT block it on Python 3.12/3.13 (is_private=False) -- a
-# real HTTP-side gap tracked separately, NOT fixed in this egress-firewall PR.
+# CPython's address properties miss two kinds of firewall-dropped space: all of
+# 100.64/10 (CGNAT: neither private nor global to IANA) and the two globally-reachable
+# anycast carve-outs inside 192.0.0.0/24 (192.0.0.9 PCP, 192.0.0.10 NAT64/DNS64
+# discovery, per the post-CVE-2024-4032 registry alignment); ssrf_guard blocks both
+# ranges explicitly (_EXTRA_BLOCKED_NETS).
 _DANGEROUS = [
     "169.254.169.254", "10.1.2.3", "172.16.5.5", "192.168.1.1", "127.0.0.1",
     "0.0.0.0", "255.255.255.255", "198.18.0.1", "192.0.0.170", "240.0.0.1",
-    "::1", "fc00::1", "fe80::1",
+    "100.64.0.1", "192.0.0.9", "192.0.0.10", "::1", "fc00::1", "fe80::1",
 ]
 
 
@@ -107,6 +109,28 @@ def test_parity_with_ssrf_guard_block_list():
         addr = ipaddress.ip_address(ip)
         drops = _V4_DROP if addr.version == 4 else _V6_DROP
         assert any(addr in ipaddress.ip_network(c) for c in drops), f"firewall should drop {ip}"
+
+
+def test_every_firewall_drop_range_blocked_http_side():
+    # Structural parity, the reverse direction of the sample list above: EVERY
+    # range the netns firewall drops must also be blocked by ssrf_guard in-process,
+    # so a range added to _V4_DROP/_V6_DROP can never silently stay fetchable at
+    # the HTTP layer. Ranges up to /16 are enumerated EXHAUSTIVELY (~0.6s total):
+    # IANA carve-outs are single addresses inside small special-purpose blocks
+    # (192.0.0.9/.10 hid from first/middle/last sampling exactly this way), so
+    # sampling a small range proves nothing. Larger ranges get first/middle/last;
+    # their known carve-outs are none, and full enumeration is infeasible.
+    for cidr in _V4_DROP + _V6_DROP:
+        net = ipaddress.ip_network(cidr)
+        if net.num_addresses <= 65536:
+            addrs = iter(net)
+        else:
+            addrs = iter({net.network_address, net.broadcast_address,
+                          net.network_address + net.num_addresses // 2})
+        for addr in addrs:
+            assert ssrf_guard._is_blocked_ip(str(addr)), (
+                f"{addr} is in firewall-dropped {cidr} but ssrf_guard does not block it"
+            )
 
 
 def test_subprocess_invocation_is_hermetic():

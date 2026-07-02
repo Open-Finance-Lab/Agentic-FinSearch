@@ -64,6 +64,22 @@ class NormalizeAndBlockTests(SimpleTestCase):
                    "::ffff:10.0.0.1", "fe80::1", "224.0.0.1"):
             self.assertTrue(ssrf_guard._is_blocked_ip(ip), ip)
 
+    def test_blocks_cgnat_shared_address_space(self):
+        # RFC 6598 100.64.0.0/10 is neither private nor reserved to CPython's
+        # ipaddress (IANA: neither private nor globally reachable), so the
+        # property checks alone let it through -- it needs the explicit range.
+        for ip in ("100.64.0.0", "100.64.0.1", "100.96.0.5",
+                   "100.127.255.255", "::ffff:100.64.0.1"):
+            self.assertTrue(ssrf_guard._is_blocked_ip(ip), ip)
+
+    def test_blocks_ietf_protocol_anycast_carveouts(self):
+        # CPython (post CVE-2024-4032 IANA alignment) carves 192.0.0.9 (PCP
+        # anycast) and 192.0.0.10 (NAT64/DNS64 discovery) out of the otherwise
+        # is_private 192.0.0.0/24, so the property checks alone let exactly
+        # those two through -- the explicit range must cover the whole /24.
+        for ip in ("192.0.0.9", "192.0.0.10", "::ffff:192.0.0.9"):
+            self.assertTrue(ssrf_guard._is_blocked_ip(ip), ip)
+
     def test_public_ips_allowed(self):
         for ip in ("8.8.8.8", "93.184.216.34", "1.1.1.1"):
             self.assertFalse(ssrf_guard._is_blocked_ip(ip), ip)
