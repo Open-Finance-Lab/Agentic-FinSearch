@@ -7,6 +7,7 @@ These lock the Dockerfile / deploy invariants so a later edit cannot
 silently re-root the container or widen the chown back to the whole tree.
 """
 import os
+import re
 
 from django.test import SimpleTestCase
 
@@ -47,16 +48,11 @@ class DockerfileNonRootTests(SimpleTestCase):
     def test_app_drops_to_nonroot_via_entrypoint_root_init_drop(self):
         # Root-init-drop: PID1 must be root-in-userns to load the SSRF egress firewall
         # (nft needs CAP_NET_ADMIN), so the Dockerfile deliberately has NO `USER` line;
-        # entrypoint.sh drops to the non-root uid1001 (fingpt) via setpriv, removing
-        # NET_ADMIN from the bounding set + setting no_new_privs, BEFORE running the app.
-        # The no-write-under-/app posture holds: the long-running app is uid1001.
+        # entrypoint.sh drops to the non-root uid1001 (fingpt) via setpriv BEFORE running
+        # the app. The setpriv statement itself (full flag set + last-statement position)
+        # is pinned by test_privilege_drop_is_last_statement_of_root_init_block.
         self.assertNotIn("\nUSER ", self.text, "Dockerfile must NOT set a USER (root-init-drop)")
-        entry = _read(ENTRYPOINT_SH)
-        self.assertIn("setpriv", entry)
-        self.assertIn("--reuid=1001", entry)
-        self.assertIn("--regid=1001", entry)
-        self.assertIn("--bounding-set=-net_admin", entry)
-        self.assertIn("--no-new-privs", entry)
+        self.assertIn("setpriv", _read(ENTRYPOINT_SH))
 
     def test_privilege_drop_is_last_statement_of_root_init_block(self):
         # Structural: the root-init `if [ id -u == 0 ]` block must END with the setpriv
@@ -66,19 +62,17 @@ class DockerfileNonRootTests(SimpleTestCase):
         lines = _read(ENTRYPOINT_SH).splitlines()
         start = next(i for i, l in enumerate(lines) if "id -u" in l and "then" in l)
         end = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == "fi")
-        logical, buf = [], ""
-        for l in lines[start + 1:end]:
-            s = l.strip()
-            if not s or s.startswith("#"):
-                continue
-            buf += ((" " if buf else "") + s.rstrip("\\").strip())
-            if not l.rstrip().endswith("\\"):
-                logical.append(buf)
-                buf = ""
-        self.assertTrue(logical[-1].startswith("exec setpriv"), logical[-1])
-        self.assertIn('-- "$0" "$@"', logical[-1])
-        self.assertIn("--bounding-set=-net_admin", logical[-1])
-        self.assertIn("--no-new-privs", logical[-1])
+        block = re.sub(r"\\\n\s*", " ", "\n".join(lines[start + 1:end]))
+        logical = [s.strip() for s in block.splitlines()
+                   if s.strip() and not s.strip().startswith("#")]
+        drop = logical[-1]
+        self.assertTrue(drop.startswith("exec setpriv"), drop)
+        self.assertIn('-- "$0" "$@"', drop)
+        # The full flag set is asserted HERE, on the actual exec statement -- a whole-file
+        # substring check would pass with the flags on any line of the script.
+        for flag in ("--reuid=1001", "--regid=1001", "--init-groups",
+                     "--bounding-set=-net_admin", "--no-new-privs"):
+            self.assertIn(flag, drop)
         joined = "\n".join(logical)
         for marker in ("gunicorn", "collectstatic", "truthlayer", "REQUIRE_OPENAI_API_KEY"):
             self.assertNotIn(marker, joined, f"app-phase marker {marker!r} inside root block")
@@ -154,6 +148,28 @@ class DeployUserNamespaceTests(SimpleTestCase):
             data = yaml.safe_load(fh)
         caps = data["services"]["api"].get("cap_add", [])
         self.assertIn("NET_ADMIN", caps)
+
+    def test_precutover_gate_runs_real_entrypoint_check_only(self):
+        # The deploy's pre-cutover gate must exercise the image's REAL entrypoint via
+        # --egress-check-only, not an inline re-copy of the root-init sequence: a
+        # hand-copied gate can silently drift from what PID1 actually runs at cutover
+        # (the previous inline copy had already dropped the [ -s ] and grep-sentinel
+        # guards). No --entrypoint override may bypass it anywhere in the deploy.
+        wf = _read(DEPLOY_WORKFLOW)
+        self.assertIn("--egress-check-only", wf)
+        self.assertNotIn("--entrypoint", wf)
+        # Placement in entrypoint.sh is load-bearing: the check-only exit must come
+        # AFTER the setpriv drop (above the root-init block it would exit 0 with NO
+        # firewall loaded -- a vacuous gate) and BEFORE the app phase's heavy store
+        # build (so the gate stays fast and dependency-free).
+        entry_lines = _read(ENTRYPOINT_SH).splitlines()
+        flag_idx = next(i for i, l in enumerate(entry_lines)
+                        if "--egress-check-only" in l and l.lstrip().startswith("if "))
+        setpriv_idx = next(i for i, l in enumerate(entry_lines)
+                           if l.lstrip().startswith("exec setpriv"))
+        store_idx = next(i for i, l in enumerate(entry_lines) if "_ensure_built" in l)
+        self.assertGreater(flag_idx, setpriv_idx)
+        self.assertLess(flag_idx, store_idx)
 
     def test_runtime_bind_mount_selinux_relabel_for_nonroot(self):
         text = _read(DEPLOY_WORKFLOW)

@@ -38,7 +38,7 @@ async def PlaywrightBrowser(timeout: int = 30000):
         browser = await playwright.chromium.launch(
             headless=True,
             args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-                  '--disable-quic']
+                  *ssrf_guard.CHROMIUM_HARDENING_ARGS]
         )
 
         context = await browser.new_context(

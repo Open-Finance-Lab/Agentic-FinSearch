@@ -49,6 +49,18 @@ fi
 [ "${EGRESS_FW_LOADED:-}" = "1" ] \
     || { echo "FATAL: app phase reached without egress firewall (non-root PID1?)" >&2; exit 1; }
 
+# Deploy pre-cutover gate mode (see backend-deploy.yml): everything the gate needs has
+# already run above -- the FULL root-init (generate + sentinel checks + nft load +
+# transition-proof self-test) plus the setpriv drop and the marker guard. Exit before
+# the app phase's heavy work (store build, collectstatic). Running the gate through
+# THIS script means it can never drift from what PID1 actually runs at boot.
+# Placement is load-bearing (pinned by test_dockerfile_nonroot): above the root-init
+# block this flag would exit 0 with NO firewall loaded -- a vacuous gate.
+if [ "${1:-}" = "--egress-check-only" ]; then
+    echo "Egress firewall check-only: root-init completed; skipping app phase."
+    exit 0
+fi
+
 REQUIRE_OPENAI_API_KEY="${REQUIRE_OPENAI_API_KEY:-1}"
 
 if [ "$REQUIRE_OPENAI_API_KEY" = "1" ] && [ -z "${OPENAI_API_KEY:-}" ]; then

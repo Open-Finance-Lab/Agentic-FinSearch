@@ -24,6 +24,8 @@ from ops.egress_firewall import (
 )
 from datascraper import ssrf_guard
 
+_BACKEND = Path(__file__).resolve().parent.parent
+
 
 def test_v4_drop_ranges_all_present():
     rs = build_egress_ruleset(["10.89.0.0/24"])
@@ -76,6 +78,17 @@ def test_override_env(monkeypatch):
     assert [str(n) for n in discover_own_v4()] == ["10.89.0.0/24"]
 
 
+def test_override_env_suppresses_v6_discovery(monkeypatch):
+    # The override is the COMPLETE own-subnet spec: v6 discovery must not shell out
+    # either, keeping the override path hermetic on hosts without iproute2.
+    monkeypatch.setenv("EGRESS_OWN_SUBNET", "10.89.0.0/24")
+    monkeypatch.setattr(
+        ef.subprocess, "run",
+        lambda *a, **k: pytest.fail("override must suppress the ip subprocess"),
+    )
+    assert ef.discover_own_v6() == []
+
+
 # Parity vs ssrf_guard: the two "what is private" definitions must not silently diverge.
 # 100.64/10 (CGNAT) is deliberately EXCLUDED: the firewall drops it, but ssrf_guard's
 # ipaddress-based check does NOT block it on Python 3.12/3.13 (is_private=False) -- a
@@ -98,10 +111,9 @@ def test_parity_with_ssrf_guard_block_list():
 
 def test_subprocess_invocation_is_hermetic():
     env = dict(os.environ, EGRESS_OWN_SUBNET="10.89.0.0/24")
-    backend = Path(__file__).resolve().parent.parent
     r = subprocess.run(
         [sys.executable, "-m", "ops.egress_firewall"],
-        cwd=backend, env=env, capture_output=True, text=True,
+        cwd=_BACKEND, env=env, capture_output=True, text=True,
     )
     assert r.returncode == 0, r.stderr
     assert "table inet ssrf_egress" in r.stdout
@@ -161,9 +173,12 @@ def test_self_test_passes_when_blocked_and_infra_up(monkeypatch):
 
 def test_entrypoint_grep_sentinels_match_generated_ruleset():
     # The entrypoint's own-subnet-accept grep pattern must match what the generator emits.
-    entry = (Path(__file__).resolve().parent.parent / "entrypoint.sh").read_text()
+    entry = (_BACKEND / "entrypoint.sh").read_text()
     rs = build_egress_ruleset(["10.89.0.0/24"])
     assert "169.254.0.0/16" in entry and "169.254.0.0/16" in rs
     m = re.search(r"grep -qE '([^']+)'", entry)
     assert m, "own-subnet accept 'grep -qE' pattern not found in entrypoint.sh"
     assert re.search(m.group(1), rs), f"entrypoint grep {m.group(1)!r} does not match ruleset"
+    # The entrypoint's post-load table check must use the SAME table name the generator
+    # creates (the literal is spelled in both places; pin them together).
+    assert f"nft list table inet {ef.TABLE}" in entry

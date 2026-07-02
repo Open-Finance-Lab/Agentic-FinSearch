@@ -29,6 +29,7 @@ Public contract (do not rename):
     install_route_guard_sync(page) (sync, Playwright)
     assert_safe_page_url(page)     (async, Playwright)
     DISABLE_WEBRTC_JS              (init-script string, Playwright)
+    CHROMIUM_HARDENING_ARGS        (launch-args tuple, Playwright)
 """
 import asyncio
 import ipaddress
@@ -76,14 +77,20 @@ _POOL_MAXSIZE = int(os.getenv("SCRAPE_POOL_MAXSIZE", "20"))
 # and page.route cannot intercept it (Chromium egresses it on its own socket). Installed
 # as a pre-navigation init script by BOTH scraper paths (the playwright_tools async
 # factory and the url_tools sync fallback) — defined once HERE so the two paths cannot
-# drift. Paired with --disable-quic on the launch args. A fresh realm could re-obtain
-# the deleted constructor, so the netns egress firewall (ops/egress_firewall.py) remains
-# the actual boundary; this only shrinks the surface for the public-egress residual.
+# drift. Paired with CHROMIUM_HARDENING_ARGS on the launch args. A fresh realm could
+# re-obtain the deleted constructor, so the netns egress firewall (ops/egress_firewall.py)
+# remains the actual boundary; this only shrinks the surface for the public-egress residual.
 DISABLE_WEBRTC_JS = (
     "delete window.RTCPeerConnection;"
     "delete window.webkitRTCPeerConnection;"
     "delete window.RTCDataChannel;"
 )
+
+# The launch-args half of the same surface reduction, consumed by BOTH launch sites
+# (playwright_tools async factory + url_tools sync fallback) so a hardening flag can
+# never be added to one path only. QUIC would otherwise carry HTTP/3 on Chromium's own
+# UDP socket, past page.route exactly like WebRTC.
+CHROMIUM_HARDENING_ARGS = ("--disable-quic",)
 
 # Response headers that must NOT be forwarded when fulfilling a Playwright route
 # from a safe_get response: requests has already decoded the body (so a stale

@@ -85,32 +85,42 @@ def build_egress_ruleset(own_v4_cidrs, own_v6_cidrs=()):
     return "\n".join(lines) + "\n"
 
 
-def _valid_own(cidrs):
-    """Keep only CIDRs that are a private IPv4 container subnet nested in a broad
-    RFC1918 range (so a special/metadata range can never be accepted)."""
+def _nets_within(cidrs, version, broads):
+    """Parse ``cidrs`` and keep only ``version`` networks nested inside one of
+    ``broads``. The ONE shared implementation of the security-load-bearing nesting
+    guard (v4: broad RFC1918; v6: real ULA/GUA), so a fix to it can never land in
+    one address family only."""
     good = []
     for c in cidrs:
         try:
             net = ipaddress.ip_network(c, strict=False)
         except ValueError:
             continue
-        if net.version == 4 and net.is_private and any(net.subnet_of(b) for b in _BROAD_RFC1918):
+        if net.version == version and any(net.subnet_of(b) for b in broads):
             good.append(net)
     return good
 
 
+def _valid_own(cidrs):
+    """Private IPv4 container subnets only (so a special/metadata range can never be
+    accepted). RFC1918 nesting already implies ``is_private``; the extra check is
+    belt-and-braces at zero cost."""
+    return [n for n in _nets_within(cidrs, 4, _BROAD_RFC1918) if n.is_private]
+
+
 def _ip_addr_cidrs(family):
-    """Global-scope CIDRs from ``ip -o <family> addr show scope global``."""
+    """Global-scope CIDRs from ``ip -o <family> addr show scope global``. ``family``
+    is ``-4`` or ``-6``, so exactly one address key can appear in the output."""
     out = subprocess.run(
         ["ip", "-o", family, "addr", "show", "scope", "global"],
         capture_output=True, text=True, check=True,
     ).stdout
+    key = "inet6" if family == "-6" else "inet"
     cidrs = []
     for line in out.splitlines():
         parts = line.split()
-        for key in ("inet", "inet6"):
-            if key in parts:
-                cidrs.append(parts[parts.index(key) + 1])
+        if key in parts:
+            cidrs.append(parts[parts.index(key) + 1])
     return cidrs
 
 
@@ -125,16 +135,13 @@ def discover_own_v6():
     """Global-scope IPv6 subnets the container owns (empty on a v4-only network like
     fingpt-net). Constrained to real ULA/GUA the container owns (symmetric with the v4
     nesting check) so same-net v6 peers stay reachable; the v6 drop block still covers
-    every OTHER v6 range."""
-    good = []
-    for c in _ip_addr_cidrs("-6"):
-        try:
-            net = ipaddress.ip_network(c, strict=False)
-        except ValueError:
-            continue
-        if net.version == 6 and any(net.subnet_of(b) for b in _BROAD_V6):
-            good.append(net)
-    return good
+    every OTHER v6 range. An EGRESS_OWN_SUBNET override is the COMPLETE own-subnet
+    spec: it suppresses discovery here too, keeping the override path fully hermetic
+    (no ``ip`` subprocess on hosts without iproute2); omitting the v6 accepts under
+    override can only fail closed."""
+    if os.getenv("EGRESS_OWN_SUBNET"):
+        return []
+    return _nets_within(_ip_addr_cidrs("-6"), 6, _BROAD_V6)
 
 
 def _redis_host_port():

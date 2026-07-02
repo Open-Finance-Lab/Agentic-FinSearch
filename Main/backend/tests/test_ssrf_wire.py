@@ -25,6 +25,56 @@ def _fake_html_response(text: str) -> MagicMock:
     return resp
 
 
+def _async_pw_mocks():
+    """Mock chain for pt.PlaywrightBrowser: async_playwright().start() -> playwright
+    .chromium.launch(**kw) -> browser.new_context() -> context.new_page() -> page.
+    Returns (ap, page, launch_kwargs); launch kwargs are captured so hardening tests
+    can assert on them. ONE scaffold shared by the factory-guard and Chromium-hardening
+    tests, so a change to the factory's call chain is fixed in one place."""
+    page = MagicMock(name="page")
+    page.add_init_script = AsyncMock()
+    context = MagicMock(name="context")
+    context.new_page = AsyncMock(return_value=page)
+    browser = MagicMock(name="browser")
+    browser.new_context = AsyncMock(return_value=context)
+    browser.close = AsyncMock()
+    launch_kwargs = {}
+
+    async def _launch(**kwargs):
+        launch_kwargs.update(kwargs)
+        return browser
+
+    playwright = MagicMock(name="playwright")
+    playwright.chromium.launch = AsyncMock(side_effect=_launch)
+    playwright.stop = AsyncMock()
+    ap = MagicMock()
+    ap.start = AsyncMock(return_value=playwright)
+    return ap, page, launch_kwargs
+
+
+def _sync_pw_mocks():
+    """Sync-fallback twin of _async_pw_mocks for url_tools.scrape_with_playwright:
+    sync_playwright() (context manager) -> p.chromium.launch(**kw) -> browser
+    .new_context() -> context.new_page() -> page. Returns (sp_cm, page, launch_kwargs)."""
+    page = MagicMock()
+    page.url = "http://example.com/x"
+    ctx = MagicMock()
+    ctx.new_page.return_value = page
+    browser = MagicMock()
+    browser.new_context.return_value = ctx
+    launch_kwargs = {}
+
+    def _launch(**kwargs):
+        launch_kwargs.update(kwargs)
+        return browser
+
+    p = MagicMock()
+    p.chromium.launch.side_effect = _launch
+    sp_cm = MagicMock()
+    sp_cm.__enter__.return_value = p
+    return sp_cm, page, launch_kwargs
+
+
 class ScrapeUrlSinkTests(SimpleTestCase):
     """_scrape_url_impl must fetch only via ssrf_guard.safe_get."""
 
@@ -87,16 +137,7 @@ class PlaywrightFallbackRouteGuardTests(SimpleTestCase):
     Chromium subresources are pinned, not only the seed + post-nav URL."""
 
     def test_scrape_with_playwright_installs_sync_route_guard(self):
-        page = MagicMock()
-        page.url = "http://example.com/x"
-        ctx = MagicMock()
-        ctx.new_page.return_value = page
-        browser = MagicMock()
-        browser.new_context.return_value = ctx
-        p = MagicMock()
-        p.chromium.launch.return_value = browser
-        sp_cm = MagicMock()
-        sp_cm.__enter__.return_value = p
+        sp_cm, page, _ = _sync_pw_mocks()
 
         # Record whether the navigation had already happened at the instant the
         # guard is installed. The guard MUST precede page.goto, else the seed
@@ -174,18 +215,7 @@ class PlaywrightFactoryGuardTests(SimpleTestCase):
     def test_factory_installs_route_guard_on_yielded_page(self):
         import datascraper.playwright_tools as pt
 
-        page = MagicMock(name="page")
-        page.add_init_script = AsyncMock()
-        context = MagicMock(name="context")
-        context.new_page = AsyncMock(return_value=page)
-        browser = MagicMock(name="browser")
-        browser.new_context = AsyncMock(return_value=context)
-        browser.close = AsyncMock()
-        playwright = MagicMock(name="playwright")
-        playwright.chromium.launch = AsyncMock(return_value=browser)
-        playwright.stop = AsyncMock()
-        ap = MagicMock()
-        ap.start = AsyncMock(return_value=playwright)
+        ap, page, _ = _async_pw_mocks()
 
         async def run():
             with patch("playwright.async_api.async_playwright", return_value=ap), \
@@ -209,24 +239,7 @@ class ChromiumEgressHardeningTests(SimpleTestCase):
     def test_async_factory_disables_webrtc_and_quic(self):
         import datascraper.playwright_tools as pt
 
-        page = MagicMock(name="page")
-        page.add_init_script = AsyncMock()
-        context = MagicMock(name="context")
-        context.new_page = AsyncMock(return_value=page)
-        browser = MagicMock(name="browser")
-        browser.new_context = AsyncMock(return_value=context)
-        browser.close = AsyncMock()
-        launch_kwargs = {}
-
-        async def _launch(**kwargs):
-            launch_kwargs.update(kwargs)
-            return browser
-
-        playwright = MagicMock(name="playwright")
-        playwright.chromium.launch = AsyncMock(side_effect=_launch)
-        playwright.stop = AsyncMock()
-        ap = MagicMock()
-        ap.start = AsyncMock(return_value=playwright)
+        ap, page, launch_kwargs = _async_pw_mocks()
 
         async def run():
             with patch("playwright.async_api.async_playwright", return_value=ap), \
@@ -247,22 +260,7 @@ class ChromiumEgressHardeningTests(SimpleTestCase):
     def test_sync_path_disables_webrtc_and_quic(self):
         import datascraper.url_tools as ut
 
-        page = MagicMock()
-        page.url = "http://example.com/x"
-        ctx = MagicMock()
-        ctx.new_page.return_value = page
-        browser = MagicMock()
-        browser.new_context.return_value = ctx
-        launch_kwargs = {}
-
-        def _launch(**kwargs):
-            launch_kwargs.update(kwargs)
-            return browser
-
-        p = MagicMock()
-        p.chromium.launch.side_effect = _launch
-        sp_cm = MagicMock()
-        sp_cm.__enter__.return_value = p
+        sp_cm, page, launch_kwargs = _sync_pw_mocks()
 
         # Record whether goto had already run at the instant the init script is installed;
         # it MUST precede navigation or it is inert on the seed page.

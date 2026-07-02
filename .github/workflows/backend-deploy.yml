@@ -196,23 +196,20 @@ jobs:
               podman start fingpt-redis >/dev/null 2>&1 || true
             fi
 
-            # Pre-cutover firewall validation: prove the NEW image can generate + load the
-            # SSRF egress ruleset and pass its self-test on fingpt-net BEFORE the systemctl
-            # restart's --replace kills the currently-serving container. On failure, abort
+            # Pre-cutover firewall validation: run the NEW image's REAL entrypoint in
+            # check-only mode on fingpt-net BEFORE the systemctl restart's --replace kills
+            # the currently-serving container. --egress-check-only exercises the byte-
+            # identical root-init PID1 runs at cutover (generate + sentinel checks + nft
+            # load + transition-proof self-test + setpriv drop), then exits before the app
+            # phase; an inline re-copy of that sequence (this step's previous shape) can
+            # silently drift from the boot path it is supposed to prove. On failure, abort
             # so the OLD container keeps serving (there is no auto-rollback). This closes
             # the CI-invisible gap: the test job is pytest-only and never touches nft/netns.
             echo "Validating egress firewall on the new image (pre-cutover)..."
             podman run --rm --cap-add=NET_ADMIN --network fingpt-net \
               --env REDIS_URL=redis://fingpt-redis:6379/0 \
-              --entrypoint sh "$REMOTE_IMAGE" -c '
-                set -eu
-                RULES=$(mktemp)
-                python -m ops.egress_firewall > "$RULES"
-                if python -m ops.egress_firewall --metadata-reachable; then MB=1; else MB=0; fi
-                nft -f "$RULES"
-                nft list table inet ssrf_egress >/dev/null
-                METADATA_WAS_REACHABLE=$MB python -m ops.egress_firewall --self-test
-              ' || { echo "ERROR: egress firewall pre-cutover validation FAILED; aborting deploy (old container left serving)"; exit 1; }
+              "$REMOTE_IMAGE" --egress-check-only \
+              || { echo "ERROR: egress firewall pre-cutover validation FAILED; aborting deploy (old container left serving)"; exit 1; }
             echo "Egress firewall pre-cutover validation passed."
 
             # Record the currently-deployed image for manual rollback (no auto-rollback).

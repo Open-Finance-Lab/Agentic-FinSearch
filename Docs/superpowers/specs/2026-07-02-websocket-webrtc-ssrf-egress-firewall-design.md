@@ -199,6 +199,12 @@ Deliberate choices, each from the design review:
   ssrf_egress >/dev/null && python -m ops.egress_firewall --self-test'`. **Abort the deploy on
   failure** so the old container keeps serving. This converts a catastrophic mid-swap fail-closed
   into a safe no-op abort and closes the CI-invisible gap.
+  **AMENDED at implementation (simplify pass):** the gate no longer inlines that sequence — it runs
+  the image's REAL entrypoint via `podman run … "$REMOTE_IMAGE" --egress-check-only` (a flag
+  entrypoint.sh handles after the setpriv drop, exiting before the app phase). An inline copy can
+  silently drift from the boot path it is supposed to prove (and had: it lacked the `[ -s ]` and
+  grep-sentinel guards); the flag form exercises the byte-identical root-init PID1 runs at cutover.
+  Wiring pinned by `test_dockerfile_nonroot.test_precutover_gate_runs_real_entrypoint_check_only`.
 - Record/echo the previously-deployed image digest before restart, and add a one-line manual
   rollback note to the deploy log for the no-auto-rollback case.
 

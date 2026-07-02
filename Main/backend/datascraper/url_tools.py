@@ -202,7 +202,7 @@ def scrape_with_playwright(url: str) -> str:
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-quic'])
+            browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox', *ssrf_guard.CHROMIUM_HARDENING_ARGS])
             try:
                 context = browser.new_context(
                     user_agent=HEADERS['User-Agent'],
