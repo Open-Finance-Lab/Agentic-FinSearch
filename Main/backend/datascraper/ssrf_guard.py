@@ -125,8 +125,9 @@ class UnsafeURLError(ValueError):
 #     CPython added in the post-CVE-2024-4032 IANA alignment: 192.0.0.9 (PCP,
 #     RFC 7723) and 192.0.0.10 (TURN anycast, RFC 8155). A scraper has no
 #     business at either, and the firewall drops the whole /24, so block it whole.
-# Full-range parity with the firewall (exhaustive for small ranges) is pinned by
-# tests/test_egress_firewall.py::test_every_firewall_drop_range_blocked_http_side.
+# Both directions of parity with the firewall (drop-implies-blocked, exhaustively
+# for small ranges; and each entry here nests inside a drop range) are pinned by
+# the structural tests in tests/test_egress_firewall.py.
 _EXTRA_BLOCKED_NETS = (
     ipaddress.ip_network("100.64.0.0/10"),
     ipaddress.ip_network("192.0.0.0/24"),
