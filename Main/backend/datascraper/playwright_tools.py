@@ -14,6 +14,7 @@ from datascraper import ssrf_guard
 
 logger = logging.getLogger(__name__)
 
+
 @asynccontextmanager
 async def PlaywrightBrowser(timeout: int = 30000):
     """
@@ -36,7 +37,8 @@ async def PlaywrightBrowser(timeout: int = 30000):
         playwright = await async_playwright().start()
         browser = await playwright.chromium.launch(
             headless=True,
-            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+                  *ssrf_guard.CHROMIUM_HARDENING_ARGS]
         )
 
         context = await browser.new_context(
@@ -50,6 +52,10 @@ async def PlaywrightBrowser(timeout: int = 30000):
         # async entrypoints (and any future one) are pinned without each having
         # to remember the call. See datascraper.ssrf_guard.install_route_guard.
         await ssrf_guard.install_route_guard(page)
+        # WebRTC hardening (best-effort, not a boundary): remove RTCPeerConnection before
+        # page scripts run to curb WebRTC egress on Chromium's own socket (which the route
+        # guard cannot intercept). The netns egress firewall is the real boundary.
+        await page.add_init_script(ssrf_guard.DISABLE_WEBRTC_JS)
 
         yield page
 

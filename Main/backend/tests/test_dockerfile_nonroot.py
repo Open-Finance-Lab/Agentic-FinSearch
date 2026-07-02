@@ -7,14 +7,17 @@ These lock the Dockerfile / deploy invariants so a later edit cannot
 silently re-root the container or widen the chown back to the whole tree.
 """
 import os
+import re
 
 from django.test import SimpleTestCase
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DOCKERFILE = os.path.join(_HERE, "..", "Dockerfile")
+ENTRYPOINT_SH = os.path.join(_HERE, "..", "entrypoint.sh")
 DEPLOY_WORKFLOW = os.path.join(
     _HERE, "..", "..", "..", ".github", "workflows", "backend-deploy.yml"
 )
+COMPOSE = os.path.join(_HERE, "..", "..", "..", "docker-compose.yml")
 
 RUNTIME_DIRS = ["/app/staticfiles", "/app/media", "/app/logs", "/tmp/fingpt_cache", "/app/runtime"]
 
@@ -42,11 +45,44 @@ class DockerfileNonRootTests(SimpleTestCase):
             self.text,
         )
 
-    def test_switches_to_nonroot_user(self):
-        self.assertIn("\nUSER fingpt\n", self.text)
+    def test_app_drops_to_nonroot_via_entrypoint_root_init_drop(self):
+        # Root-init-drop: PID1 must be root-in-userns to load the SSRF egress firewall
+        # (nft needs CAP_NET_ADMIN), so the Dockerfile deliberately has NO `USER` line;
+        # entrypoint.sh drops to the non-root uid1001 (fingpt) via setpriv BEFORE running
+        # the app. The setpriv statement itself (full flag set + last-statement position)
+        # is pinned by test_privilege_drop_is_last_statement_of_root_init_block.
+        self.assertNotIn("\nUSER ", self.text, "Dockerfile must NOT set a USER (root-init-drop)")
+        self.assertIn("setpriv", _read(ENTRYPOINT_SH))
+
+    def test_privilege_drop_is_last_statement_of_root_init_block(self):
+        # Structural: the root-init `if [ id -u == 0 ]` block must END with the setpriv
+        # exec, and NO app-phase work (gunicorn/collectstatic/truthlayer/OPENAI gate) may
+        # run inside it -- else the app would run as root. Substring presence is not enough
+        # (dropping `exec` or hoisting an app line above setpriv keeps all substrings).
+        lines = _read(ENTRYPOINT_SH).splitlines()
+        start = next(i for i, l in enumerate(lines) if "id -u" in l and "then" in l)
+        end = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == "fi")
+        block = re.sub(r"\\\n\s*", " ", "\n".join(lines[start + 1:end]))
+        logical = [s.strip() for s in block.splitlines()
+                   if s.strip() and not s.strip().startswith("#")]
+        drop = logical[-1]
+        self.assertTrue(drop.startswith("exec setpriv"), drop)
+        self.assertIn('-- "$0" "$@"', drop)
+        # The full flag set is asserted HERE, on the actual exec statement -- a whole-file
+        # substring check would pass with the flags on any line of the script.
+        for flag in ("--reuid=1001", "--regid=1001", "--init-groups",
+                     "--bounding-set=-net_admin", "--no-new-privs"):
+            self.assertIn(flag, drop)
+        joined = "\n".join(logical)
+        for marker in ("gunicorn", "collectstatic", "truthlayer", "REQUIRE_OPENAI_API_KEY"):
+            self.assertNotIn(marker, joined, f"app-phase marker {marker!r} inside root block")
 
     def test_chown_only_runtime_dirs_not_whole_tree(self):
-        chown_lines = [l for l in self.lines if "chown" in l]
+        # Count only actual chown COMMANDS, not prose in comments (the root-init-drop
+        # comment block legitimately mentions chowning the runtime mount).
+        chown_lines = [
+            l for l in self.lines if "chown" in l and not l.strip().startswith("#")
+        ]
         self.assertEqual(
             len(chown_lines), 1, f"expected exactly one chown line, got {chown_lines}"
         )
@@ -62,18 +98,17 @@ class DockerfileNonRootTests(SimpleTestCase):
         # snapshots) stays root-owned and read-only, restoring no-write-under-/app.
         self.assertNotIn("/app/truthlayer/data", chown)
 
-    def test_user_switch_after_last_root_run_before_entrypoint(self):
+    def test_chown_after_last_root_run_before_entrypoint(self):
         ln_idx = self._index_of("ln -sf /ms-playwright")
         verify_idx = self._index_of("Chromium browser found")
         chown_idx = self._index_of("chown -R fingpt:fingpt")
-        user_idx = self._index_of("USER fingpt")
         entry_idx = self._index_of('ENTRYPOINT ["/app/entrypoint.sh"]')
-        # USER comes after the last root RUN (the /usr/bin symlink + browser verify)
-        # and after the chown, then immediately before ENTRYPOINT.
-        self.assertGreater(user_idx, ln_idx)
-        self.assertGreater(user_idx, verify_idx)
-        self.assertGreater(user_idx, chown_idx)
-        self.assertLess(user_idx, entry_idx)
+        # The chown comes after the last root RUN (the /usr/bin symlink + browser verify)
+        # and before ENTRYPOINT. There is no Dockerfile USER line (root-init-drop): the
+        # privilege drop to uid1001 happens at runtime in entrypoint.sh via setpriv.
+        self.assertGreater(chown_idx, ln_idx)
+        self.assertGreater(chown_idx, verify_idx)
+        self.assertLess(chown_idx, entry_idx)
 
     def test_store_persisted_on_runtime_volume(self):
         # The regenerable DuckDB store must build onto the /app/runtime volume
@@ -96,6 +131,45 @@ class DeployUserNamespaceTests(SimpleTestCase):
         # uid (1001) so the non-root process can write it.
         self.assertIn("/home/deploy/fingpt/runtime:/app/runtime:U", text)
         self.assertNotIn("/home/deploy/fingpt/runtime:/app/runtime ", text)
+
+    def test_execstart_podman_run_has_net_admin_cap(self):
+        # --cap-add=NET_ADMIN is load-bearing (root-in-userns needs it to load nft) and
+        # must be on the ExecStart podman run line SPECIFICALLY -- a whole-file assertIn
+        # would pass if only the pre-cutover validation kept it while ExecStart dropped it.
+        text = _read(DEPLOY_WORKFLOW)
+        execstart = [l for l in text.splitlines() if "--name ${SYSTEMD_UNIT}" in l and "podman run" in l]
+        self.assertTrue(execstart, "ExecStart podman run line not found")
+        for l in execstart:
+            self.assertIn("--cap-add=NET_ADMIN", l)
+
+    def test_compose_api_service_has_net_admin_cap(self):
+        import yaml
+        with open(COMPOSE, "r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+        caps = data["services"]["api"].get("cap_add", [])
+        self.assertIn("NET_ADMIN", caps)
+
+    def test_precutover_gate_runs_real_entrypoint_check_only(self):
+        # The deploy's pre-cutover gate must exercise the image's REAL entrypoint via
+        # --egress-check-only, not an inline re-copy of the root-init sequence: a
+        # hand-copied gate can silently drift from what PID1 actually runs at cutover
+        # (the previous inline copy had already dropped the [ -s ] and grep-sentinel
+        # guards). No --entrypoint override may bypass it anywhere in the deploy.
+        wf = _read(DEPLOY_WORKFLOW)
+        self.assertIn("--egress-check-only", wf)
+        self.assertNotIn("--entrypoint", wf)
+        # Placement in entrypoint.sh is load-bearing: the check-only exit must come
+        # AFTER the setpriv drop (above the root-init block it would exit 0 with NO
+        # firewall loaded -- a vacuous gate) and BEFORE the app phase's heavy store
+        # build (so the gate stays fast and dependency-free).
+        entry_lines = _read(ENTRYPOINT_SH).splitlines()
+        flag_idx = next(i for i, l in enumerate(entry_lines)
+                        if "--egress-check-only" in l and l.lstrip().startswith("if "))
+        setpriv_idx = next(i for i, l in enumerate(entry_lines)
+                           if l.lstrip().startswith("exec setpriv"))
+        store_idx = next(i for i, l in enumerate(entry_lines) if "_ensure_built" in l)
+        self.assertGreater(flag_idx, setpriv_idx)
+        self.assertLess(flag_idx, store_idx)
 
     def test_runtime_bind_mount_selinux_relabel_for_nonroot(self):
         text = _read(DEPLOY_WORKFLOW)

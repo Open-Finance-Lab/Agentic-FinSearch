@@ -202,7 +202,7 @@ def scrape_with_playwright(url: str) -> str:
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox'])
+            browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-setuid-sandbox', *ssrf_guard.CHROMIUM_HARDENING_ARGS])
             try:
                 context = browser.new_context(
                     user_agent=HEADERS['User-Agent'],
@@ -215,6 +215,10 @@ def scrape_with_playwright(url: str) -> str:
                 # seed-only validate_fetch_url checks leave open. Must precede
                 # the first navigation.
                 ssrf_guard.install_route_guard_sync(page)
+                # WebRTC hardening (see ssrf_guard.DISABLE_WEBRTC_JS): remove
+                # RTCPeerConnection in every frame so a scraped page cannot open WebRTC
+                # on Chromium's own socket. Must precede the first navigation.
+                page.add_init_script(ssrf_guard.DISABLE_WEBRTC_JS)
 
                 logger.info(f"Playwright scraping: {url}")
                 page.goto(url, timeout=30000, wait_until="domcontentloaded")

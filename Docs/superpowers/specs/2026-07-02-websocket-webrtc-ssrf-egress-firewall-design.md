@@ -172,6 +172,10 @@ Deliberate choices, each from the design review:
     resolver) → else non-zero.
   - `fingpt-redis:6379` TCP connect **must succeed** within a short retry window (~5×1s, tolerating
     redis's own cold start) → else non-zero.
+  - **AMENDED at implementation:** the DNS + redis legs shipped as **advisory (WARN, exit 0)**, not
+    fatal — the prior entrypoint had zero redis/DNS boot dependency, so a fatal leg would let a
+    redis blip at reboot fail-close a correct firewall (see `_self_test`'s docstring for the full
+    rationale). Only the metadata leg is fatal.
 - `ops/__init__.py` (new, empty) so `python -m ops.egress_firewall` resolves from WORKDIR `/app`.
 
 ### Dockerfile changes
@@ -195,6 +199,12 @@ Deliberate choices, each from the design review:
   ssrf_egress >/dev/null && python -m ops.egress_firewall --self-test'`. **Abort the deploy on
   failure** so the old container keeps serving. This converts a catastrophic mid-swap fail-closed
   into a safe no-op abort and closes the CI-invisible gap.
+  **AMENDED at implementation (simplify pass):** the gate no longer inlines that sequence — it runs
+  the image's REAL entrypoint via `podman run … "$REMOTE_IMAGE" --egress-check-only` (a flag
+  entrypoint.sh handles after the setpriv drop, exiting before the app phase). An inline copy can
+  silently drift from the boot path it is supposed to prove (and had: it lacked the `[ -s ]` and
+  grep-sentinel guards); the flag form exercises the byte-identical root-init PID1 runs at cutover.
+  Wiring pinned by `test_dockerfile_nonroot.test_precutover_gate_runs_real_entrypoint_check_only`.
 - Record/echo the previously-deployed image digest before restart, and add a one-line manual
   rollback note to the deploy log for the no-auto-rollback case.
 

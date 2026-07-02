@@ -1,6 +1,66 @@
 #!/usr/bin/env sh
 set -eu
 
+# ---- root init phase: load + PROVE the SSRF egress firewall, then drop privilege ----
+# Runs only on the first (root-in-userns) invocation; re-execs self as uid1001.
+# See ops/egress_firewall.py and Docs/superpowers/specs/2026-07-02-*egress-firewall*.
+if [ "$(id -u)" = "0" ]; then
+    RULES="$(mktemp)"
+    # Temp-file, NOT a pipe: `python ... | nft -f -` fails OPEN under dash (a generator
+    # crash yields empty stdin, nft exits 0, set -e never fires -> we serve with NO
+    # firewall). Each guard below is fail-closed-and-loud, matching this file's idiom.
+    python -m ops.egress_firewall > "$RULES" \
+        || { echo "FATAL: egress ruleset generation failed" >&2; exit 1; }
+    [ -s "$RULES" ] \
+        || { echo "FATAL: egress ruleset empty" >&2; exit 1; }
+    grep -q '169.254.0.0/16' "$RULES" \
+        || { echo "FATAL: egress ruleset missing metadata drop sentinel" >&2; exit 1; }
+    grep -qE 'ip6? daddr [0-9a-fA-F].* accept' "$RULES" \
+        || { echo "FATAL: egress ruleset missing own-subnet accept" >&2; exit 1; }
+    # Record metadata reachability BEFORE load so the self-test's "unreachable" result is
+    # a true reachable->blocked transition on cloud, not a vacuous pass off-cloud.
+    if python -m ops.egress_firewall --metadata-reachable; then META_BEFORE=1; else META_BEFORE=0; fi
+    nft -f "$RULES" \
+        || { echo "FATAL: nft failed to load egress ruleset" >&2; exit 1; }
+    rm -f "$RULES"
+    nft list table inet ssrf_egress >/dev/null 2>&1 \
+        || { echo "FATAL: ssrf_egress table absent after load" >&2; exit 1; }
+    # Active proof the DROP bites (fatal); redis/DNS reachability is advisory (non-fatal)
+    # so a redis blip at reboot cannot fail-close a correct firewall.
+    METADATA_WAS_REACHABLE="$META_BEFORE" python -m ops.egress_firewall --self-test \
+        || { echo "FATAL: egress firewall self-test failed" >&2; exit 1; }
+    echo "SSRF egress firewall loaded and self-tested."
+    # :U chowned the runtime mount to root (PID1 is root); hand it to the app user.
+    chown -R fingpt:fingpt /app/runtime
+    # Marker (env survives setpriv) so the app phase can refuse to serve if it was ever
+    # reached WITHOUT this root-init firewall load (e.g. a mistaken non-root PID1 start).
+    # A MISTAKE-GUARD ONLY, not a security boundary: trivially spoofable via -e/--env-file,
+    # and uid1001 cannot verify the table for real (nft list itself needs NET_ADMIN).
+    export EGRESS_FW_LOADED=1
+    # Drop to uid1001, remove NET_ADMIN from the BOUNDING set (so a compromised app
+    # cannot re-arm/flush the firewall), set no_new_privs, and re-exec self as fingpt.
+    exec setpriv --reuid=1001 --regid=1001 --init-groups \
+         --bounding-set=-net_admin --no-new-privs -- "$0" "$@"
+fi
+# ---- app phase (uid 1001) continues below, unchanged ----
+
+# Fail closed if the app phase is ever reached without the root-init firewall load
+# (defends Decision 2: never serve with the SSRF egress firewall absent).
+[ "${EGRESS_FW_LOADED:-}" = "1" ] \
+    || { echo "FATAL: app phase reached without egress firewall (non-root PID1?)" >&2; exit 1; }
+
+# Deploy pre-cutover gate mode (see backend-deploy.yml): everything the gate needs has
+# already run above -- the FULL root-init (generate + sentinel checks + nft load +
+# transition-proof self-test) plus the setpriv drop and the marker guard. Exit before
+# the app phase's heavy work (store build, collectstatic). Running the gate through
+# THIS script means it can never drift from what PID1 actually runs at boot.
+# Placement is load-bearing (pinned by test_dockerfile_nonroot): above the root-init
+# block this flag would exit 0 with NO firewall loaded -- a vacuous gate.
+if [ "${1:-}" = "--egress-check-only" ]; then
+    echo "Egress firewall check-only: root-init completed; skipping app phase."
+    exit 0
+fi
+
 REQUIRE_OPENAI_API_KEY="${REQUIRE_OPENAI_API_KEY:-1}"
 
 if [ "$REQUIRE_OPENAI_API_KEY" = "1" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
