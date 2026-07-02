@@ -90,13 +90,13 @@ def test_override_env_suppresses_v6_discovery(monkeypatch):
 
 
 # Parity vs ssrf_guard: the two "what is private" definitions must not silently diverge.
-# 100.64/10 (CGNAT) is deliberately EXCLUDED: the firewall drops it, but ssrf_guard's
-# ipaddress-based check does NOT block it on Python 3.12/3.13 (is_private=False) -- a
-# real HTTP-side gap tracked separately, NOT fixed in this egress-firewall PR.
+# 100.64.0.1 / 192.0.0.9 / 192.0.0.10 pin the space CPython's address properties miss;
+# the registry rationale lives at ssrf_guard._EXTRA_BLOCKED_NETS (single source --
+# don't restate it here).
 _DANGEROUS = [
     "169.254.169.254", "10.1.2.3", "172.16.5.5", "192.168.1.1", "127.0.0.1",
     "0.0.0.0", "255.255.255.255", "198.18.0.1", "192.0.0.170", "240.0.0.1",
-    "::1", "fc00::1", "fe80::1",
+    "100.64.0.1", "192.0.0.9", "192.0.0.10", "::1", "fc00::1", "fe80::1",
 ]
 
 
@@ -107,6 +107,56 @@ def test_parity_with_ssrf_guard_block_list():
         addr = ipaddress.ip_address(ip)
         drops = _V4_DROP if addr.version == 4 else _V6_DROP
         assert any(addr in ipaddress.ip_network(c) for c in drops), f"firewall should drop {ip}"
+
+
+# Drop ranges too large to enumerate (> /15) that are wholly covered by ONE
+# ipaddress property with no registry carve-outs, so 3-point sampling is acceptable
+# for them. A new too-large drop range does NOT get sampling by default: the parity
+# test fails until it is consciously listed here.
+_SAMPLING_OK = frozenset({
+    "10.0.0.0/8", "172.16.0.0/12", "127.0.0.0/8", "0.0.0.0/8", "100.64.0.0/10",
+    "224.0.0.0/4", "240.0.0.0/4",
+    "fc00::/7", "fe80::/10", "ff00::/8", "64:ff9b::/96",
+})
+
+
+def test_every_firewall_drop_range_blocked_http_side():
+    # Structural parity, the reverse direction of the sample list above: EVERY
+    # range the netns firewall drops must also be blocked by ssrf_guard in-process,
+    # so a range added to _V4_DROP/_V6_DROP can never silently stay fetchable at
+    # the HTTP layer. Ranges up to /15 (198.18.0.0/15 is the largest IANA
+    # special-purpose block in the drop lists) are enumerated EXHAUSTIVELY
+    # (~1.4s total): single-address carve-outs hide from point sampling
+    # (192.0.0.9/.10 did exactly that), so sampling a small block proves nothing.
+    # Only _SAMPLING_OK ranges -- where enumeration genuinely is infeasible (the
+    # /12 alone costs ~6s, a /8 ~90s) -- get first/middle/last.
+    for cidr in _V4_DROP + _V6_DROP:
+        net = ipaddress.ip_network(cidr)
+        if net.num_addresses <= 131072:
+            addrs = net
+        elif cidr in _SAMPLING_OK:
+            addrs = (net.network_address, net.broadcast_address,
+                     net.network_address + net.num_addresses // 2)
+        else:
+            pytest.fail(
+                f"{cidr} is too large to enumerate and not in _SAMPLING_OK -- "
+                "sampling proves nothing for special-purpose blocks; decide consciously"
+            )
+        for addr in addrs:
+            assert ssrf_guard._is_blocked_ip(str(addr)), (
+                f"{addr} is in firewall-dropped {cidr} but ssrf_guard does not block it"
+            )
+
+
+def test_extra_blocked_nets_nest_in_firewall_drops():
+    # The remaining structural direction: every explicit ssrf_guard range must nest
+    # inside a firewall drop range, else a net added HTTP-side (the pattern invites
+    # future registry carve-outs) leaves WS/WebRTC/QUIC egress open to it.
+    for net in ssrf_guard._EXTRA_BLOCKED_NETS:
+        drops = _V4_DROP if net.version == 4 else _V6_DROP
+        assert any(net.subnet_of(ipaddress.ip_network(c)) for c in drops), (
+            f"{net} is in ssrf_guard._EXTRA_BLOCKED_NETS but not inside any firewall drop range"
+        )
 
 
 def test_subprocess_invocation_is_hermetic():

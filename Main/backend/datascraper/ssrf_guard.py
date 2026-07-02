@@ -117,6 +117,23 @@ class UnsafeURLError(ValueError):
     """Raised when a URL, host, or resolved IP is rejected by the SSRF guard."""
 
 
+# Firewall-dropped space (see ops/egress_firewall._V4_DROP) that CPython's address
+# properties do NOT flag, so _is_blocked_ip needs explicit membership checks:
+#   100.64.0.0/10 -- CGNAT / RFC 6598 shared space, IANA-listed as neither private
+#     nor globally reachable, so is_private and is_reserved are both False.
+#   192.0.0.0/24  -- is_private EXCEPT the two globally-reachable anycast carve-outs
+#     CPython added in the post-CVE-2024-4032 IANA alignment: 192.0.0.9 (PCP,
+#     RFC 7723) and 192.0.0.10 (TURN anycast, RFC 8155). A scraper has no
+#     business at either, and the firewall drops the whole /24, so block it whole.
+# Both directions of parity with the firewall (drop-implies-blocked, exhaustively
+# for small ranges; and each entry here nests inside a drop range) are pinned by
+# the structural tests in tests/test_egress_firewall.py.
+_EXTRA_BLOCKED_NETS = (
+    ipaddress.ip_network("100.64.0.0/10"),
+    ipaddress.ip_network("192.0.0.0/24"),
+)
+
+
 def _normalize_ip(ip_str: str) -> str:
     """Collapse an IPv4-mapped IPv6 address (``::ffff:a.b.c.d``) to its bare IPv4
     form before classification, so a private IPv4 cannot be smuggled past the
@@ -131,8 +148,10 @@ def _normalize_ip(ip_str: str) -> str:
 def _is_blocked_ip(ip_str: str) -> bool:
     """True if ``ip_str`` (after :func:`_normalize_ip`) is in a range that must
     never be reachable from a user-driven fetch: private, loopback, link-local
-    (incl. 169.254.169.254 cloud metadata), multicast, reserved, or the
-    unspecified address. An unparseable value is treated as blocked."""
+    (incl. 169.254.169.254 cloud metadata), multicast, reserved, the
+    unspecified address, or the ranges the ipaddress properties don't cover
+    (``_EXTRA_BLOCKED_NETS``: CGNAT + the 192.0.0.0/24 anycast carve-outs).
+    An unparseable value is treated as blocked."""
     try:
         ip = ipaddress.ip_address(_normalize_ip(ip_str))
     except ValueError:
@@ -144,6 +163,7 @@ def _is_blocked_ip(ip_str: str) -> bool:
         or ip.is_multicast
         or ip.is_reserved
         or ip.is_unspecified
+        or any(ip in net for net in _EXTRA_BLOCKED_NETS)
     )
 
 

@@ -64,6 +64,21 @@ class NormalizeAndBlockTests(SimpleTestCase):
                    "::ffff:10.0.0.1", "fe80::1", "224.0.0.1"):
             self.assertTrue(ssrf_guard._is_blocked_ip(ip), ip)
 
+    def test_blocks_cgnat_shared_address_space(self):
+        # is_private and is_reserved are both False for this whole range -- only
+        # the explicit _EXTRA_BLOCKED_NETS entry blocks it (rationale at its
+        # definition).
+        for ip in ("100.64.0.0", "100.64.0.1", "100.96.0.5",
+                   "100.127.255.255", "::ffff:100.64.0.1"):
+            self.assertTrue(ssrf_guard._is_blocked_ip(ip), ip)
+
+    def test_blocks_ietf_protocol_anycast_carveouts(self):
+        # CPython carves exactly these two globally-reachable anycast addresses
+        # out of the otherwise-is_private 192.0.0.0/24 -- only the explicit
+        # _EXTRA_BLOCKED_NETS entry blocks them (rationale at its definition).
+        for ip in ("192.0.0.9", "192.0.0.10", "::ffff:192.0.0.9"):
+            self.assertTrue(ssrf_guard._is_blocked_ip(ip), ip)
+
     def test_public_ips_allowed(self):
         for ip in ("8.8.8.8", "93.184.216.34", "1.1.1.1"):
             self.assertFalse(ssrf_guard._is_blocked_ip(ip), ip)

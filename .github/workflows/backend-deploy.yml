@@ -23,7 +23,6 @@ env:
   DROPLET_HOST: ${{ vars.DROPLET_HOST }}
   DROPLET_USER: ${{ vars.DROPLET_USER }}
   SYSTEMD_UNIT: fingpt-api
-  RUN_TESTS: "true" # Backend TDD suite gates deploy (P0 F-gate)
 
 jobs:
   build:
@@ -109,25 +108,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
-      - name: Tests temporarily disabled
-        if: ${{ env.RUN_TESTS != 'true' }}
-        run: echo "::warning::Backend test suite is currently skipped. Set RUN_TESTS to true when ready to re-enable it."
-
       - name: Set up uv
-        if: ${{ env.RUN_TESTS == 'true' }}
         uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
 
       - name: Install Python ${{ env.PYTHON_VERSION }}
-        if: ${{ env.RUN_TESTS == 'true' }}
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Sync backend dependencies
-        if: ${{ env.RUN_TESTS == 'true' }}
         working-directory: ${{ env.BACKEND_DIR }}
         run: uv sync --frozen --python ${{ env.PYTHON_VERSION }}
 
       - name: Run backend tests
-        if: ${{ env.RUN_TESTS == 'true' }}
         working-directory: ${{ env.BACKEND_DIR }}
         run: uv run pytest tests -q
 
