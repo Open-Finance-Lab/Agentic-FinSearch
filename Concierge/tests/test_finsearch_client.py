@@ -91,15 +91,21 @@ class _FakeResp:
     def raise_for_status(self): pass
 
 
-class _FakeGetCtx:
+class _FakeReqCtx:
     def __init__(self, resp): self._resp = resp
     async def __aenter__(self): return self._resp
     async def __aexit__(self, *a): return False
 
 
 class _FakeSession:
-    def __init__(self, resp): self._resp = resp; self.closed = False
-    def get(self, url, **kwargs): return _FakeGetCtx(self._resp)
+    """Implements ONLY .post (the frozen contract's method) and records every call, so a
+    regression back to session.get() fails loudly with AttributeError."""
+    def __init__(self, resp):
+        self._resp = resp; self.closed = False
+        self.calls = []            # (url, kwargs) per request; kwargs["json"] is the body
+    def post(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        return _FakeReqCtx(self._resp)
     async def close(self): self.closed = True
 
 
@@ -112,6 +118,28 @@ def _client_with(content):
 async def _drain(client):
     return [item async for item in client.stream_chat(
         question="q", session_id="discord:1:1", user_timezone="UTC", user_time="t")]
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_posts_json_body_to_bare_path():
+    # Frozen POST contract: POST to the same path with NO query string; every request
+    # parameter travels in a flat JSON body, ALL values strings (aiohttp's json= kwarg sets
+    # Content-Type: application/json); redirects are still refused, never followed.
+    client = _client_with(_FakeContent([b'data: {"done": true}\n']))
+    await _drain(client)
+    assert len(client._session.calls) == 1
+    url, kwargs = client._session.calls[0]
+    assert url == "http://x/get_chat_response_stream/"
+    assert "?" not in url                       # URL carries NO query params
+    assert kwargs["allow_redirects"] is False
+    body = kwargs["json"]
+    assert body == {
+        "question": "q", "session_id": "discord:1:1", "models": "m",
+        "is_advanced": "false", "use_memory": "true",
+        "current_url": "https://discord.com",
+        "user_timezone": "UTC", "user_time": "t",
+    }
+    assert all(isinstance(v, str) for v in body.values())
 
 
 @pytest.mark.asyncio
@@ -224,15 +252,15 @@ class _RecordingResp:
 
 
 class _RecordingSession:
-    """Records the headers of every .get() and replays one queued response per call, so a
+    """Records the headers of every .post() and replays one queued response per call, so a
     test can assert exactly what Cookie header the client sent on each request."""
     def __init__(self, responses):
         self._responses = list(responses)
         self.sent_headers = []
         self.closed = False
-    def get(self, url, **kwargs):
+    def post(self, url, **kwargs):
         self.sent_headers.append(kwargs.get("headers") or {})
-        return _FakeGetCtx(self._responses.pop(0))
+        return _FakeReqCtx(self._responses.pop(0))
     async def close(self): self.closed = True
 
 

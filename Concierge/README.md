@@ -2,7 +2,8 @@
 
 Interactive sibling of the News Heartbeat. A persistent `discord.py` Gateway service
 that maps free-form @mention/DM messages onto the **existing** FinSearch extension
-pipeline (`/get_chat_response_stream/`) and posts replies back. Backend is unchanged.
+pipeline (`POST /get_chat_response_stream/`, JSON body, SSE response) and posts replies
+back. Backend is unchanged.
 
 See `Docs/superpowers/specs/2026-06-28-discord-chat-adapter-design.md`.
 
@@ -58,7 +59,8 @@ processes against it.
 
 ### 2. Configure & run
 Follow **Run locally** above. `FINSEARCH_API_BASE` must be reachable from wherever
-Concierge runs (it streams from the backend's `/get_chat_response_stream/`). On the
+Concierge runs (it streams SSE from a `POST` to the backend's
+`/get_chat_response_stream/`, request params in a flat JSON body). On the
 droplet the backend is co-located, so the default `http://localhost:8000` works; from a
 laptop, point it at a tunnel (e.g. `ssh -L 8000:localhost:8000 finsearch-deploy`).
 
@@ -76,5 +78,6 @@ Beyond the happy path in **Live smoke (manual)** above:
 ### 4. Refresh the SSE fixture (optional)
 `tests/fixtures/sse_chat_stream.txt` is the recorded byte stream the client tests replay.
 To re-capture from a live backend (e.g. after a backend frame-format change), save the raw
-`/get_chat_response_stream/` response body verbatim — including `event:`/`data:` lines and
-the terminal `{"done": true, ...}` frame — over that file, then re-run `pytest -q`.
+response body of a `POST /get_chat_response_stream/` (JSON body, same keys the client
+sends) verbatim — including `event:`/`data:` lines and the terminal `{"done": true, ...}`
+frame — over that file, then re-run `pytest -q`.
