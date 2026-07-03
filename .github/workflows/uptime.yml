@@ -34,3 +34,38 @@ jobs:
           done
           echo "::error::agenticfinsearch.org/health/ is DOWN after 9 attempts (~180s)"
           exit 1
+      - name: Verify edge security headers
+        # Converts the edge headers from CONFIGURED to POSITIVELY-VERIFIED: a
+        # non-deferred Caddy `header` block validates fine yet ships duplicate
+        # HSTS lines and a silently-losing Referrer-Policy (the silent-no-op
+        # lesson behind the deferred block in Deploy/podman/Caddyfile.example),
+        # so only probing the live response proves delivery. Runs only after
+        # the health probe above passed, so a failure here is a HEADER
+        # regression, not an outage. No `-f` on curl: an HTTP error status
+        # still carries the deferred edge headers we assert on.
+        # NOTE: red until the deferred header block ships on the live edge
+        # Caddyfile (a separate, post-review op).
+        run: |
+          set -euo pipefail
+          for i in 1 2 3; do
+            if hdrs=$(curl -sSI -m 10 https://agenticfinsearch.org/health/); then
+              break
+            fi
+            if [ "$i" = 3 ]; then
+              echo "::error::could not fetch response headers after 3 attempts"
+              exit 1
+            fi
+            sleep 10
+          done
+          printf '%s\n' "$hdrs"
+          csp=$(printf '%s\n' "$hdrs" | grep -ic '^content-security-policy:' || true)
+          hsts=$(printf '%s\n' "$hdrs" | grep -ic '^strict-transport-security:' || true)
+          if [ "$csp" -lt 1 ]; then
+            echo "::error::edge response lacks Content-Security-Policy (deferred header block missing at the proxy)"
+            exit 1
+          fi
+          if [ "$hsts" -gt 1 ]; then
+            echo "::error::$hsts Strict-Transport-Security lines in one response (defer lost: Caddy + Django copies both shipped)"
+            exit 1
+          fi
+          echo "edge headers verified (CSP present, single HSTS)"

@@ -1,8 +1,14 @@
-# environment variables
-Main/backend/.env
-Main/backend/.env.production
-# older ver has env in here
-chat_interface/backend_modules/.env
+# environment variables — repo-wide guard. Real dotenvs (Concierge/.env.concierge,
+# Heartbeat/.env.heartbeat, droplet-written) sit NEXT TO tracked .example templates,
+# and the old path-specific list (Main/backend/.env, chat_interface/...) silently
+# rotted each time a service was added: a `git add -A` from the repo root would have
+# staged live Discord/OpenAI credentials. Ignore every dotenv shape everywhere; the
+# two negations re-include ONLY the committed onboarding templates. Sentinel:
+# Main/backend/tests/test_gitignore_env.py pins both directions.
+.env
+.env.*
+!.env.example
+!.env.*.example
 
 # google cookie
 Main/backend/.google-cookie

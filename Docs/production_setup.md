@@ -233,7 +233,18 @@ api.your-domain.com {
         header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto {scheme}
     }
-    header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+    # `defer` is load-bearing: the ops run AFTER Django's SecurityMiddleware
+    # copies are merged in, so `set` dedupes them. Non-deferred, the response
+    # ships two Strict-Transport-Security lines and Referrer-Policy silently
+    # loses. Full rationale in Deploy/podman/Caddyfile.example.
+    header {
+        defer
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        # API-only origin -- relax deliberately if HTML is ever served here.
+        Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+        Referrer-Policy "no-referrer"
+        Permissions-Policy "accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), usb=(), web-share=(), xr-spatial-tracking=()"
+    }
 }
 ```
 

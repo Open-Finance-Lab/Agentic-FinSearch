@@ -17,7 +17,12 @@ keepalive = 5
 accesslog = '-'
 errorlog = '-'
 loglevel = os.getenv('GUNICORN_LOG_LEVEL', 'info')
-access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s'
+# %(m)s %(U)s %(H)s instead of %(r)s: the raw request line embeds the query string, so
+# any credential passed there (the old /api/debug/memory/?token=... pattern, signed URLs,
+# etc.) would be written verbatim to stdout and shipped to log aggregation. Logging
+# method + path + protocol keeps the combined-log shape for downstream parsers while
+# dropping the query string entirely. Pinned by tests/test_gunicorn_conf.py.
+access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(m)s %(U)s %(H)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s'
 
 proc_name = 'fingpt-backend'
 

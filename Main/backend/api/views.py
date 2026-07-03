@@ -251,7 +251,13 @@ def validate_claims(request: HttpRequest) -> JsonResponse:
 
  
 
+# Root-G Tier 2: the chat/agent surface is GET-by-contract (extension + SSE
+# clients read query params only), so pin the method on all five views. The
+# gate sits OUTSIDE @ratelimit (same stacking as validate_claims) so a
+# wrong-method probe is bounced with 405 without consuming the caller's
+# rate budget.
 @csrf_exempt
+@require_http_methods(['GET'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def chat_response(request: HttpRequest) -> JsonResponse:
     """
@@ -347,6 +353,7 @@ def chat_response(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@require_http_methods(['GET'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def adv_response(request: HttpRequest) -> JsonResponse:
     """
@@ -471,6 +478,7 @@ def adv_response(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@require_http_methods(['GET'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def agent_chat_response(request: HttpRequest) -> JsonResponse:
     """
@@ -563,6 +571,7 @@ def agent_chat_response(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@require_http_methods(['GET'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def chat_response_stream(request: HttpRequest) -> StreamingHttpResponse:
     """
@@ -740,6 +749,7 @@ def chat_response_stream(request: HttpRequest) -> StreamingHttpResponse:
 
 
 @csrf_exempt
+@require_http_methods(['GET'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def adv_response_stream(request: HttpRequest) -> StreamingHttpResponse:
     """Process streaming advanced chat response from selected models using SSE"""
@@ -921,7 +931,16 @@ def adv_response_stream(request: HttpRequest) -> StreamingHttpResponse:
 
 
 
+# Root-G Tier 1: every routed sink shares the per-identity limiter. The
+# previously un-throttled ingest/store/log endpoints (auto_scrape through
+# get_available_models below) were a free amplification path — cache writes,
+# the disk-backed preferred-links file, unbounded log lines — even though they
+# never touch the LLM. Only health/ stays undecorated: django-ratelimit fails
+# CLOSED when the counter cache is unreachable (get_usage -> should_limit on a
+# None count), which would take the LB probe down together with Redis. Pinned
+# by tests/test_endpoint_protection.py.
 @csrf_exempt
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def auto_scrape(request: HttpRequest) -> JsonResponse:
     """
     Automatically scrape the current page if not already in context.
@@ -985,6 +1004,7 @@ def auto_scrape(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def add_webtext(request: HttpRequest) -> JsonResponse:
     """
     Handle appending the site's text to the message list.
@@ -1037,7 +1057,13 @@ def add_webtext(request: HttpRequest) -> JsonResponse:
         return JsonResponse({'error': _safe_error_message(e, request.path)}, status=500)
 
 
+# POST-only: clear drops conversation state, and on a CSRF-exempt endpoint a
+# GET would leave it triggerable by any prefetch/img-tag. The shipped frontend
+# already sends POST (dist/main.js fetch {method:"POST"}), so only the
+# accidental-GET surface changes.
 @csrf_exempt
+@require_http_methods(['POST'])
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def clear(request: HttpRequest) -> JsonResponse:
     """
     Clear conversation messages and optionally preserve scraped web content.
@@ -1068,6 +1094,7 @@ def clear(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def get_memory_stats(request: HttpRequest) -> JsonResponse:
     """
     Get context statistics for current session.
@@ -1101,6 +1128,10 @@ def get_memory_stats(request: HttpRequest) -> JsonResponse:
 
 
 
+# NEVER decorate health with @ratelimit: the limiter fails closed when the
+# counter cache is down (django-ratelimit get_usage returns should_limit for a
+# None count), so a Redis outage would 429/500 the probe and cascade into a
+# restart loop. Pinned by test_endpoint_protection HealthIndependenceTests.
 def health(request: HttpRequest) -> JsonResponse:
     """
     Health check endpoint for load balancers and monitoring.
@@ -1116,6 +1147,7 @@ def health(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def get_sources(request: HttpRequest) -> JsonResponse:
     """Get sources for a query"""
     query = request.GET.get('query', '')
@@ -1129,6 +1161,7 @@ def get_sources(request: HttpRequest) -> JsonResponse:
     return JsonResponse({'resp': sources})
 
 
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def log_question(request: HttpRequest) -> JsonResponse:
     """Legacy question logging (redirects to enhanced logging)"""
     question = request.GET.get('question', '')
@@ -1136,11 +1169,15 @@ def log_question(request: HttpRequest) -> JsonResponse:
     current_url = request.GET.get('current_url', '')
 
     if question and button_clicked and current_url:
-        logger.info(f"Interaction [{button_clicked}]: URL={current_url}, Q='{question}'")
+        # [:50] like every other Interaction line: this sink logs verbatim
+        # caller input, so an untruncated question is a log-flooding /
+        # line-injection vector out of proportion to its telemetry value.
+        logger.info(f"Interaction [{button_clicked}]: URL={current_url}, Q='{question[:50]}...'")
 
     return JsonResponse({'status': 'success'})
 
 
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def get_preferred_urls(request: HttpRequest) -> JsonResponse:
     """Retrieve preferred URLs from storage"""
     manager = get_manager()
@@ -1149,6 +1186,7 @@ def get_preferred_urls(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def add_preferred_url(request: HttpRequest) -> JsonResponse:
     """Add new preferred URL to storage"""
     if request.method == 'POST':
@@ -1175,6 +1213,7 @@ def add_preferred_url(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def sync_preferred_urls(request: HttpRequest) -> JsonResponse:
     """Sync preferred URLs from frontend to backend storage"""
     if request.method == 'POST':
@@ -1193,6 +1232,7 @@ def sync_preferred_urls(request: HttpRequest) -> JsonResponse:
     return JsonResponse({'status': 'failed'}, status=400)
 
 
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def get_available_models(request: HttpRequest) -> JsonResponse:
     """Get list of available models with their configurations"""
     models = []

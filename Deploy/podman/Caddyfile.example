@@ -35,12 +35,39 @@ fingpt.example.com {
         reverse_proxy fingpt-api:8000
     }
 
+    # Root G hygiene: browser-facing security headers, set once at the edge.
+    # `defer` is LOAD-BEARING: it runs these ops at response-write time, AFTER
+    # the upstream copies are merged in, so `set` REPLACES what Django's
+    # SecurityMiddleware already emits. Without defer the ops run pre-proxy and
+    # the proxy ADDs the upstream copies on top: the response ships two
+    # Strict-Transport-Security lines and Caddy's Referrer-Policy silently
+    # loses to Django's (last valid value wins per spec) -- "configured" here
+    # but never delivered, the silent no-op uptime.yml now positively probes.
     header {
+        defer
         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        # API-only origin: no first-party HTML/JS is ever served, so CSP locks
+        # everything down (and frame-ancestors kills UI redressing). If a future
+        # HTML frontend is ever served from THIS origin, these directives must
+        # be relaxed deliberately -- default-src 'none' blocks all its
+        # subresources (scripts, styles, images, XHR).
+        Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+        Referrer-Policy "no-referrer"
+        Permissions-Policy "accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), usb=(), web-share=(), xr-spatial-tracking=()"
     }
 
     log {
         output stdout
-        format console
+        # Strip the query string from the logged URI: query strings carry PII
+        # (user questions, browsing URLs) and, before the backend dropped the
+        # ?token= auth path, credentials. The app-side gunicorn access log is
+        # redacted the same way (%(U)s, no %(q)s) -- both layers must agree or
+        # the redaction is a silent no-op at the edge.
+        format filter {
+            wrap console
+            fields {
+                request>uri regexp \?.* ""
+            }
+        }
     }
 }
