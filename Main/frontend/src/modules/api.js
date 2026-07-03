@@ -313,7 +313,7 @@ function getChatResponseStream(question, selectedModel, promptMode, useRAG, useM
                     err.isFatalSSE = true;
                     throw err;
                 }
-                console.log('EventSource connected successfully');
+                console.log('SSE stream connected successfully');
 
                 const reader = response.body.getReader();
                 const pump = () => reader.read().then(({ done, value }) => {
@@ -365,7 +365,7 @@ function getChatResponseStream(question, selectedModel, promptMode, useRAG, useM
             if (abortController) {
                 abortController.abort();
             }
-            console.log('EventSource connection closed by client');
+            console.log('SSE stream closed by client');
         }
     };
 }
