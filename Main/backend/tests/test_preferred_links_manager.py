@@ -78,7 +78,10 @@ def test_seed_falls_back_to_hardcoded_defaults_when_default_file_absent(
     manager = PreferredLinksManager(storage_path=str(target))
     links = manager.get_links()
     assert links, "hardcoded defaults expected"
-    assert "https://finance.yahoo.com" in links
+    # Exact-match membership (not a substring/URL check): keeps CodeQL's
+    # py/incomplete-url-substring-sanitization heuristic from misfiring on a
+    # `"<url>" in <list>` that is really list membership, and states intent.
+    assert any(link == "https://finance.yahoo.com" for link in links)
 
 
 def test_writes_land_on_the_configured_path(monkeypatch, tmp_path):
