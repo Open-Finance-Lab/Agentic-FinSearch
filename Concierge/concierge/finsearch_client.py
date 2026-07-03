@@ -4,7 +4,6 @@ import json
 import re
 from dataclasses import dataclass
 from typing import AsyncIterator, Iterable, Iterator, Optional, Union
-from urllib.parse import urlencode
 
 import aiohttp
 from aiohttp.http_exceptions import LineTooLong
@@ -152,13 +151,17 @@ class FinSearchClient:
     async def stream_chat(self, *, question: str, session_id: str,
                           user_timezone: str, user_time: str
                           ) -> AsyncIterator[Union[ChatChunk, ChatResult]]:
-        params = {
+        # Frozen POST contract: same path, NO query string. Every request parameter travels
+        # in a flat JSON body with ALL values as strings. The backend dual-accepts GET and
+        # POST during the migration window, with a JSON-body value winning over any same-key
+        # query-string value; the SSE response is byte-identical to the old GET's.
+        payload = {
             "question": question, "session_id": session_id, "models": self._model,
             "is_advanced": "false", "use_memory": "true",
             "current_url": "https://discord.com",
             "user_timezone": user_timezone, "user_time": user_time,
         }
-        url = f"{self._base}/get_chat_response_stream/?{urlencode(params)}"
+        url = f"{self._base}/get_chat_response_stream/"
         session = await self._ensure_session()
         acc, done, final = [], False, {}
         try:
@@ -166,8 +169,8 @@ class FinSearchClient:
             # 3xx here means the backend is misrouting this client. Following it (e.g. http->https on
             # a plain-HTTP port) strands us in a ~60s TLS handshake before it aborts — refuse it and
             # fail fast into the friendly error instead.
-            async with session.get(url, allow_redirects=False,
-                                   headers=self._cookie_header(session_id) or None) as resp:
+            async with session.post(url, json=payload, allow_redirects=False,
+                                    headers=self._cookie_header(session_id) or None) as resp:
                 # Capture the conversation root cookie as soon as headers arrive (before the
                 # body streams), so we still remember it even if the stream later drops.
                 self._remember_cookie(session_id, resp)
