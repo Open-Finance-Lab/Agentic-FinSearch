@@ -39,7 +39,8 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    TRUTHLAYER_DB_PATH=/app/runtime/truthlayer.duckdb
+    TRUTHLAYER_DB_PATH=/app/runtime/truthlayer.duckdb \
+    HOME=/home/fingpt
 
 COPY . .
 
@@ -69,9 +70,18 @@ RUN echo "Verifying Playwright browsers..." && \
 # regenerable DuckDB truth-layer store there BEFORE gunicorn forks; in production it is a
 # persistent bind mount (podman -v ...:/app/runtime:U,Z) so the store survives restarts.
 # Owning these dirs in the image keeps them writable with no mount (compose/CI/bare run).
+# HOME (ENV above) + a real, fingpt-owned home dir are LOAD-BEARING: PID1 starts as
+# root-in-userns, and setpriv drops the uid WITHOUT touching the environment -- so
+# before the ENV pin the app (and every MCP stdio child, which inherits HOME via the
+# SDK's get_default_environment) ran with HOME=/root it could not write. edgartools
+# mkdirs ~/.edgar AT IMPORT, which killed the sec-edgar MCP child with EACCES on every
+# boot from the root-init redesign (Jul 1) until this fix; yfinance's ~/.cache tz store
+# degraded the same way, just non-fatally. --no-create-home stays (system-user idiom);
+# the dir is created explicitly and owned alongside the other writable runtime dirs.
 RUN groupadd --system --gid 1001 fingpt \
     && useradd --system --uid 1001 --gid fingpt --no-create-home fingpt \
-    && chown -R fingpt:fingpt /app/staticfiles /app/media /app/logs /tmp/fingpt_cache /app/runtime
+    && mkdir -p /home/fingpt \
+    && chown -R fingpt:fingpt /app/staticfiles /app/media /app/logs /tmp/fingpt_cache /app/runtime /home/fingpt
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 
