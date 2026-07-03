@@ -108,4 +108,57 @@ python -c "from playwright.async_api import async_playwright; print('✓ Playwri
     exit 1
 }
 
+# Deploy pre-cutover FULL-BOOT gate mode (see backend-deploy.yml). By this point the
+# ENTIRE boot has already run under the deploy's exact --read-only/tmpfs/cap flags:
+# root-init (nft load + sentinels + self-test + setpriv drop), the OPENAI key gate,
+# the cache mkdir, the truth-layer store build, collectstatic, and the Playwright
+# verify above -- so this mode SUBSUMES the --egress-check-only gate. It then proves
+# the two things a later /health/ poll alone can never catch:
+#   (a) every writable surface is really writable by uid1001. MCP stdio children
+#       write $HOME fail-SOFT (logger.error in mcp_client/apps.py), so a missing or
+#       root-owned tmpfs there would pass every health check while silently killing
+#       the sec-edgar child -- exactly the EACCES class fixed in #331;
+#   (b) the image's own CMD ("$@", byte-identical: the deploy gate passes no
+#       positional args) comes up and answers /health/ within a bounded window.
+# Placement is load-bearing (pinned by test_dockerfile_nonroot): this branch wraps
+# the final exec, and the fall-through path still ends in exec "$@".
+if [ "${BOOT_CHECK_ONLY:-}" = "1" ]; then
+    echo "Boot check: probing writable surfaces..."
+    for dir in /app/staticfiles /app/runtime "${CACHE_FILE_PATH:-/tmp/fingpt_cache}" "$HOME"; do
+        probe="$dir/.boot-check-probe"
+        ( touch "$probe" && rm -f "$probe" ) 2>/dev/null \
+            || { echo "FATAL: boot check: cannot write $dir (missing/mis-owned tmpfs under --read-only?)" >&2; exit 1; }
+    done
+    echo "Boot check: writable surfaces OK; starting app for /health/ validation..."
+    "$@" &
+    APP_PID=$!
+    HEALTH_OK=0
+    tries=0
+    # ~90s window (30 x 3s; refused connections fail fast), same python-urllib
+    # probe as the Dockerfile HEALTHCHECK.
+    while [ "$tries" -lt 30 ]; do
+        if python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/', timeout=5)" 2>/dev/null; then
+            HEALTH_OK=1
+            break
+        fi
+        kill -0 "$APP_PID" 2>/dev/null \
+            || { echo "FATAL: boot check: app exited before /health/ answered" >&2; exit 1; }
+        tries=$((tries + 1))
+        sleep 3
+    done
+    # Bounded shutdown: SIGTERM the app, watchdog hard-SIGKILLs if it hangs, so the
+    # gate can never wedge the deploy past its own window.
+    kill "$APP_PID" 2>/dev/null || true
+    ( sleep 20; kill -9 "$APP_PID" 2>/dev/null ) &
+    WATCHDOG_PID=$!
+    wait "$APP_PID" 2>/dev/null || true
+    kill "$WATCHDOG_PID" 2>/dev/null || true
+    if [ "$HEALTH_OK" = "1" ]; then
+        echo "Boot check: /health/ answered; full boot validated under deploy flags."
+        exit 0
+    fi
+    echo "FATAL: boot check: /health/ did not answer within the ~90s window" >&2
+    exit 1
+fi
+
 exec "$@"

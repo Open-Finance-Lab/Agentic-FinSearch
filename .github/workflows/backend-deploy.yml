@@ -172,6 +172,10 @@ jobs:
           username: ${{ env.DROPLET_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: 22
+          # The default 10m is now shared by the multi-GB image pull, the pre-cutover
+          # FULL-boot gate (store build + collectstatic + gunicorn up + /health/ poll,
+          # ~2-3min), cutover, and image retirement -- give it explicit headroom.
+          command_timeout: 20m
           envs: REMOTE_IMAGE,GHCR_USERNAME,GHCR_TOKEN,SYSTEMD_UNIT
           script: |
             set -euo pipefail
@@ -202,28 +206,44 @@ jobs:
               podman start fingpt-redis >/dev/null 2>&1 || true
             fi
 
-            # Pre-cutover firewall validation: run the NEW image's REAL entrypoint in
-            # check-only mode on fingpt-net BEFORE the systemctl restart's --replace kills
-            # the currently-serving container. --egress-check-only exercises the byte-
-            # identical root-init PID1 runs at cutover (generate + sentinel checks + nft
-            # load + transition-proof self-test + setpriv drop), then exits before the app
-            # phase; an inline re-copy of that sequence (this step's previous shape) can
-            # silently drift from the boot path it is supposed to prove. On failure, abort
-            # so the OLD container keeps serving (there is no auto-rollback). This closes
-            # the CI-invisible gap: the test job is pytest-only and never touches nft/netns.
-            # The gate runs under the IDENTICAL frozen cap/pids flags as the ExecStart
-            # below (cap-to-step map at the override; parity pinned in
-            # Main/backend/tests/test_dockerfile_nonroot.py). That parity IS the safety
-            # property: check-only mode exits right after the setpriv drop, so all five
-            # caps the root-init needs (nft + chown + setuid/setgid + bounding-set drop)
-            # are exercised HERE -- a too-narrow set aborts the deploy with the old
-            # container still serving, instead of crash-looping the new unit at cutover.
-            echo "Validating egress firewall on the new image (pre-cutover)..."
-            podman run --rm --cap-drop=ALL --cap-add=NET_ADMIN --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=SETPCAP --pids-limit=1024 --network fingpt-net \
-              --env REDIS_URL=redis://fingpt-redis:6379/0 \
-              "$REMOTE_IMAGE" --egress-check-only \
-              || { echo "ERROR: egress firewall pre-cutover validation FAILED; aborting deploy (old container left serving)"; exit 1; }
-            echo "Egress firewall pre-cutover validation passed."
+            # Pre-cutover FULL-BOOT validation: run the NEW image's REAL entrypoint on
+            # fingpt-net BEFORE the systemctl restart's --replace kills the currently-
+            # serving container. BOOT_CHECK_ONLY=1 (mode lives at the END of
+            # Main/backend/entrypoint.sh, wrapping the final exec) exercises the byte-
+            # identical PID1 path that runs at cutover: the full root-init (generate +
+            # sentinel checks + nft load + transition-proof self-test + setpriv drop --
+            # so this SUBSUMES the old --egress-check-only gate, which stays in the
+            # entrypoint for manual/local use), then the full app phase (store build,
+            # collectstatic, Playwright verify), then explicit writable-surface probes
+            # over the tmpfs set (these cover the fail-SOFT MCP-child $HOME writes a
+            # /health/ poll can never catch), then backgrounds the image's own CMD and
+            # polls /health/ INSIDE the container until gunicorn answers (hence no
+            # --publish: the gate's :8000 stays netns-private). No positional args
+            # after the image ref, so the Dockerfile CMD flows through byte-identical
+            # (zero-drift property). On failure, abort so the OLD container keeps
+            # serving (there is no auto-rollback). This closes the CI-invisible gap:
+            # the test job is pytest-only and never touches nft/netns/--read-only.
+            # The gate runs the IDENTICAL frozen cap/pids/read-only/tmpfs/memory flags
+            # as the ExecStart below (cap-to-step map + tmpfs map at the override;
+            # parity pinned in Main/backend/tests/test_dockerfile_nonroot.py), with
+            # exactly one deliberate asymmetry: /app/runtime here is a THROWAWAY
+            # tmpfs, never the real /home/deploy/fingpt/runtime bind mount. Mounting
+            # the real dir pre-cutover is dangerous: :U would re-chown it under the
+            # serving container, and a new-recipe store build would os.replace() the
+            # shared DuckDB while the old container still serves it
+            # (truthlayer/retrieve.py). Same isolation for redis: DB15 is a throwaway
+            # keyspace so gate boot-time writes can never touch the serving
+            # container's rate-limit/budget counters in DB0 (only settings_prod.py
+            # and ops/egress_firewall.py consume REDIS_URL, and the firewall
+            # self-test checks host:port reachability only, DB-agnostic).
+            echo "Validating full boot (root-init + read-only rootfs + /health/) on the new image (pre-cutover)..."
+            podman run --rm --cap-drop=ALL --cap-add=NET_ADMIN --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=SETPCAP --pids-limit=1024 --read-only --tmpfs=/tmp:rw,size=512m,mode=1777 --tmpfs=/app/staticfiles:rw,uid=1001,gid=1001 --tmpfs=/home/fingpt:rw,uid=1001,gid=1001 --tmpfs=/app/runtime:rw,size=512m --memory=1.7g --memory-swap=2g --network fingpt-net \
+              --env-file /home/deploy/fingpt/envs/.env.production \
+              --env REDIS_URL=redis://fingpt-redis:6379/15 \
+              --env BOOT_CHECK_ONLY=1 \
+              "$REMOTE_IMAGE" \
+              || { echo "ERROR: full-boot pre-cutover validation FAILED; aborting deploy (old container left serving)"; exit 1; }
+            echo "Full-boot pre-cutover validation passed."
 
             # Record the currently-deployed image for manual rollback (no auto-rollback).
             PREV_IMAGE=$(podman inspect --format '{{.ImageName}}' "$SYSTEMD_UNIT" 2>/dev/null || echo "unknown")
@@ -260,15 +280,34 @@ jobs:
             # --pids-limit=1024 is the fork-bomb ceiling: worst case today is ~400-600
             # tasks (gunicorn workers x threads + agent fan-out + Playwright/Chromium);
             # revisit if AGENT_MAX_CONCURRENCY or GUNICORN_WORKERS is raised.
-            # A read-only rootfs is DELIBERATELY deferred: the gate exits before the app
-            # phase, so --read-only would ship unvalidated pre-cutover -- and collectstatic
-            # writes /app/staticfiles at boot, which needs a tmpfs/volume design first.
+            # --read-only rootfs: the ONLY writable surfaces are the tmpfs set below,
+            # /dev/shm (podman-managed 64MB tmpfs; gunicorn --worker-tmp-dir, untouched
+            # by --read-only), and the /app/runtime bind mount. The tmpfs map:
+            #   /tmp              Chromium temp profiles + shm redirect
+            #                     (--disable-dev-shm-usage), nft mktemp at root-init,
+            #                     /tmp/fingpt_cache; sized + world-writable-sticky;
+            #   /app/staticfiles  collectstatic writes it at boot (0 files today, kept
+            #                     writable as future-proofing); uid1001 tmpfs;
+            #   /home/fingpt      fontconfig cache, edgartools ~/.edgar import-time
+            #                     marker, yfinance cache; MUST carry uid=1001,gid=1001
+            #                     or the MCP-child EACCES bug (#331 class) returns.
+            # /app/logs and /app/media are vestigial with ZERO writers -- deliberately
+            # NOT tmpfs, so a future stray write fails LOUDLY instead of vanishing
+            # into RAM. Playwright's DEPENDENCIES_VALIDATED marker is pre-baked at
+            # image build (Dockerfile) so first browser launch needs no rootfs write.
+            # The pre-cutover gate above boots the FULL app under these exact flags
+            # (BOOT_CHECK_ONLY=1) before cutover, so a missing/mis-owned tmpfs aborts
+            # the deploy with the old container still serving. Accepted residual: the
+            # gate's /app/runtime is a throwaway tmpfs, so the :U chown / :Z SELinux
+            # relabel path of the REAL bind mount (#322 class) is NOT exercised
+            # pre-cutover; it stays covered only by the post-cutover ~130s health
+            # window in the Verify step below.
             OVERRIDE_DIR="$HOME/.config/systemd/user/${SYSTEMD_UNIT}.service.d"
             mkdir -p "$OVERRIDE_DIR"
             cat > "$OVERRIDE_DIR/override.conf" <<EOF
             [Service]
             ExecStart=
-            ExecStart=/usr/bin/podman run --name ${SYSTEMD_UNIT} --replace --rm --cap-drop=ALL --cap-add=NET_ADMIN --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=SETPCAP --pids-limit=1024 --cgroups=split --sdnotify=conmon -d --memory=1.7g --memory-swap=2g --network fingpt-net -v /home/deploy/fingpt/runtime:/app/runtime:U,Z --publish 127.0.0.1:8000:8000 --env-file /home/deploy/fingpt/envs/.env.production --env REDIS_URL=redis://fingpt-redis:6379/0 ${REMOTE_IMAGE}
+            ExecStart=/usr/bin/podman run --name ${SYSTEMD_UNIT} --replace --rm --cap-drop=ALL --cap-add=NET_ADMIN --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=SETPCAP --pids-limit=1024 --read-only --tmpfs=/tmp:rw,size=512m,mode=1777 --tmpfs=/app/staticfiles:rw,uid=1001,gid=1001 --tmpfs=/home/fingpt:rw,uid=1001,gid=1001 --cgroups=split --sdnotify=conmon -d --memory=1.7g --memory-swap=2g --network fingpt-net -v /home/deploy/fingpt/runtime:/app/runtime:U,Z --publish 127.0.0.1:8000:8000 --env-file /home/deploy/fingpt/envs/.env.production --env REDIS_URL=redis://fingpt-redis:6379/0 ${REMOTE_IMAGE}
             EOF
 
             systemctl --user daemon-reload

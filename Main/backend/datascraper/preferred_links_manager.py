@@ -12,6 +12,16 @@ from threading import Lock
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# In-image/in-repo default storage file. Local dev reads AND writes it directly.
+# In the production container /app/data is root-owned and the rootfs is read-only,
+# so writes there EACCES -> 500 on /api/sync_preferred_urls/ (used by the shipped
+# extension). The prod image therefore pins PREFERRED_LINKS_PATH to
+# /app/runtime/preferred_links.json (Dockerfile ENV; /app/runtime is the writable
+# persistent volume) and this file becomes the read-only SEED the runtime copy is
+# initialized from on first use.
+DEFAULT_STORAGE_PATH = Path(__file__).resolve().parent.parent / 'data' / 'preferred_links.json'
+
+
 class PreferredLinksManager:
     """Manages preferred links with JSON file storage."""
 
@@ -21,13 +31,13 @@ class PreferredLinksManager:
 
         Args:
             storage_path: Path to the JSON storage file.
-                         Defaults to backend/data/preferred_links.json
+                         Defaults to $PREFERRED_LINKS_PATH if set (the prod image
+                         points it at the writable /app/runtime volume), else
+                         backend/data/preferred_links.json (local dev).
         """
         if storage_path is None:
-            backend_dir = Path(__file__).resolve().parent.parent
-            self.storage_path = backend_dir / 'data' / 'preferred_links.json'
-        else:
-            self.storage_path = Path(storage_path)
+            storage_path = os.environ.get('PREFERRED_LINKS_PATH') or DEFAULT_STORAGE_PATH
+        self.storage_path = Path(storage_path)
 
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -37,7 +47,25 @@ class PreferredLinksManager:
             self._init_storage()
 
     def _init_storage(self):
-        """Initialize the storage file with default structure."""
+        """Initialize the storage file, seeding from the in-image default file.
+
+        When the storage path is redirected off the default (prod: the writable
+        /app/runtime volume) and the runtime copy is missing, seed it from the
+        read-only in-image default file so curated defaults survive the move.
+        Falls back to the hardcoded defaults if the seed is absent or unreadable.
+        """
+        if DEFAULT_STORAGE_PATH.exists() and DEFAULT_STORAGE_PATH != self.storage_path.resolve():
+            try:
+                seed_data = json.loads(DEFAULT_STORAGE_PATH.read_text())
+                self._write_data(seed_data)
+                logging.info(
+                    f"Seeded preferred links storage at {self.storage_path} "
+                    f"from {DEFAULT_STORAGE_PATH}"
+                )
+                return
+            except (json.JSONDecodeError, OSError) as e:
+                logging.error(f"Error seeding preferred links from default file: {e}")
+
         default_links = [
             "https://finance.yahoo.com",
             "https://www.sec.gov/search-filings",
