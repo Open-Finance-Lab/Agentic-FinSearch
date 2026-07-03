@@ -8,9 +8,12 @@ sentinel. The sentinel form matters: P0 Root C proved the STRING ``method='ALL'`
 never matches ``core._method_match``'s ``(None,)`` tuple, silently disabling the
 limiter — so the structural scan also forbids the string form at any call site.
 
-Tier 2 — method gates: ``clear_messages`` mutates state on a CSRF-exempt
-endpoint so it is POST-only; the chat/agent surface reads query params only so
-it is GET-only.
+Tier 2/3 — method gates: ``clear_messages`` mutates state on a CSRF-exempt
+endpoint so it is POST-only. The chat surface (four views) dual-accepts
+GET+POST during the Tier-3 migration window: POST carries a flat all-string
+JSON body (same keys as the query params, body wins over a same-key query
+value, syntactically invalid JSON -> 400) while GET behavior stays unchanged
+until the POST-only flip lands in a later PR. PUT/DELETE stay 405.
 
 health/ pin: django-ratelimit fails CLOSED when the counter cache is
 unreachable (``get_usage`` returns ``should_limit`` for a ``None`` count, and
@@ -24,12 +27,14 @@ Run: uv run pytest tests/test_endpoint_protection.py -v
 import ast
 import importlib
 import json
+import re
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from django.conf import settings
 from django.core.cache import cache
 from django.core.cache.backends.base import BaseCache
-from django.test import RequestFactory, SimpleTestCase, override_settings
+from django.test import Client, RequestFactory, SimpleTestCase, override_settings
 from django_ratelimit.exceptions import Ratelimited
 
 import api.views as views_module
@@ -293,7 +298,16 @@ class AddWebtextRatelimit429Tests(SimpleTestCase):
         self.assertEqual(resp.status_code, 400)
 
 
-# ── Tier 2: method gates ─────────────────────────────────────────────────────
+# ── Tier 2/3: method gates + dual-accept chat surface ───────────────────────
+
+
+# The four dual-accept chat views (Tier 3 phase 1). view name -> routed path.
+CHAT_VIEWS = {
+    "chat_response": "/get_chat_response/",
+    "adv_response": "/get_adv_response/",
+    "chat_response_stream": "/get_chat_response_stream/",
+    "adv_response_stream": "/get_adv_response_stream/",
+}
 
 
 METHOD_GATE_OVERRIDES = override_settings(
@@ -331,12 +345,380 @@ class MethodGateTests(SimpleTestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(json.loads(resp.content)["status"], "success")
 
-    def test_post_to_get_only_chat_view_is_405(self):
-        resp = views_module.chat_response(
-            self.factory.post("/get_chat_response/", data={"question": "hi"})
+    def test_post_to_chat_views_passes_method_gate(self):
+        # Tier 3 phase 1 flip of the former GET-only pin: POST is accepted on
+        # the whole chat surface. An empty JSON body short-circuits at the
+        # 'No question provided' 400 BEFORE any session/LLM work, so this pins
+        # the gate (400, not 405) hermetically with zero mocks. Full POST
+        # behavior is pinned by DualAcceptChatViewTests below.
+        for view_name, path in CHAT_VIEWS.items():
+            with self.subTest(view=view_name):
+                req = self.factory.post(path, data="{}", content_type="application/json")
+                resp = getattr(views_module, view_name)(req)
+                self.assertEqual(resp.status_code, 400)
+                self.assertEqual(json.loads(resp.content)["error"], "No question provided")
+
+    def test_put_and_delete_on_chat_views_stay_405(self):
+        for view_name, path in CHAT_VIEWS.items():
+            for method in ("put", "delete"):
+                with self.subTest(view=view_name, method=method):
+                    req = getattr(self.factory, method)(path)
+                    resp = getattr(views_module, view_name)(req)
+                    self.assertEqual(resp.status_code, 405)
+                    self.assertEqual(resp["Allow"], "GET, POST")
+
+
+# ── Tier 3 phase 1: dual-accept (GET+POST) behavior on the chat surface ─────
+
+
+def _noop_slot():
+    """agent_run_slot stand-in whose context manager acquires and releases."""
+    cm = MagicMock()
+    cm.__enter__.return_value = None
+    cm.__exit__.return_value = False
+    return MagicMock(return_value=cm)
+
+
+def _ctx_mock():
+    ctx = MagicMock()
+    ctx.get_formatted_messages_for_api.return_value = []
+    ctx.get_session_stats.return_value = {
+        "mode": "thinking",
+        "message_count": 1,
+        "token_count": 2,
+        "fetched_context_counts": {},
+    }
+    return ctx
+
+
+async def _one_chunk_agent_gen():
+    yield "Hello"
+
+
+async def _one_chunk_research_gen():
+    yield ("Hello", [])
+
+
+def _invoke_chat_view(view_name, request):
+    """Run a chat view with the LLM layer mocked out.
+
+    Returns ``(response, captured, payload)``: ``captured`` holds the args/
+    kwargs that reached the downstream datascraper call — the proof a param
+    actually traversed the view logic rather than just the decorator stack —
+    and ``payload`` is the fully-drained body (SSE bytes for the *_stream
+    views, JSON bytes otherwise; draining also exercises the slot-release
+    finally in the stream generators).
+    """
+    captured = {}
+
+    def _record(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+
+    def fake_agent(*args, **kwargs):
+        _record(*args, **kwargs)
+        return "ok", []
+
+    def fake_advanced(*args, **kwargs):
+        _record(*args, **kwargs)
+        return "ok", []
+
+    def fake_agent_stream(*args, **kwargs):
+        _record(*args, **kwargs)
+        return _one_chunk_agent_gen(), {"final_output": "ok"}
+
+    def fake_advanced_stream(*args, **kwargs):
+        _record(*args, **kwargs)
+        return _one_chunk_research_gen(), {}
+
+    with patch("api.views.agent_run_slot", _noop_slot()), \
+         patch("api.views.get_context_manager", return_value=_ctx_mock()), \
+         patch("api.views.get_context_integration", return_value=MagicMock()), \
+         patch("api.views.get_claims", return_value=[]), \
+         patch("api.views._wrap_for_client", side_effect=lambda prose, sid: prose), \
+         patch("api.views.build_xbrl_sources", return_value=[]), \
+         patch("api.views.merge_xbrl_sources", side_effect=lambda sources, xbrl: sources), \
+         patch("api.views.ds.create_agent_response", side_effect=fake_agent), \
+         patch("api.views.ds.create_advanced_response", side_effect=fake_advanced), \
+         patch("api.views.ds.create_agent_response_stream", side_effect=fake_agent_stream), \
+         patch("api.views.ds.create_advanced_response_streaming", side_effect=fake_advanced_stream):
+        resp = getattr(views_module, view_name)(request)
+        if hasattr(resp, "streaming_content"):
+            payload = b"".join(resp.streaming_content)
+        else:
+            payload = resp.content
+    return resp, captured, payload
+
+
+def _downstream_signature(view_name, captured):
+    """(question, model, third, user_timezone, user_time) as received by the
+    mocked datascraper call. ``third`` is current_url for the thinking views
+    and the parsed preferred_links list for the research views."""
+    args = captured.get("args", ())
+    kwargs = captured.get("kwargs", {})
+    if view_name == "adv_response_stream":
+        question, _messages, model, preferred_links = args
+        return (question, model, preferred_links,
+                kwargs.get("user_timezone"), kwargs.get("user_time"))
+    if view_name == "adv_response":
+        return (kwargs["user_input"], kwargs["model"], kwargs["preferred_links"],
+                kwargs.get("user_timezone"), kwargs.get("user_time"))
+    return (kwargs["user_input"], kwargs["model"], kwargs["current_url"],
+            kwargs.get("user_timezone"), kwargs.get("user_time"))
+
+
+@METHOD_GATE_OVERRIDES
+class DualAcceptChatViewTests(SimpleTestCase):
+    """Frozen POST contract on the four chat views: flat all-string JSON body,
+    same keys as the query params, body wins over query, GET unchanged."""
+
+    maxDiff = None
+
+    # One canonical param set, sent as GET query params and as the POST body.
+    PARAMS = {
+        "question": "parity question",
+        "models": "gpt-4o-mini",
+        "current_url": "https://example.com/page",
+        "use_unified": "true",
+        "user_timezone": "America/New_York",
+        "user_time": "2026-07-03T10:30:00",
+        "preferred_links": '["https://reuters.com"]',
+        "session_id": "sub-42",
+    }
+
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def _post_json(self, path, payload, query=""):
+        return self.factory.post(
+            path + query, data=json.dumps(payload), content_type="application/json"
         )
+
+    def test_post_json_body_reaches_downstream_with_get_parity(self):
+        # (a) POST works on all four views AND behaves exactly like the GET
+        # equivalent: the values that reach the mocked datascraper layer are
+        # identical for both methods.
+        for view_name, path in CHAT_VIEWS.items():
+            with self.subTest(view=view_name):
+                get_resp, get_captured, _ = _invoke_chat_view(
+                    view_name, self.factory.get(path, data=self.PARAMS)
+                )
+                post_resp, post_captured, _ = _invoke_chat_view(
+                    view_name, self._post_json(path, self.PARAMS)
+                )
+                self.assertEqual(get_resp.status_code, 200)
+                self.assertEqual(post_resp.status_code, 200)
+                get_sig = _downstream_signature(view_name, get_captured)
+                self.assertEqual(get_sig, _downstream_signature(view_name, post_captured))
+                self.assertEqual(get_sig[0], "parity question")
+                self.assertEqual(get_sig[1], "gpt-4o-mini")
+
+    def test_body_wins_over_query_and_merge_keeps_query_only_keys(self):
+        # (b) same-key conflict: the JSON body value wins; a key present only
+        # in the query string still applies (merge, not replace).
+        for view_name, path in CHAT_VIEWS.items():
+            with self.subTest(view=view_name):
+                req = self._post_json(
+                    path,
+                    {"question": "from body"},
+                    query="?question=from+query&models=query-model",
+                )
+                resp, captured, _ = _invoke_chat_view(view_name, req)
+                self.assertEqual(resp.status_code, 200)
+                sig = _downstream_signature(view_name, captured)
+                self.assertEqual(sig[0], "from body")
+                self.assertEqual(sig[1], "query-model")
+
+    def test_get_behavior_unchanged(self):
+        # (c) plain GET keeps working with the same response shape: JSON with
+        # 'resp' for the non-stream views, an SSE stream ending in a done
+        # frame for the *_stream views.
+        for view_name, path in CHAT_VIEWS.items():
+            with self.subTest(view=view_name):
+                req = self.factory.get(path, data={"question": "get question", "models": "m1"})
+                resp, captured, payload = _invoke_chat_view(view_name, req)
+                self.assertEqual(resp.status_code, 200)
+                self.assertEqual(_downstream_signature(view_name, captured)[0], "get question")
+                if view_name.endswith("_stream"):
+                    self.assertEqual(resp["Content-Type"], "text/event-stream")
+                    self.assertIn(b'event: connected', payload)
+                    self.assertIn(b'"done": true', payload)
+                else:
+                    self.assertEqual(json.loads(payload)["resp"], {"m1": "ok"})
+
+    @staticmethod
+    def _normalize_sse(payload):
+        # Two independent requests can never be literally byte-identical: the
+        # final frame embeds a fresh per-request session uuid and a wall-clock
+        # response_time_ms. Normalize exactly those two fields; every other
+        # byte must match.
+        payload = re.sub(rb'"session_id": "[0-9a-f]+"', b'"session_id": "X"', payload)
+        return re.sub(rb'"response_time_ms": \d+', b'"response_time_ms": 0', payload)
+
+    def test_post_sse_response_matches_get_sse_response(self):
+        # Stream-contract parity: same mocked downstream, same frames.
+        for view_name in ("chat_response_stream", "adv_response_stream"):
+            path = CHAT_VIEWS[view_name]
+            with self.subTest(view=view_name):
+                _, _, get_payload = _invoke_chat_view(
+                    view_name, self.factory.get(path, data={"question": "q", "models": "m1"})
+                )
+                _, _, post_payload = _invoke_chat_view(
+                    view_name, self._post_json(path, {"question": "q", "models": "m1"})
+                )
+                self.assertEqual(
+                    self._normalize_sse(get_payload), self._normalize_sse(post_payload)
+                )
+
+    def test_malformed_json_post_is_400(self):
+        # (f) chosen semantics: a syntactically invalid JSON body on POST is a
+        # loud client error (400 'invalid JSON body'), never a 500 and never a
+        # silent fallback to query params.
+        for view_name, path in CHAT_VIEWS.items():
+            with self.subTest(view=view_name):
+                req = self.factory.post(
+                    path + "?question=from+query",
+                    data="{not json",
+                    content_type="application/json",
+                )
+                resp = getattr(views_module, view_name)(req)
+                self.assertEqual(resp.status_code, 400)
+                self.assertEqual(json.loads(resp.content)["error"], "invalid JSON body")
+
+    def test_valid_but_non_object_json_body_falls_back_to_query(self):
+        # (f) companion: valid JSON that is not an object (here: a list) is
+        # tolerated as an empty body — same stance as
+        # datascraper.session_key._caller_session_id.
+        req = self.factory.post(
+            "/get_chat_response/?question=from+query",
+            data="[]",
+            content_type="application/json",
+        )
+        resp, captured, _ = _invoke_chat_view("chat_response", req)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(_downstream_signature("chat_response", captured)[0], "from query")
+
+    def test_non_string_body_values_are_ignored(self):
+        # Frozen contract: ALL body values are strings. A non-string value is
+        # treated as absent (query fallback applies) instead of type-confusing
+        # the view (e.g. .split on an int).
+        req = self.factory.post(
+            "/get_chat_response/?models=query-model",
+            data=json.dumps({"question": "q", "models": 123}),
+            content_type="application/json",
+        )
+        resp, captured, _ = _invoke_chat_view("chat_response", req)
+        self.assertEqual(resp.status_code, 200)
+        sig = _downstream_signature("chat_response", captured)
+        self.assertEqual(sig[0], "q")
+        self.assertEqual(sig[1], "query-model")
+
+
+CSRF_CLIENT_OVERRIDES = override_settings(
+    RATELIMIT_ENABLE=False,
+    # The test client sends Host: testserver over plain http; production
+    # settings would otherwise 400 (ALLOWED_HOSTS) or 301 (SECURE_SSL_REDIRECT
+    # defaults True when DEBUG=False — the Caddy-terminated prod posture).
+    ALLOWED_HOSTS=["testserver"],
+    SECURE_SSL_REDIRECT=False,
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "endpoint-protection-csrf-tests",
+        }
+    },
+)
+
+
+@CSRF_CLIENT_OVERRIDES
+class CsrfExemptDualAcceptTests(SimpleTestCase):
+    """(e) POST must survive CSRF enforcement: the extension sends no CSRF
+    token, so the dual-accept flip only works because the views are
+    @csrf_exempt. Client(enforce_csrf_checks=True) drives the REAL middleware
+    stack (CsrfViewMiddleware included); reaching the view body — the
+    'No question provided' 400 short-circuit, or log_question's 200 ack —
+    instead of a 403 proves the exemption holds end-to-end through routing."""
+
+    def setUp(self):
+        self.client = Client(enforce_csrf_checks=True)
+
+    def test_post_without_csrf_token_reaches_chat_view_bodies(self):
+        for view_name, path in CHAT_VIEWS.items():
+            with self.subTest(view=view_name):
+                resp = self.client.post(path, data="{}", content_type="application/json")
+                self.assertNotEqual(resp.status_code, 403, "csrf_exempt does not hold")
+                self.assertEqual(resp.status_code, 400)
+                self.assertEqual(json.loads(resp.content)["error"], "No question provided")
+
+    def test_post_without_csrf_token_reaches_log_question(self):
+        resp = self.client.post(
+            "/log_question/",
+            data=json.dumps({"question": "q", "button": "b", "current_url": "https://x.example/"}),
+            content_type="application/json",
+        )
+        self.assertNotEqual(resp.status_code, 403, "csrf_exempt does not hold")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(json.loads(resp.content)["status"], "success")
+
+
+@METHOD_GATE_OVERRIDES
+class LogQuestionDualAcceptTests(SimpleTestCase):
+    """(g) log_question dual-accepts GET and POST with the same frozen body
+    contract (key: question); PUT stays 405; malformed JSON is 400."""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def test_get_still_works(self):
+        req = self.factory.get(
+            "/log_question/",
+            data={"question": "why", "button": "thinking", "current_url": "https://x.example/"},
+        )
+        with self.assertLogs("api.views", level="INFO") as logs:
+            resp = views_module.log_question(req)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(json.loads(resp.content)["status"], "success")
+        self.assertTrue(any("Interaction [thinking]" in line for line in logs.output))
+
+    def test_post_json_body_reaches_the_log_line(self):
+        req = self.factory.post(
+            "/log_question/",
+            data=json.dumps(
+                {"question": "why", "button": "research", "current_url": "https://x.example/"}
+            ),
+            content_type="application/json",
+        )
+        with self.assertLogs("api.views", level="INFO") as logs:
+            resp = views_module.log_question(req)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(json.loads(resp.content)["status"], "success")
+        joined = "\n".join(logs.output)
+        self.assertIn("Interaction [research]", joined)
+        self.assertIn("Q='why", joined)
+
+    def test_body_wins_over_query(self):
+        req = self.factory.post(
+            "/log_question/?question=from+query&button=frombtn&current_url=https://x.example/",
+            data=json.dumps({"question": "from body"}),
+            content_type="application/json",
+        )
+        with self.assertLogs("api.views", level="INFO") as logs:
+            resp = views_module.log_question(req)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Q='from body", "\n".join(logs.output))
+
+    def test_malformed_json_post_is_400(self):
+        req = self.factory.post(
+            "/log_question/", data="{not json", content_type="application/json"
+        )
+        resp = views_module.log_question(req)
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(json.loads(resp.content)["error"], "invalid JSON body")
+
+    def test_put_is_405(self):
+        resp = views_module.log_question(self.factory.put("/log_question/"))
         self.assertEqual(resp.status_code, 405)
-        self.assertEqual(resp["Allow"], "GET")
+        self.assertEqual(resp["Allow"], "GET, POST")
 
 
 # ── health/ regression pin: un-ratelimited AND cache-backend independent ─────

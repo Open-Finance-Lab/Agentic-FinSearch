@@ -53,6 +53,7 @@ from datascraper import ssrf_guard
 
 from api.agent_budget import agent_run_slot, BudgetExceeded, ConcurrencyExceeded
 from api.identity import get_request_identity
+from api.request_params import MalformedJSONBody, merged_params
 
 logger = logging.getLogger(__name__)
 
@@ -251,13 +252,15 @@ def validate_claims(request: HttpRequest) -> JsonResponse:
 
  
 
-# Root-G Tier 2: the chat/agent surface is GET-by-contract (extension + SSE
-# clients read query params only), so pin the method on all five views. The
-# gate sits OUTSIDE @ratelimit (same stacking as validate_claims) so a
-# wrong-method probe is bounced with 405 without consuming the caller's
+# Root-G Tier 3 phase 1: the chat surface dual-accepts GET+POST while clients
+# migrate off query-string params (frozen contract: flat all-string JSON body,
+# same keys as the query params, body wins over a same-key query value; see
+# api.request_params). GET is deprecated and will be dropped in a later PR.
+# The method gate sits OUTSIDE @ratelimit (same stacking as validate_claims)
+# so a wrong-method probe is bounced with 405 without consuming the caller's
 # rate budget.
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def chat_response(request: HttpRequest) -> JsonResponse:
     """
@@ -266,10 +269,14 @@ def chat_response(request: HttpRequest) -> JsonResponse:
     Uses Unified Context Manager for full conversation history.
     """
     try:
-        question = request.GET.get('question', '')
-        selected_models = request.GET.get('models', 'gpt-4o-mini')
-        current_url = request.GET.get('current_url', '')
-        use_unified = request.GET.get('use_unified', 'true').lower() == 'true'
+        params = merged_params(request)
+    except MalformedJSONBody:
+        return JsonResponse({'error': 'invalid JSON body'}, status=400)
+    try:
+        question = params.get('question', '')
+        selected_models = params.get('models', 'gpt-4o-mini')
+        current_url = params.get('current_url', '')
+        use_unified = params.get('use_unified', 'true').lower() == 'true'
 
         if not question:
             return JsonResponse({'error': 'No question provided'}, status=400)
@@ -285,8 +292,8 @@ def chat_response(request: HttpRequest) -> JsonResponse:
             session_id=session_id,
             mode=ContextMode.THINKING,
             current_url=current_url,
-            user_timezone=request.GET.get('user_timezone'),
-            user_time=request.GET.get('user_time')
+            user_timezone=params.get('user_timezone'),
+            user_time=params.get('user_time')
         )
 
         context_mgr.add_user_message(session_id, question)
@@ -307,8 +314,8 @@ def chat_response(request: HttpRequest) -> JsonResponse:
                             message_list=messages,
                             model=model,
                             current_url=current_url,
-                            user_timezone=request.GET.get('user_timezone'),
-                            user_time=request.GET.get('user_time'),
+                            user_timezone=params.get('user_timezone'),
+                            user_time=params.get('user_time'),
                             session_id=session_id,
                         )
 
@@ -353,7 +360,7 @@ def chat_response(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def adv_response(request: HttpRequest) -> JsonResponse:
     """
@@ -362,10 +369,14 @@ def adv_response(request: HttpRequest) -> JsonResponse:
     Now uses Unified Context Manager for full conversation history.
     """
     try:
-        question = request.GET.get('question', '')
-        selected_models = request.GET.get('models', 'gpt-4o-mini')
-        preferred_links_json = request.GET.get('preferred_links', '')
-        current_url = request.GET.get('current_url', '')
+        params = merged_params(request)
+    except MalformedJSONBody:
+        return JsonResponse({'error': 'invalid JSON body'}, status=400)
+    try:
+        question = params.get('question', '')
+        selected_models = params.get('models', 'gpt-4o-mini')
+        preferred_links_json = params.get('preferred_links', '')
+        current_url = params.get('current_url', '')
 
         if not question:
             return JsonResponse({'error': 'No question provided'}, status=400)
@@ -387,8 +398,8 @@ def adv_response(request: HttpRequest) -> JsonResponse:
             session_id=session_id,
             mode=ContextMode.RESEARCH,
             current_url=current_url,
-            user_timezone=request.GET.get('user_timezone'),
-            user_time=request.GET.get('user_time')
+            user_timezone=params.get('user_timezone'),
+            user_time=params.get('user_time')
         )
 
         context_mgr.add_user_message(session_id, question)
@@ -411,8 +422,8 @@ def adv_response(request: HttpRequest) -> JsonResponse:
                             model=model,
                             preferred_links=preferred_links,
                             stream=False,
-                            user_timezone=request.GET.get('user_timezone'),
-                            user_time=request.GET.get('user_time')
+                            user_timezone=params.get('user_timezone'),
+                            user_time=params.get('user_time')
                         )
 
                         responses[model] = _wrap_for_client(response, session_id)
@@ -478,100 +489,7 @@ def adv_response(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
-@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
-def agent_chat_response(request: HttpRequest) -> JsonResponse:
-    """
-    Process chat response via Agent with MCP tools (SEC-EDGAR, filesystem).
-    Note: Browser automation has been removed. For web research, use Research mode.
-    Uses Unified Context Manager for full conversation history.
-    """
-    try:
-        question = request.GET.get('question', '')
-        selected_models = request.GET.get('models', 'gpt-4o-mini')
-        current_url = request.GET.get('current_url', '')
-
-        if not question:
-            return JsonResponse({'error': 'No question provided'}, status=400)
-
-        session_id = _get_session_id(request)
-
-        integration = get_context_integration()
-        context_mgr = get_context_manager()
-
-        context_mgr.update_metadata(
-            session_id=session_id,
-            mode=ContextMode.THINKING,
-            current_url=current_url,
-            user_timezone=request.GET.get('user_timezone'),
-            user_time=request.GET.get('user_time')
-        )
-
-        context_mgr.add_user_message(session_id, question)
-
-        messages = context_mgr.get_formatted_messages_for_api(session_id)
-
-        models = [m.strip() for m in selected_models.split(',') if m.strip()]
-        responses = {}
-
-        try:
-            with agent_run_slot(get_request_identity(request)):
-                for model in models:
-                    try:
-                        start_time = time.time()
-
-                        response, _sources = ds.create_agent_response(
-                            user_input=question,
-                            message_list=messages,
-                            model=model,
-                            current_url=current_url,
-                            user_timezone=request.GET.get('user_timezone'),
-                            user_time=request.GET.get('user_time'),
-                            session_id=session_id,
-                        )
-
-                        responses[model] = _wrap_for_client(response, session_id)
-
-                        response_time_ms = int((time.time() - start_time) * 1000)
-                        context_mgr.add_assistant_message(
-                            session_id=session_id,
-                            content=response,
-                            model=model,
-                            tools_used=[],
-                            response_time_ms=response_time_ms
-                        )
-
-                    except Exception as e:
-                        responses[model] = f"Error: {_safe_error_message(e, f'model {model}')}"
-        except (ConcurrencyExceeded, BudgetExceeded):
-            return _busy_response()
-
-        stats = context_mgr.get_session_stats(session_id)
-
-        first_response = next(iter(responses.values()), "No response")
-        logger.info(f"Interaction [agent_chat]: URL={current_url}, Q='{question[:50]}...', Resp='{str(first_response)[:50]}...'")
-
-        result = {
-            'resp': responses,
-            'context_stats': {
-                'session_id': session_id,
-                'mode': stats['mode'],
-                'message_count': stats['message_count'],
-                'token_count': stats['token_count'],
-                'fetched_context': stats['fetched_context_counts']
-            }
-        }
-
-        return JsonResponse(result)
-
-    except Exception as e:
-        logger.error(f"Agent response error: {e}", exc_info=True)
-        return JsonResponse({'error': _safe_error_message(e, request.path)}, status=500)
-
-
-
-@csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def chat_response_stream(request: HttpRequest) -> StreamingHttpResponse:
     """
@@ -579,10 +497,14 @@ def chat_response_stream(request: HttpRequest) -> StreamingHttpResponse:
     Note: Browser automation has been removed. For web research, use Research mode.
     """
     try:
+        params = merged_params(request)
+    except MalformedJSONBody:
+        return JsonResponse({'error': 'invalid JSON body'}, status=400)
+    try:
         slot_cm = None
-        question = request.GET.get('question', '')
-        selected_models = request.GET.get('models', 'gpt-4o-mini')
-        current_url = request.GET.get('current_url', '')
+        question = params.get('question', '')
+        selected_models = params.get('models', 'gpt-4o-mini')
+        current_url = params.get('current_url', '')
 
         if not question:
             return JsonResponse({'error': 'No question provided'}, status=400)
@@ -600,8 +522,8 @@ def chat_response_stream(request: HttpRequest) -> StreamingHttpResponse:
 
         session_id = _get_session_id(request)
 
-        user_timezone = request.GET.get('user_timezone')
-        user_time = request.GET.get('user_time')
+        user_timezone = params.get('user_timezone')
+        user_time = params.get('user_time')
 
         context_mgr = get_context_manager()
         integration = get_context_integration()
@@ -749,16 +671,20 @@ def chat_response_stream(request: HttpRequest) -> StreamingHttpResponse:
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def adv_response_stream(request: HttpRequest) -> StreamingHttpResponse:
     """Process streaming advanced chat response from selected models using SSE"""
     try:
+        params = merged_params(request)
+    except MalformedJSONBody:
+        return JsonResponse({'error': 'invalid JSON body'}, status=400)
+    try:
         slot_cm = None
-        question = request.GET.get('question', '')
-        selected_models = request.GET.get('models', 'gpt-4o-mini')
-        current_url = request.GET.get('current_url', '')
-        preferred_links_json = request.GET.get('preferred_links', '')
+        question = params.get('question', '')
+        selected_models = params.get('models', 'gpt-4o-mini')
+        current_url = params.get('current_url', '')
+        preferred_links_json = params.get('preferred_links', '')
 
         preferred_links = []
         if preferred_links_json:
@@ -787,8 +713,8 @@ def adv_response_stream(request: HttpRequest) -> StreamingHttpResponse:
             session_id=session_id,
             mode=ContextMode.RESEARCH,
             current_url=current_url,
-            user_timezone=request.GET.get('user_timezone'),
-            user_time=request.GET.get('user_time')
+            user_timezone=params.get('user_timezone'),
+            user_time=params.get('user_time')
         )
 
         context_mgr.add_user_message(session_id, question)
@@ -813,8 +739,8 @@ def adv_response_stream(request: HttpRequest) -> StreamingHttpResponse:
                     messages,
                     model,
                     preferred_links,
-                    user_timezone=request.GET.get('user_timezone'),
-                    user_time=request.GET.get('user_time')
+                    user_timezone=params.get('user_timezone'),
+                    user_time=params.get('user_time')
                 )
 
                 previous_loop = None
@@ -1093,40 +1019,6 @@ def clear(request: HttpRequest) -> JsonResponse:
         return JsonResponse({'error': _safe_error_message(e, request.path)}, status=500)
 
 
-@csrf_exempt
-@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
-def get_memory_stats(request: HttpRequest) -> JsonResponse:
-    """
-    Get context statistics for current session.
-    Now uses Unified Context Manager.
-    """
-    try:
-        session_id = _get_session_id(request)
-
-        integration = get_context_integration()
-
-        stats = integration.get_context_stats(session_id)
-
-        return JsonResponse({
-            'stats': {
-                'session_id': session_id,
-                'mode': stats['mode'],
-                'message_count': stats['message_count'],
-                'token_count': stats['token_count'],
-                'fetched_context_counts': stats['fetched_context_counts'],
-                'total_fetched_items': stats['total_fetched_items'],
-                'current_url': stats.get('current_url'),
-                'last_updated': stats.get('last_updated'),
-                'using_unified_context': True
-            }
-        })
-
-    except Exception as e:
-        return JsonResponse({'stats': {"error": _safe_error_message(e, "get_stats"), "using_unified_context": False}}, status=500)
-
-
-
-
 
 # NEVER decorate health with @ratelimit: the limiter fails closed when the
 # counter cache is down (django-ratelimit get_usage returns should_limit for a
@@ -1161,12 +1053,22 @@ def get_sources(request: HttpRequest) -> JsonResponse:
     return JsonResponse({'resp': sources})
 
 
+# Tier 3 phase 1: dual-accept like the chat views (same frozen JSON-body
+# contract, key: question). csrf_exempt is required once POST is accepted —
+# the extension has no CSRF token; the endpoint stays side-effect-free
+# (log line only) so the exemption is bounded-damage by construction.
+@csrf_exempt
+@require_http_methods(['GET', 'POST'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def log_question(request: HttpRequest) -> JsonResponse:
     """Legacy question logging (redirects to enhanced logging)"""
-    question = request.GET.get('question', '')
-    button_clicked = request.GET.get('button', '')
-    current_url = request.GET.get('current_url', '')
+    try:
+        params = merged_params(request)
+    except MalformedJSONBody:
+        return JsonResponse({'error': 'invalid JSON body'}, status=400)
+    question = params.get('question', '')
+    button_clicked = params.get('button', '')
+    current_url = params.get('current_url', '')
 
     if question and button_clicked and current_url:
         # [:50] like every other Interaction line: this sink logs verbatim
@@ -1183,33 +1085,6 @@ def get_preferred_urls(request: HttpRequest) -> JsonResponse:
     manager = get_manager()
     urls = manager.get_links()
     return JsonResponse({'urls': urls})
-
-
-@csrf_exempt
-@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
-def add_preferred_url(request: HttpRequest) -> JsonResponse:
-    """Add new preferred URL to storage"""
-    if request.method == 'POST':
-        try:
-            new_url = request.POST.get('url')
-            if not new_url and request.body:
-                data = json.loads(request.body)
-                new_url = data.get('url')
-
-            if new_url:
-                manager = get_manager()
-                success = manager.add_link(new_url)
-
-                if success:
-                    logger.info(f"Interaction [add_url]: URL={new_url}, Msg='Added preferred URL: {new_url}'")
-                    return JsonResponse({'status': 'success'})
-                else:
-                    return JsonResponse({'status': 'exists'})
-        except Exception as e:
-            logger.error(f"Error adding preferred URL: {e}")
-            return JsonResponse({'status': 'error', 'message': _safe_error_message(e, request.path)}, status=500)
-
-    return JsonResponse({'status': 'failed'}, status=400)
 
 
 @csrf_exempt

@@ -106,7 +106,6 @@ backend/
 - `/api/auto_scrape/` - Auto-scrape current URL for context
 - `/clear_messages/` - Clear session conversation context
 - `/get_source_urls/` - Retrieve sources used in research queries
-- `/api/get_memory_stats/` - Session context statistics
 - `/api/get_available_models/` - List available models
 
 **`api/openai_views.py`** – OpenAI-compatible API (for testers & automation):
@@ -353,19 +352,16 @@ See `InternalDocs/api/API_DOCUMENTATION.md` for the complete API reference with 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/health/` | GET | Service health check |
-| `/get_chat_response/` | GET | Thinking mode chat |
-| `/get_chat_response_stream/` | GET | Thinking mode with SSE streaming |
-| `/get_adv_response/` | GET | Research mode with web search |
-| `/get_adv_response_stream/` | GET | Research mode with SSE streaming |
+| `/get_chat_response/` | GET or POST (POST preferred; GET deprecated, removal planned) | Thinking mode chat |
+| `/get_chat_response_stream/` | GET or POST (POST preferred; GET deprecated, removal planned) | Thinking mode with SSE streaming |
+| `/get_adv_response/` | GET or POST (POST preferred; GET deprecated, removal planned) | Research mode with web search |
+| `/get_adv_response_stream/` | GET or POST (POST preferred; GET deprecated, removal planned) | Research mode with SSE streaming |
 | `/input_webtext/` | POST | Accept pre-scraped page content |
 | `/api/auto_scrape/` | POST | Auto-scrape current URL |
-| `/clear_messages/` | GET | Clear session conversation context |
+| `/clear_messages/` | POST | Clear session conversation context |
 | `/get_source_urls/` | GET | Get sources used in queries |
 | `/api/get_preferred_urls/` | GET | Get preferred URLs list |
-| `/api/add_preferred_url/` | POST | Add preferred URL |
 | `/api/sync_preferred_urls/` | POST | Bulk sync preferred URLs |
-| `/get_agent_response/` | GET | Agent-mode response |
-| `/api/get_memory_stats/` | GET | Session context statistics |
 | `/api/get_available_models/` | GET | List available models with config |
 
 **Common Query Parameters:**
@@ -376,6 +372,12 @@ See `InternalDocs/api/API_DOCUMENTATION.md` for the complete API reference with 
 - `user_timezone` – IANA timezone string
 - `user_time` – ISO 8601 current time
 - `preferred_links` – JSON array of preferred source URLs (research mode)
+
+For the dual-accept chat endpoints, POST sends the same keys as a flat JSON
+object whose values are all strings (`Content-Type: application/json`, e.g.
+`{"question": "...", "models": "gpt-4o-mini"}`; `preferred_links` stays a
+JSON-array-encoded string). A JSON-body value wins over a same-key query
+parameter; a syntactically invalid JSON body is rejected with 400.
 
 ---
 

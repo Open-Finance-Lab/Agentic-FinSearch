@@ -281,15 +281,17 @@ context_mgr.clear_session(session_id)
 
 | Endpoint | Method | Description | Context Operations |
 |----------|--------|-------------|-------------------|
-| `/get_chat_response/` | GET | Standard chat (Thinking Mode) | Updates metadata, adds user message, adds assistant response |
-| `/get_chat_response_stream/` | GET | Streaming chat | Same as above, streaming response |
-| `/get_adv_response/` | GET | Research Mode with web search | Performs search, adds to `fetched_context["web_search"]` |
-| `/get_adv_response_stream/` | GET | Streaming research | Same as above, streaming |
-| `/get_agent_response/` | POST | MCP agent-enabled chat | Uses PromptBuilder for prompt assembly |
+| `/get_chat_response/` | GET or POST (POST preferred; GET deprecated, removal planned) | Standard chat (Thinking Mode) | Updates metadata, adds user message, adds assistant response |
+| `/get_chat_response_stream/` | GET or POST (POST preferred; GET deprecated, removal planned) | Streaming chat | Same as above, streaming response |
+| `/get_adv_response/` | GET or POST (POST preferred; GET deprecated, removal planned) | Research Mode with web search | Performs search, adds to `fetched_context["web_search"]` |
+| `/get_adv_response_stream/` | GET or POST (POST preferred; GET deprecated, removal planned) | Streaming research | Same as above, streaming |
 | `/input_webtext/` | POST | Ingest scraped page content | Adds to `fetched_context["js_scraping"]` |
 | `/clear_messages/` | POST | Clear conversation history | Calls `clear_conversation_history()` |
-| `/api/get_memory_stats/` | GET | Get session statistics | Returns token_count, message_count, fetched_context_counts |
 | `/api/auto_scrape/` | POST | Auto-scrape current page | Scrapes page, adds to js_scraping |
+
+POST on the dual-accept chat endpoints carries the same keys as a flat JSON
+object of strings (`Content-Type: application/json`); a body value wins over a
+same-key query parameter, and syntactically invalid JSON returns 400.
 
 ## Implementation Details
 
