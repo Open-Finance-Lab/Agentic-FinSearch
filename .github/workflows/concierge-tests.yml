@@ -49,6 +49,10 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     needs: test
+    # DEPLOY_SSH_KEY is an ENVIRONMENT secret (Production: deployment branch
+    # policy = main only) -- non-main refs cannot release the prod SSH key even
+    # if the ref-gate above is edited away (same stanza as backend/heartbeat).
+    environment: Production
     # Serialize deploys so two merges in quick succession can't land out of order and
     # leave the droplet on the older commit.
     concurrency:

@@ -232,6 +232,19 @@ class DeployUserNamespaceTests(SimpleTestCase):
         self.assertIsNone(re.search(r"\bprune\b[^\n]*(\s-\w*a\b|\s--all\b)", code))
         self.assertIsNone(re.search(r"""--filter[= ]["']?until""", code))
 
+    def test_deploy_job_bound_to_production_environment(self):
+        # DEPLOY_SSH_KEY (the prod SSH key) and GHCR_READ_TOKEN are ENVIRONMENT
+        # secrets on Production, whose deployment branch policy is main-only. The
+        # job must reference that environment or the secrets simply don't resolve
+        # -- and, critically, a workflow edited/dispatched on a non-main ref can
+        # never release them, independently of the ref-gate `if:`. Dropping this
+        # key would silently fall back to... nothing (the repo-scoped copies are
+        # deleted), so the deploy-gate step would skip deploys forever.
+        wf = _read(DEPLOY_WORKFLOW)
+        deploy_job = wf[wf.index("\n  deploy:"):wf.index("Deploy to Fedora droplet")]
+        self.assertIn("environment:", deploy_job)
+        self.assertIn("name: Production", deploy_job)
+
     def test_deploy_job_serialized_by_concurrency_group(self):
         # Without serialization, two quick-succession merges run overlapping deploy
         # scripts against the same droplet: they can land out of order, and the
