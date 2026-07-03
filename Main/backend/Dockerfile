@@ -40,7 +40,8 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     TRUTHLAYER_DB_PATH=/app/runtime/truthlayer.duckdb \
-    HOME=/home/fingpt
+    HOME=/home/fingpt \
+    PREFERRED_LINKS_PATH=/app/runtime/preferred_links.json
 
 COPY . .
 
@@ -82,6 +83,33 @@ RUN groupadd --system --gid 1001 fingpt \
     && useradd --system --uid 1001 --gid fingpt --no-create-home fingpt \
     && mkdir -p /home/fingpt \
     && chown -R fingpt:fingpt /app/staticfiles /app/media /app/logs /tmp/fingpt_cache /app/runtime /home/fingpt
+
+# Pre-bake Playwright's DEPENDENCIES_VALIDATED marker so the --read-only rootfs
+# (backend-deploy.yml) never needs the write. At FIRST browser launch Playwright
+# validates host requirements (an ldd walk over the browser executable) and caches
+# success by writing a 0-byte DEPENDENCIES_VALIDATED marker next to the executable
+# (driver/package/lib/server/registry/index.js, _validateHostRequirementsForExecutable-
+# IfNeeded). The write itself is fail-SOFT (`.catch(() => {})`), so under --read-only
+# nothing crashes -- but the marker never lands and every fresh process re-runs the
+# validation on its first launch. Bake it organically instead: a real one-time
+# chromium launch as the runtime uid (setpriv, same drop the entrypoint performs;
+# there is deliberately no USER line), i.e. exactly the code path that writes the
+# marker in prod today. /ms-playwright ships world-writable in the Playwright base
+# image, so uid1001 can write it. --no-sandbox/--disable-dev-shm-usage: the docker
+# build environment lacks the userns the Chromium sandbox wants and its /dev/shm is
+# tiny; both flags only shape the spawned browser process, not the dependency
+# validation that writes the marker. The trailing `test -f` fails the BUILD loudly
+# if Playwright ever moves the marker. Residual: the marker's validity window is 30
+# days from its mtime (= image build time); past that, Playwright re-validates once
+# per process and fail-soft skips the re-write -- back to pre-marker behavior,
+# never a crash.
+RUN setpriv --reuid=1001 --regid=1001 --init-groups \
+        python -c "from playwright.sync_api import sync_playwright; \
+p = sync_playwright().start(); \
+b = p.chromium.launch(args=['--no-sandbox', '--disable-dev-shm-usage']); \
+b.close(); p.stop(); print('✓ Chromium one-time launch OK')" \
+    && test -f /ms-playwright/chromium_headless_shell-*/DEPENDENCIES_VALIDATED \
+    && echo "✓ DEPENDENCIES_VALIDATED marker baked"
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 
