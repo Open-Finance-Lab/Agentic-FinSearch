@@ -1,6 +1,5 @@
 // settings_window.js
 import { availableModels, selectedModel, getSelectedModel, setSelectedModel, fetchAvailableModels, getAvailableModels, getModelDetails } from '../config.js';
-import { buildBackendUrl } from '../backendConfig.js';
 //import { loadPreferredLinks, createAddLinkButton } from '../helpers.js';
 import { createLinkManager } from './link_manager.js';
 
@@ -230,61 +229,13 @@ function createSettingsWindow(isFixedModeRef, settingsButton, positionModeButton
         // Any immediate actions when the checkbox changes can be handled here
         console.log ("switch value:", ragSwitch.checked);
 
-        
         if(ragSwitch.checked && RAGPath !== '') {
-            console.log("BODY:", JSON.stringify({ 'filePaths': [RAGPath] }));
-        
-            // Retrieve all file contents
-            const fileHandles = [];
-            for await (const entry of RAGPath.values()) {
-                if (entry.kind === 'file') {
-                    fileHandles.push(entry);  // Store file handles
-                }
-            }
-            const filesPromises = fileHandles.map(async (handle) => {
-                const file = await handle.getFile();
-                const ext = file.name.split('.').pop().toLowerCase();
-                console.log(`[DEBUG] extension: ${ext}`)
-                let text = "hello";
-                if (ext === 'txt') {
-                    text = await file.text();
-                } else if (ext === 'pdf') {
-                    text = await extractTextFromPDF(file);
-                } else if (ext === 'docx') {
-                    text = await extractTextFromDocx(file);
-                } else {
-                    console.warn(`Unsupported file type: ${file.name}`);
-                }
-                console.log(`[DEBUG] extension: ${text}`)
-                return { name: file.name, content: text };
-            });
-            const filesData = await Promise.all(filesPromises);
-            console.log("filesdata: ", filesData);
-            
-            // Create a FormData object
-            const formData = new FormData();
-
-            // Convert your data to a JSON string and add it as a file
-            const jsonBlob = new Blob([JSON.stringify({ 'filePaths': filesData })], 
-                            { type: 'application/json' });
-            formData.append('json_data', jsonBlob, 'data.json');
-
-            // Making the POST request to Flask
-            fetch(buildBackendUrl('/api/folder_path'), {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.message) {
-                    console.log("Success:", data.message);
-                } else if (data.error) {
-                    console.error("Error:", data.error);
-                }
-            })
-            .catch(error => {
-                console.error("Error processing data:", error);
-            });
+            // The old '/api/folder_path' upload was a Flask-era leftover:
+            // that route no longer exists in the Django backend, so the
+            // folder contents are no longer read or uploaded. The switch is
+            // disabled in the UI; if local-folder RAG is ever re-enabled,
+            // wire this handler to a real endpoint first.
+            console.warn('[RAG] Local folder upload is not supported by the current backend; the selected folder was not uploaded.');
         }
     };
 
