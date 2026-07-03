@@ -263,7 +263,6 @@ function createActionButtons(
   userQuestion,
   promptMode,
   useRAG,
-  useMCP,
   selectedModel
 ) {
   const buttonContainer = document.createElement('div');
@@ -474,18 +473,14 @@ async function handleChatResponse(question, promptMode = false, useStreaming = t
   const ragSwitchEl = document.getElementById('ragSwitch');
   const useRAG = ragSwitchEl ? !!ragSwitchEl.checked : false;
 
-  // Read the MCP mode toggle
-  const mcpSwitchEl = document.getElementById('mcpModeSwitch');
-  const useMCP = mcpSwitchEl ? !!mcpSwitchEl.checked : false;
-
   const selectedModel = getSelectedModel();
 
-  // Check if streaming is available (not for MCP or RAG modes)
-  const canStream = useStreaming && !useMCP && !useRAG;
+  // Check if streaming is available (not for RAG mode)
+  const canStream = useStreaming && !useRAG;
   if (!canStream) {
     pushAgentStatus({
       label: 'Processing',
-      detail: useMCP ? 'MCP mode' : useRAG ? 'RAG mode' : 'Standard pipeline',
+      detail: useRAG ? 'RAG mode' : 'Standard pipeline',
     });
   }
 
@@ -505,7 +500,6 @@ async function handleChatResponse(question, promptMode = false, useStreaming = t
       selectedModel,
       promptMode,
       useRAG,
-      useMCP,
       {
         // onChunk callback - called for each chunk of text
         onChunk: (_chunk, fullResponse) => {
@@ -549,7 +543,6 @@ async function handleChatResponse(question, promptMode = false, useStreaming = t
             question,
             promptMode,
             useRAG,
-            useMCP,
             selectedModel
           );
           attachValidateButtonIfClaims(actionButtons, {
@@ -638,15 +631,15 @@ async function handleChatResponse(question, promptMode = false, useStreaming = t
     );
   } else {
     // Use regular non-streaming response
-    getChatResponse(question, selectedModel, promptMode, useRAG, useMCP)
+    getChatResponse(question, selectedModel, promptMode, useRAG)
       .then((data) => {
         const endTime = performance.now();
         const responseTime = endTime - startTime;
         console.log(`Time taken for response: ${responseTime} ms`);
 
-        // Extract the reply. All modes (including the MCP toggle, which now
-        // shares the standard chat endpoint) return `data.resp[...]`; the
-        // `data.reply` fallback covers older servers' MCP-shaped payloads.
+        // Extract the reply. The chat endpoints return `data.resp[model]`;
+        // the `data.reply` fallback covers older servers' alternate payload
+        // shape.
         const modelResponse = data.resp ? data.resp[selectedModel] : data.reply;
 
         let responseText = '';
@@ -673,7 +666,6 @@ async function handleChatResponse(question, promptMode = false, useStreaming = t
           question,
           promptMode,
           useRAG,
-          useMCP,
           selectedModel
         );
         attachValidateButtonIfClaims(actionButtons, {

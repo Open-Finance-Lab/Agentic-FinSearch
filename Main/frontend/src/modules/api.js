@@ -94,11 +94,10 @@ function buildChatRequestBody(question, selectedModel, promptMode) {
 }
 
 // Function to get chat response from server
-function getChatResponse(question, selectedModel, promptMode, useRAG, useMCP) {
-    // The MCP toggle used to select a dedicated 'get_mcp_response' endpoint
-    // that does not exist in the backend (every call 404'd). The regular
-    // chat endpoint already runs the LLM with the available MCP tools, so
-    // all modes share the two real endpoints now.
+function getChatResponse(question, selectedModel, promptMode, useRAG) {
+    // Every mode shares the two real chat endpoints; the LLM already runs
+    // with the available MCP tools server-side, so there is no separate MCP
+    // endpoint or client-side toggle.
     const endpoint = promptMode ? 'get_adv_response' : 'get_chat_response';
 
     return fetch(buildBackendUrl(`/${endpoint}/`), {
@@ -130,7 +129,7 @@ function getChatResponse(question, selectedModel, promptMode, useRAG, useMCP) {
 //   readyState CLOSED behavior on non-200 responses;
 // - the returned cleanup function cancels the stream (AbortController now,
 //   eventSource.close() before).
-function getChatResponseStream(question, selectedModel, promptMode, useRAG, useMCP, callbacks = {}) {
+function getChatResponseStream(question, selectedModel, promptMode, useRAG, callbacks = {}) {
     const {
         onChunk,
         onSources,
@@ -138,22 +137,6 @@ function getChatResponseStream(question, selectedModel, promptMode, useRAG, useM
         onError,
         onStatus,
     } = callbacks;
-
-    // MCP mode doesn't support streaming yet
-    if (useMCP) {
-        return getChatResponse(question, selectedModel, promptMode, useRAG, useMCP)
-            .then(data => {
-                const modelResponse = data.resp ? data.resp[selectedModel] : data.reply;
-                if (typeof onComplete === 'function') {
-                    onComplete(modelResponse, data);
-                }
-            })
-            .catch(error => {
-                if (typeof onError === 'function') {
-                    onError(error);
-                }
-            });
-    }
 
     // Build SSE endpoint based on mode (research vs thinking)
     const url = buildBackendUrl(promptMode ? '/get_adv_response_stream/' : '/get_chat_response_stream/');

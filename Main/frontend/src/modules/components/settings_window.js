@@ -174,22 +174,6 @@ function createSettingsWindow(isFixedModeRef, settingsButton, positionModeButton
 
 
 
-    // —– MCP Mode Toggle —–
-    // MCP Mode toggle temporarily disabled
-    /*
-    const mcpLabel = document.createElement('label');
-    mcpLabel.className = 'settings-checkbox-label';
-    mcpLabel.innerText = "MCP Mode";
-    const mcpSwitch = document.createElement('input');
-    mcpSwitch.type = "checkbox";
-    mcpSwitch.id = "mcpModeSwitch";
-    mcpSwitch.style.transform = 'translate(4px, -2px)';
-    mcpLabel.appendChild(mcpSwitch);
-    */
-
-
-
-
     // RAG Section
     // RAG settings temporarily disabled
     /*
@@ -335,7 +319,6 @@ function createSettingsWindow(isFixedModeRef, settingsButton, positionModeButton
     */
 
     // Append elements to settings window
-    // settings_window.appendChild(mcpLabel);
     // settings_window.appendChild(ragSectionContainer);
 
     settingsButton.onclick = function (event) {
