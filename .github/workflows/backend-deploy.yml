@@ -125,6 +125,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     if: ${{ github.ref == 'refs/heads/main' }}
+    # DEPLOY_SSH_KEY / GHCR_READ_TOKEN are ENVIRONMENT secrets (Production has a
+    # deployment branch policy of main only), not repo-scoped: even a workflow
+    # edited or dispatched on a non-main ref cannot release the prod SSH key.
+    # This gates the secret itself, independently of the ref-gate above -- the
+    # two layers fail separately (same stanza as the heartbeat/concierge jobs).
+    environment:
+      name: Production
+      url: https://agenticfinsearch.org
     # Serialize deploys so two merges in quick succession can't land out of order,
     # leave the droplet on the older commit, or -- now that superseded images are
     # retired below -- rmi an in-flight peer's freshly pulled, still container-less
