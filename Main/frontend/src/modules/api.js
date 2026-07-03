@@ -1,6 +1,7 @@
 // api.js
 
 import { buildBackendUrl } from './backendConfig.js';
+import { createSSEParser } from './sse.js';
 
 // Session ID management
 let currentSessionId = sessionStorage.getItem('fingpt_session_id');
@@ -54,48 +55,58 @@ function getUserTimeInfo() {
     };
 }
 
-// Function to get chat response from server (now supports MCP mode)
-function getChatResponse(question, selectedModel, promptMode, useRAG, useMCP) {
-    const encodedQuestion = encodeURIComponent(question);
-    const currentUrl = window.location.href;
-    const encodedCurrentUrl = encodeURIComponent(currentUrl);
-
-    // Get user's timezone and time
+// Build the flat JSON body for the frozen POST contract shared by the chat
+// endpoints. All values are strings and every key is optional; the server
+// merges JSON-body values over same-key query-string values (dual-accept
+// window). `preferred_links` stays a JSON-array-encoded STRING — the same
+// encoding the old GET query param carried.
+function buildChatRequestBody(question, selectedModel, promptMode) {
     const timeInfo = getUserTimeInfo();
-    const encodedTimezone = encodeURIComponent(timeInfo.timezone);
-    const encodedCurrentTime = encodeURIComponent(timeInfo.currentTime);
 
-    let endpoint;
-    if (useMCP) {
-        endpoint = 'get_mcp_response';
-    } else {
-        endpoint = promptMode ? 'get_adv_response' : 'get_chat_response';
+    const body = {
+        question: String(question),
+        models: String(selectedModel),
+        current_url: window.location.href,
+        use_unified: 'true',
+        user_timezone: timeInfo.timezone,
+        user_time: timeInfo.currentTime,
+    };
+
+    // Every key is optional in the contract: omit session_id rather than
+    // sending the literal string "null" the old GET template produced.
+    if (currentSessionId) {
+        body.session_id = String(currentSessionId);
     }
 
-    // Get preferred links from localStorage for advanced mode
-    let url = `${buildBackendUrl(`/${endpoint}/`)}?question=${encodedQuestion}` +
-        `&models=${selectedModel}` +
-        `&is_advanced=${promptMode}` +
-        `&use_rag=${useRAG}` +
-        `&use_memory=true` +
-        `&session_id=${currentSessionId}` +
-        `&current_url=${encodedCurrentUrl}` +
-        `&user_timezone=${encodedTimezone}` +
-        `&user_time=${encodedCurrentTime}`;
-
-    // Add preferred links if in advanced mode
+    // Add preferred links if in advanced/research mode
     if (promptMode) {
         try {
             const preferredLinks = JSON.parse(localStorage.getItem('preferredLinks') || '[]');
             if (preferredLinks.length > 0) {
-                url += `&preferred_links=${encodeURIComponent(JSON.stringify(preferredLinks))}`;
+                body.preferred_links = JSON.stringify(preferredLinks);
             }
         } catch (e) {
             console.error('Error getting preferred links:', e);
         }
     }
 
-    return fetch(url, { method: 'GET', credentials: 'include' })
+    return body;
+}
+
+// Function to get chat response from server
+function getChatResponse(question, selectedModel, promptMode, useRAG, useMCP) {
+    // The MCP toggle used to select a dedicated 'get_mcp_response' endpoint
+    // that does not exist in the backend (every call 404'd). The regular
+    // chat endpoint already runs the LLM with the available MCP tools, so
+    // all modes share the two real endpoints now.
+    const endpoint = promptMode ? 'get_adv_response' : 'get_chat_response';
+
+    return fetch(buildBackendUrl(`/${endpoint}/`), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildChatRequestBody(question, selectedModel, promptMode)),
+    })
         .then(response => response.json())
         .catch(error => {
             console.error('There was a problem with your fetch operation:', error);
@@ -103,7 +114,22 @@ function getChatResponse(question, selectedModel, promptMode, useRAG, useMCP) {
         });
 }
 
-// Function to get streaming chat response using EventSource
+// Function to get streaming chat response via POST fetch-streaming SSE.
+//
+// This replaces the old GET + EventSource transport with the frozen POST
+// contract while reproducing the previous observable behavior exactly:
+// - same JSON event handling (error/content/status/used_urls/used_sources/
+//   done/memory_stats) and the same callback surface;
+// - same reconnect semantics: if the connection drops (or the stream ends
+//   without a `done` event) the request is retried up to 3 times, and — as
+//   with EventSource auto-reconnect before — each retry RE-ISSUES the
+//   request server-side (pre-existing semantics);
+// - a successful `event: connected` frame resets the retry counter, as the
+//   old 'connected' listener did;
+// - an HTTP error status is fatal without retry, matching EventSource's
+//   readyState CLOSED behavior on non-200 responses;
+// - the returned cleanup function cancels the stream (AbortController now,
+//   eventSource.close() before).
 function getChatResponseStream(question, selectedModel, promptMode, useRAG, useMCP, callbacks = {}) {
     const {
         onChunk,
@@ -112,20 +138,12 @@ function getChatResponseStream(question, selectedModel, promptMode, useRAG, useM
         onError,
         onStatus,
     } = callbacks;
-    const encodedQuestion = encodeURIComponent(question);
-    const currentUrl = window.location.href;
-    const encodedCurrentUrl = encodeURIComponent(currentUrl);
-
-    // Get user's timezone and time
-    const timeInfo = getUserTimeInfo();
-    const encodedTimezone = encodeURIComponent(timeInfo.timezone);
-    const encodedCurrentTime = encodeURIComponent(timeInfo.currentTime);
 
     // MCP mode doesn't support streaming yet
     if (useMCP) {
         return getChatResponse(question, selectedModel, promptMode, useRAG, useMCP)
             .then(data => {
-                const modelResponse = data.reply;
+                const modelResponse = data.resp ? data.resp[selectedModel] : data.reply;
                 if (typeof onComplete === 'function') {
                     onComplete(modelResponse, data);
                 }
@@ -137,63 +155,47 @@ function getChatResponseStream(question, selectedModel, promptMode, useRAG, useM
             });
     }
 
-    // Build SSE URL based on mode
-    let url;
-    if (promptMode) {
-        // Research mode streaming endpoint
-        url = `${buildBackendUrl('/get_adv_response_stream/')}` +
-            `?question=${encodedQuestion}` +
-            `&models=${selectedModel}` +
-            `&use_rag=${useRAG}` +
-            `&use_memory=true` +
-            `&session_id=${currentSessionId}` +
-            `&current_url=${encodedCurrentUrl}` +
-            `&user_timezone=${encodedTimezone}` +
-            `&user_time=${encodedCurrentTime}`;
+    // Build SSE endpoint based on mode (research vs thinking)
+    const url = buildBackendUrl(promptMode ? '/get_adv_response_stream/' : '/get_chat_response_stream/');
+    const requestBody = JSON.stringify(buildChatRequestBody(question, selectedModel, promptMode));
 
-        // Add preferred links for research mode
-        try {
-            const preferredLinks = JSON.parse(localStorage.getItem('preferredLinks') || '[]');
-            if (preferredLinks.length > 0) {
-                url += `&preferred_links=${encodeURIComponent(JSON.stringify(preferredLinks))}`;
-            }
-        } catch (e) {
-            console.error('Error getting preferred links:', e);
-        }
-    } else {
-        // Thinking mode streaming endpoint
-        url = `${buildBackendUrl('/get_chat_response_stream/')}` +
-            `?question=${encodedQuestion}` +
-            `&models=${selectedModel}` +
-            `&use_rag=${useRAG}` +
-            `&use_memory=true` +
-            `&session_id=${currentSessionId}` +
-            `&current_url=${encodedCurrentUrl}` +
-            `&user_timezone=${encodedTimezone}` +
-            `&user_time=${encodedCurrentTime}`;
-    }
-
-    // Create EventSource for SSE with credentials support
-    const eventSource = new EventSource(url, { withCredentials: true });
     let fullResponse = '';
     let connectionAttempts = 0;
     const maxReconnectAttempts = 3;
+    const reconnectDelayMs = 3000; // EventSource's default retry interval
     let usedUrls = [];  // Store source URLs for research mode
     let usedSources = [];  // Store detailed source metadata
+    let finished = false;      // done / fatal error / retries exhausted
+    let clientClosed = false;  // user-initiated cancel via the cleanup fn
+    let abortController = null;
 
-    // Handle connection event
-    eventSource.addEventListener('connected', (event) => {
-        console.log(`SSE connection established for ${promptMode ? 'research' : 'thinking'} mode`);
-        connectionAttempts = 0; // Reset on successful connection
-    });
+    // Stop all stream activity (the fetch-streaming analogue of
+    // eventSource.close()).
+    function closeStream() {
+        finished = true;
+        if (abortController) {
+            abortController.abort();
+        }
+    }
 
-    // Handle open event (connection established)
-    eventSource.onopen = (event) => {
-        console.log('EventSource connected successfully');
-    };
+    // Handle one parsed SSE event — the JSON handling is identical to the
+    // old eventSource.onmessage / 'connected' listener pair.
+    function handleServerEvent(event) {
+        if (finished || clientClosed) {
+            return;
+        }
 
-    // Handle message events
-    eventSource.onmessage = (event) => {
+        // Handle connection event
+        if (event.type === 'connected') {
+            console.log(`SSE connection established for ${promptMode ? 'research' : 'thinking'} mode`);
+            connectionAttempts = 0; // Reset on successful connection
+            return;
+        }
+
+        if (event.type !== 'message') {
+            return; // unknown event types were unlistened before; ignore
+        }
+
         try {
             const data = JSON.parse(event.data);
 
@@ -201,7 +203,7 @@ function getChatResponseStream(question, selectedModel, promptMode, useRAG, useM
                 if (typeof onError === 'function') {
                     onError(new Error(data.error));
                 }
-                eventSource.close();
+                closeStream();
                 return;
             }
 
@@ -236,7 +238,7 @@ function getChatResponseStream(question, selectedModel, promptMode, useRAG, useM
             }
 
             if (data.done) {
-                eventSource.close();
+                closeStream();
                 // Debug: Log what we're about to pass to completion
                 console.log('[Research Mode] Stream done. Final usedUrls:', usedUrls);
                 console.log('[Research Mode] data.used_urls:', data.used_urls);
@@ -263,40 +265,106 @@ function getChatResponseStream(question, selectedModel, promptMode, useRAG, useM
         } catch (e) {
             console.error('Error parsing SSE data:', e);
         }
-    };
+    }
 
-    // Handle errors with reconnection logic
-    eventSource.onerror = (error) => {
-        // Check readyState to determine the type of error
-        if (eventSource.readyState === EventSource.CONNECTING) {
-            connectionAttempts++;
-            console.log(`SSE reconnecting... Attempt ${connectionAttempts}`);
+    // Retry logic — mirrors the old onerror readyState===CONNECTING branch.
+    // NOTE: like EventSource auto-reconnect, a retry re-sends the POST, which
+    // re-issues the question server-side (pre-existing semantics).
+    function scheduleReconnect() {
+        connectionAttempts++;
+        console.log(`SSE reconnecting... Attempt ${connectionAttempts}`);
 
-            if (connectionAttempts > maxReconnectAttempts) {
-                console.error('SSE max reconnection attempts reached');
-                eventSource.close();
-                if (typeof onError === 'function') {
-                    onError(new Error('Connection failed after multiple attempts'));
-                }
-            }
-        } else if (eventSource.readyState === EventSource.CLOSED) {
-            console.error('SSE connection closed');
+        if (connectionAttempts > maxReconnectAttempts) {
+            console.error('SSE max reconnection attempts reached');
+            finished = true;
             if (typeof onError === 'function') {
-                onError(new Error('Connection closed unexpectedly'));
+                onError(new Error('Connection failed after multiple attempts'));
             }
-        } else {
-            console.error('SSE error:', error);
-            eventSource.close();
-            if (typeof onError === 'function') {
-                onError(error);
-            }
+            return;
         }
-    };
 
-    // Return a cleanup function
+        setTimeout(() => {
+            if (!finished && !clientClosed) {
+                connect();
+            }
+        }, reconnectDelayMs);
+    }
+
+    function connect() {
+        abortController = new AbortController();
+        const parser = createSSEParser(handleServerEvent);
+        const decoder = new TextDecoder('utf-8');
+
+        fetch(url, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'text/event-stream',
+            },
+            body: requestBody,
+            signal: abortController.signal,
+        })
+            .then(response => {
+                if (!response.ok) {
+                    // EventSource treated a non-200 as fatal (readyState
+                    // CLOSED) — no retry.
+                    const err = new Error('Connection closed unexpectedly');
+                    err.isFatalSSE = true;
+                    throw err;
+                }
+                console.log('EventSource connected successfully');
+
+                const reader = response.body.getReader();
+                const pump = () => reader.read().then(({ done, value }) => {
+                    if (finished || clientClosed) {
+                        reader.cancel().catch(() => {});
+                        return;
+                    }
+                    if (done) {
+                        parser.feed(decoder.decode()); // flush the decoder
+                        parser.end();
+                        return;
+                    }
+                    parser.feed(decoder.decode(value, { stream: true }));
+                    return pump();
+                });
+                return pump();
+            })
+            .then(() => {
+                if (finished || clientClosed) {
+                    return;
+                }
+                // Stream ended without a `done` event: EventSource would
+                // auto-reconnect here, so we do too.
+                scheduleReconnect();
+            })
+            .catch(error => {
+                if (clientClosed || finished || error.name === 'AbortError') {
+                    return;
+                }
+                if (error.isFatalSSE) {
+                    finished = true;
+                    console.error('SSE connection closed');
+                    if (typeof onError === 'function') {
+                        onError(new Error('Connection closed unexpectedly'));
+                    }
+                    return;
+                }
+                // Network-level failure: EventSource would retry.
+                scheduleReconnect();
+            });
+    }
+
+    connect();
+
+    // Return a cleanup function (user-initiated cancel)
     return () => {
-        if (eventSource.readyState !== EventSource.CLOSED) {
-            eventSource.close();
+        if (!finished && !clientClosed) {
+            clientClosed = true;
+            if (abortController) {
+                abortController.abort();
+            }
             console.log('EventSource connection closed by client');
         }
     };
@@ -351,9 +419,16 @@ function getSourceUrls(searchQuery, currentUrl) {
 function logQuestion(question, button) {
     const currentUrl = window.location.href;
 
-    const requestUrl = `${buildBackendUrl('/log_question/')}?question=${encodeURIComponent(question)}&button=${encodeURIComponent(button)}&current_url=${encodeURIComponent(currentUrl)}`;
-
-    return fetch(requestUrl, { method: "GET", credentials: "include" })
+    return fetch(buildBackendUrl('/log_question/'), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            question: String(question),
+            button: String(button),
+            current_url: String(currentUrl),
+        }),
+    })
         .then(response => response.json())
         .then(data => {
             if (data.status !== 'success') {

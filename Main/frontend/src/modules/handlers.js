@@ -644,8 +644,10 @@ async function handleChatResponse(question, promptMode = false, useStreaming = t
         const responseTime = endTime - startTime;
         console.log(`Time taken for response: ${responseTime} ms`);
 
-        // Extract the reply: MCP gives `data.reply`, normal gives `data.resp[...]`
-        const modelResponse = useMCP ? data.reply : data.resp[selectedModel];
+        // Extract the reply. All modes (including the MCP toggle, which now
+        // shares the standard chat endpoint) return `data.resp[...]`; the
+        // `data.reply` fallback covers older servers' MCP-shaped payloads.
+        const modelResponse = data.resp ? data.resp[selectedModel] : data.reply;
 
         let responseText = '';
         if (!modelResponse) {

@@ -1,6 +1,6 @@
 {
   "name": "extension-chatbot-fin",
-  "version": "0.15.2",
+  "version": "0.16.0",
   "description": "",
   "main": "src/main.js",
   "scripts": {
@@ -15,7 +15,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "dompurify": "3.4.11",
+    "dompurify": "3.2.7",
     "katex": "^0.16.10",
     "markdown-it": "^14.1.0",
     "markdown-it-texmath": "^1.0.0",
