@@ -126,6 +126,31 @@ class DockerfileNonRootTests(SimpleTestCase):
         chown = next(l for l in self.lines if "chown -R fingpt:fingpt" in l)
         self.assertIn("/home/fingpt", chown)
 
+    def test_entrypoint_chowns_read_only_tmpfs_dirs(self):
+        # Under the #333 --read-only rootfs, /home/fingpt and /app/staticfiles are
+        # fresh tmpfs mounts that MASK the image's build-time ownership, so they
+        # come up root-owned. podman 5.6.2 has no tmpfs uid= option to fix that at
+        # mount time (test_tmpfs_options_pinned), so the root-init phase must chown
+        # them to fingpt itself -- before the setpriv drop, while it still holds
+        # CAP_CHOWN as root-in-userns. Without it uid1001 cannot write $HOME and the
+        # sec-edgar MCP child dies with EACCES (the #331 class the BOOT_CHECK_ONLY
+        # gate exists to catch).
+        lines = _read(ENTRYPOINT_SH).splitlines()
+        start = next(i for i, l in enumerate(lines) if "id -u" in l and "then" in l)
+        end = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == "fi")
+        root_init_chowns = [
+            l for l in lines[start + 1:end]
+            if "chown" in l and not l.strip().startswith("#")
+        ]
+        joined = " ".join(root_init_chowns)
+        for d in ("/home/fingpt", "/app/staticfiles"):
+            self.assertIn(d, joined, f"root-init must chown {d} (read-only tmpfs ownership)")
+        # Every chown must precede the setpriv drop, or it runs as uid1001 and EPERMs.
+        setpriv_idx = next(i for i, l in enumerate(lines) if l.lstrip().startswith("exec setpriv"))
+        for i, l in enumerate(lines):
+            if "chown" in l and not l.strip().startswith("#"):
+                self.assertLess(i, setpriv_idx, f"chown on line {i} must precede setpriv")
+
     def test_playwright_dependencies_marker_prebaked_for_read_only_rootfs(self):
         # Playwright writes a 0-byte DEPENDENCIES_VALIDATED marker next to the
         # browser executable at FIRST launch (host-requirements validation cache).
@@ -461,14 +486,24 @@ class DeployUserNamespaceTests(SimpleTestCase):
 
     def test_tmpfs_options_pinned(self):
         # /tmp must be sized (unbounded tmpfs is a memory-DoS surface) and
-        # world-writable-sticky (1777: Chromium/nft/cache all write it as
-        # uid1001); the uid1001 dirs must carry uid=1001,gid=1001 -- a bare tmpfs
-        # mounts root-owned and resurrects the EACCES class documented at the
-        # Dockerfile HOME comment.
+        # world-writable-sticky (1777: Chromium/nft/cache all write it as uid1001).
+        #
+        # The uid1001 dirs (/home/fingpt, /app/staticfiles) must NOT carry
+        # uid=/gid= tmpfs mount options: the droplet's podman (5.6.2) rejects them
+        # outright -- `Error: unknown mount option "uid=1001": invalid mount
+        # option` -- which fail-closed the #333 pre-cutover gate on the very first
+        # push-to-main deploy (build+test were green because nothing here ever runs
+        # podman). A tmpfs always mounts root-owned, so ownership is instead
+        # restored inside the container by the root-init chown
+        # (test_entrypoint_chowns_read_only_tmpfs_dirs); mode=0755 lands them
+        # owner-writable (not world-writable) once chowned to fingpt.
         for line in (self._execstart_line(), self._gate_line()):
             self.assertIn("--tmpfs=/tmp:rw,size=512m,mode=1777", line)
-            self.assertIn("--tmpfs=/app/staticfiles:rw,uid=1001,gid=1001", line)
-            self.assertIn("--tmpfs=/home/fingpt:rw,uid=1001,gid=1001", line)
+            self.assertIn("--tmpfs=/app/staticfiles:rw,mode=0755", line)
+            self.assertIn("--tmpfs=/home/fingpt:rw,mode=0755", line)
+            # podman 5.6.2 rejects tmpfs uid=/gid=; never reintroduce them.
+            self.assertNotIn("uid=1001", line)
+            self.assertNotIn("gid=1001", line)
         self.assertIn("--tmpfs=/app/runtime:rw,size=512m", self._gate_line())
 
     def test_execstart_read_only_rootfs(self):

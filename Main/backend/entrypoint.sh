@@ -32,6 +32,15 @@ if [ "$(id -u)" = "0" ]; then
     echo "SSRF egress firewall loaded and self-tested."
     # :U chowned the runtime mount to root (PID1 is root); hand it to the app user.
     chown -R fingpt:fingpt /app/runtime
+    # Under --read-only rootfs (#333), /home/fingpt and /app/staticfiles are fresh
+    # tmpfs mounts that MASK the image's build-time ownership and come up root-owned.
+    # The droplet's podman (5.6.2) has no tmpfs uid= option to fix that at mount time
+    # -- it rejects `--tmpfs=...:uid=1001` outright (see backend-deploy.yml and
+    # test_dockerfile_nonroot.test_tmpfs_options_pinned) -- so hand them to the app
+    # user HERE, while PID1 still holds CAP_CHOWN. Non-recursive: both are freshly
+    # mounted empty tmpfs. Without this, uid1001 (and every MCP stdio child writing
+    # $HOME) hits EACCES -- the #331 class the BOOT_CHECK_ONLY gate exists to catch.
+    chown fingpt:fingpt /home/fingpt /app/staticfiles
     # Marker (env survives setpriv) so the app phase can refuse to serve if it was ever
     # reached WITHOUT this root-init firewall load (e.g. a mistaken non-root PID1 start).
     # A MISTAKE-GUARD ONLY, not a security boundary: trivially spoofable via -e/--env-file,
