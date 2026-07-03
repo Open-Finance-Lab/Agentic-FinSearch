@@ -2,8 +2,8 @@
 thinking-mode agent path (``_create_agent_response_async``).
 
 After ``create_fin_agent``'s ``allowed_tools=None`` was changed from "all tools"
-to "deny-all", the non-streaming path (used by ``get_chat_response/``,
-``get_agent_response/`` and the OpenAI ``/v1`` thinking path) was still calling
+to "deny-all", the non-streaming path (used by ``get_chat_response/`` and the
+OpenAI ``/v1`` thinking path) was still calling
 ``create_fin_agent(...)`` WITHOUT an allow-list, so it silently attached ZERO
 tools. This test pins that the non-streaming path now passes a NON-empty,
 finite ``allowed_tools`` containing the real read-only data tools.

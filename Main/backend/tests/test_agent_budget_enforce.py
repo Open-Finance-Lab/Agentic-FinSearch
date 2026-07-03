@@ -1,8 +1,9 @@
-"""Enforcement tests for agent_run_slot at the 5 agent views (P0 Root-C.3).
+"""Enforcement tests for agent_run_slot at the 4 agent views (P0 Root-C.3).
 
-503-on-reject for ConcurrencyExceeded at all 5 views (mock slot) + a
+503-on-reject for ConcurrencyExceeded at all 4 views (mock slot) + a
 BudgetExceeded variant, and slot RELEASE for the two streaming views on
-normal stream exhaustion and on a mid-stream raise.
+normal stream exhaustion and on a mid-stream raise. (agent_chat_response,
+formerly the 5th view, was deleted in Tier 3 phase 1 — zero consumers.)
 
 SimpleTestCase, no DB (signed_cookies session). From Main/backend:
     uv run python manage.py test tests.test_agent_budget_enforce -v 2
@@ -83,14 +84,6 @@ class TestNonStreamSlotReject(SimpleTestCase):
              patch('api.views.get_context_manager'), \
              patch('api.views.get_context_integration'):
             resp = views.chat_response(req)
-        self._assert_busy(resp)
-
-    def test_agent_chat_response_503_on_concurrency(self):
-        req = self._req('/get_agent_response/')
-        with patch('api.views.agent_run_slot', _rejecting_slot(ConcurrencyExceeded())), \
-             patch('api.views.get_context_manager'), \
-             patch('api.views.get_context_integration'):
-            resp = views.agent_chat_response(req)
         self._assert_busy(resp)
 
     def test_adv_response_503_on_concurrency(self):
