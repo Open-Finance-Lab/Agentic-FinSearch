@@ -110,6 +110,22 @@ class DockerfileNonRootTests(SimpleTestCase):
         self.assertGreater(chown_idx, verify_idx)
         self.assertLess(chown_idx, entry_idx)
 
+    def test_runtime_user_has_writable_home(self):
+        # setpriv drops the uid but NOT the environment: without the ENV pin the
+        # app and every MCP stdio child inherit PID1's HOME=/root, which uid1001
+        # cannot write. edgartools mkdirs ~/.edgar AT IMPORT, so the sec-edgar
+        # MCP child died with EACCES on every boot from the root-init redesign
+        # until this pin existed. HOME must point at a dir that is created and
+        # fingpt-owned in the image.
+        self.assertIn("HOME=/home/fingpt", self.text)
+        mkdir_lines = [l for l in self.lines if "mkdir -p /home/fingpt" in l]
+        self.assertEqual(
+            len(mkdir_lines), 1,
+            f"expected /home/fingpt created in exactly one line, got {mkdir_lines}",
+        )
+        chown = next(l for l in self.lines if "chown -R fingpt:fingpt" in l)
+        self.assertIn("/home/fingpt", chown)
+
     def test_store_persisted_on_runtime_volume(self):
         # The regenerable DuckDB store must build onto the /app/runtime volume
         # (persisted across restarts) — not the ephemeral image layer — and nothing
