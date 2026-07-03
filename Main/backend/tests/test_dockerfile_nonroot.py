@@ -268,3 +268,65 @@ class DeployUserNamespaceTests(SimpleTestCase):
         # relabels the (private, this-container-only) mount to container_file_t so the
         # container can write it. Ownership AND SELinux must both be handled: ship :U,Z.
         self.assertIn("/home/deploy/fingpt/runtime:/app/runtime:U,Z", text)
+
+    # Frozen root-init capability set. Each cap maps 1:1 to a root-init step in
+    # entrypoint.sh -- nft firewall load -> NET_ADMIN, /app/runtime re-chown ->
+    # CHOWN, setpriv uid/gid drop -> SETUID/SETGID, --bounding-set=-net_admin ->
+    # SETPCAP -- so widening it means a root-init step was ADDED and must be
+    # justified in the deploy workflow's cap-map comment, never slipped in here.
+    ROOT_INIT_CAPS = sorted(["NET_ADMIN", "CHOWN", "SETUID", "SETGID", "SETPCAP"])
+
+    @staticmethod
+    def _joined_deploy_lines():
+        # The gate's podman run spans backslash continuations; fold them so flag
+        # extraction sees one logical line per command (same fold the entrypoint
+        # structural test uses).
+        return re.sub(r"\\\n\s*", " ", _read(DEPLOY_WORKFLOW)).splitlines()
+
+    def _execstart_line(self):
+        lines = [l for l in self._joined_deploy_lines()
+                 if "podman run" in l and "--name ${SYSTEMD_UNIT}" in l]
+        self.assertEqual(len(lines), 1, f"expected one ExecStart podman run, got {lines}")
+        return lines[0]
+
+    def _gate_line(self):
+        lines = [l for l in self._joined_deploy_lines()
+                 if "podman run" in l and "--egress-check-only" in l]
+        self.assertEqual(len(lines), 1, f"expected one gate podman run, got {lines}")
+        return lines[0]
+
+    @staticmethod
+    def _cap_pids_flags(line):
+        return sorted(re.findall(r"--(?:cap-add|cap-drop|pids-limit)=\S+", line))
+
+    def test_execstart_cap_set_is_frozen(self):
+        # assertEqual on the FULL extracted cap list, not assertIn per cap: a sixth
+        # --cap-add quietly appended to ExecStart must red this test -- preventing
+        # silent widening is the whole point. --cap-drop=ALL is part of the
+        # property: without it the five adds stack ON TOP of podman's default cap
+        # set instead of replacing it, and the "frozen set" is fiction.
+        line = self._execstart_line()
+        self.assertIn("--cap-drop=ALL", line)
+        self.assertEqual(
+            sorted(re.findall(r"--cap-add=([A-Z_]+)", line)), self.ROOT_INIT_CAPS
+        )
+
+    def test_execstart_pids_limit_pinned(self):
+        # Fork-bomb ceiling. 1024 covers today's worst case of ~400-600 tasks
+        # (gunicorn workers x threads + agent fan-out + Playwright/Chromium).
+        # Raise it DELIBERATELY (both podman run lines + this pin) if
+        # AGENT_MAX_CONCURRENCY or GUNICORN_WORKERS grows -- never by deleting
+        # the flag, which removes the ceiling entirely.
+        self.assertIn("--pids-limit=1024", self._execstart_line())
+
+    def test_gate_and_execstart_cap_pids_parity(self):
+        # The safety property of the frozen set: the pre-cutover gate must run the
+        # IDENTICAL cap/pids flags as the ExecStart it fronts, so all five caps are
+        # exercised end-to-end (nft + chown + setpriv + bounding-set drop) BEFORE
+        # cutover and a too-narrow set aborts the deploy with the old container
+        # still serving, instead of crash-looping the unit. Either line edited
+        # alone -- gate widened for a quick fix, or ExecStart narrowed without
+        # re-proving the gate -- must red here.
+        gate = self._cap_pids_flags(self._gate_line())
+        self.assertEqual(gate, self._cap_pids_flags(self._execstart_line()))
+        self.assertTrue(gate, "no cap/pids flags found on the gate podman run")

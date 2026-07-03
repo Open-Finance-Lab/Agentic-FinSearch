@@ -22,11 +22,17 @@ Run: uv run pytest tests/test_ratelimit_enforced.py -v
 """
 import importlib
 
+from django.conf import settings
 from django.core.cache import cache
 from django.test import RequestFactory, SimpleTestCase, override_settings
 from django_ratelimit.exceptions import Ratelimited
 
 import api.views as views_module
+
+# Captured at import time (test collection imports every module before any
+# override_settings is active), so the restore-reload in tearDownClass can
+# re-bind the decorators at the REAL production rate.
+_REAL_RATE = settings.API_RATE_LIMIT
 
 # Tight per-identity limit + an in-process LocMemCache so rate-limit counters
 # are deterministic and isolated from the base FileBasedCache.
@@ -59,8 +65,14 @@ class RatelimitEnforcedTests(SimpleTestCase):
     @classmethod
     def tearDownClass(cls):
         # Restore the module to its real (un-overridden) rate for the rest of
-        # the suite so we don't leak a 1/m limiter into other tests.
-        importlib.reload(views_module)
+        # the suite so we don't leak a 1/m limiter into other tests. The
+        # class-level override is STILL ACTIVE here (Django disables it in a
+        # class *cleanup*, which runs after tearDownClass), so a bare reload
+        # would re-bind every decorator at 1/m for the remainder of the
+        # process — 429-ing later suites that hit decorated views. Re-override
+        # to the captured real rate for the restore reload.
+        with override_settings(API_RATE_LIMIT=_REAL_RATE):
+            importlib.reload(views_module)
         super().tearDownClass()
 
     def setUp(self):

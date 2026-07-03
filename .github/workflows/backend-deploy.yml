@@ -211,8 +211,15 @@ jobs:
             # silently drift from the boot path it is supposed to prove. On failure, abort
             # so the OLD container keeps serving (there is no auto-rollback). This closes
             # the CI-invisible gap: the test job is pytest-only and never touches nft/netns.
+            # The gate runs under the IDENTICAL frozen cap/pids flags as the ExecStart
+            # below (cap-to-step map at the override; parity pinned in
+            # Main/backend/tests/test_dockerfile_nonroot.py). That parity IS the safety
+            # property: check-only mode exits right after the setpriv drop, so all five
+            # caps the root-init needs (nft + chown + setuid/setgid + bounding-set drop)
+            # are exercised HERE -- a too-narrow set aborts the deploy with the old
+            # container still serving, instead of crash-looping the new unit at cutover.
             echo "Validating egress firewall on the new image (pre-cutover)..."
-            podman run --rm --cap-add=NET_ADMIN --network fingpt-net \
+            podman run --rm --cap-drop=ALL --cap-add=NET_ADMIN --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=SETPCAP --pids-limit=1024 --network fingpt-net \
               --env REDIS_URL=redis://fingpt-redis:6379/0 \
               "$REMOTE_IMAGE" --egress-check-only \
               || { echo "ERROR: egress firewall pre-cutover validation FAILED; aborting deploy (old container left serving)"; exit 1; }
@@ -234,17 +241,34 @@ jobs:
             #       without it container_t is denied and the write is EACCES -- which
             #       crash-looped the truth-layer store build the first time a deploy actually
             #       wrote this mount (#322). Ownership alone is not enough; both are required.
-            # --cap-add=NET_ADMIN is SECURITY/FUNCTIONALLY LOAD-BEARING: rootless podman's
-            # default cap set excludes NET_ADMIN, so without it the root-in-userns init
-            # cannot load the SSRF egress firewall (nft EPERM) -> entrypoint fail-closes ->
-            # the container never serves. Do NOT drop it. (The app itself runs as uid1001
-            # with NET_ADMIN removed from its bounding set; see Main/backend/entrypoint.sh.)
+            # Frozen capability set: --cap-drop=ALL, then add back ONLY the five caps the
+            # root-init phase of Main/backend/entrypoint.sh actually uses. Each cap maps
+            # 1:1 to a root-init step, so nothing in the set is discretionary:
+            #   NET_ADMIN     nft loads the SSRF egress firewall -- rootless podman's
+            #                 default set excludes it; without it nft EPERMs, entrypoint
+            #                 fail-closes, and the container never serves;
+            #   CHOWN         the /app/runtime re-chown to fingpt after the :U mount chown;
+            #   SETUID/SETGID setpriv's drop to uid/gid 1001 (+ --init-groups);
+            #   SETPCAP       setpriv's --bounding-set=-net_admin drop for the app phase
+            #                 (the app runs as uid1001 with NET_ADMIN out of its bounding set).
+            # The pre-cutover gate above runs the IDENTICAL flags -- that is the safety
+            # property: all five caps get exercised end-to-end BEFORE cutover, so a
+            # too-narrow set aborts the deploy rather than crash-looping the unit. Set +
+            # gate/ExecStart parity are pinned by Main/backend/tests/test_dockerfile_nonroot.py;
+            # widen only by editing BOTH podman run invocations AND the sentinel, with the
+            # new cap's root-init step documented here.
+            # --pids-limit=1024 is the fork-bomb ceiling: worst case today is ~400-600
+            # tasks (gunicorn workers x threads + agent fan-out + Playwright/Chromium);
+            # revisit if AGENT_MAX_CONCURRENCY or GUNICORN_WORKERS is raised.
+            # A read-only rootfs is DELIBERATELY deferred: the gate exits before the app
+            # phase, so --read-only would ship unvalidated pre-cutover -- and collectstatic
+            # writes /app/staticfiles at boot, which needs a tmpfs/volume design first.
             OVERRIDE_DIR="$HOME/.config/systemd/user/${SYSTEMD_UNIT}.service.d"
             mkdir -p "$OVERRIDE_DIR"
             cat > "$OVERRIDE_DIR/override.conf" <<EOF
             [Service]
             ExecStart=
-            ExecStart=/usr/bin/podman run --name ${SYSTEMD_UNIT} --replace --rm --cap-add=NET_ADMIN --cgroups=split --sdnotify=conmon -d --memory=1.7g --memory-swap=2g --network fingpt-net -v /home/deploy/fingpt/runtime:/app/runtime:U,Z --publish 127.0.0.1:8000:8000 --env-file /home/deploy/fingpt/envs/.env.production --env REDIS_URL=redis://fingpt-redis:6379/0 ${REMOTE_IMAGE}
+            ExecStart=/usr/bin/podman run --name ${SYSTEMD_UNIT} --replace --rm --cap-drop=ALL --cap-add=NET_ADMIN --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=SETPCAP --pids-limit=1024 --cgroups=split --sdnotify=conmon -d --memory=1.7g --memory-swap=2g --network fingpt-net -v /home/deploy/fingpt/runtime:/app/runtime:U,Z --publish 127.0.0.1:8000:8000 --env-file /home/deploy/fingpt/envs/.env.production --env REDIS_URL=redis://fingpt-redis:6379/0 ${REMOTE_IMAGE}
             EOF
 
             systemctl --user daemon-reload

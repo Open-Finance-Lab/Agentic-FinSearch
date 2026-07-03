@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable
 
 from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp.client.stdio import get_default_environment, stdio_client
 from mcp.client.sse import sse_client
 from mcp.types import Tool as MCPTool, CallToolResult
 
@@ -135,7 +135,28 @@ class MCPClientManager:
 
             self._log(f"[MCP DEBUG] {server_name} using Stdio transport: {command} {args}")
 
-            full_env = os.environ.copy()
+            # Root G hygiene (2026-06-29 audit follow-up): never hand a child
+            # the full backend environment. os.environ here carries
+            # OPENAI_API_KEY / DJANGO_SECRET_KEY / Redis + Mem0 credentials,
+            # and stdio servers run third-party code (sec-edgar-mcp,
+            # npx-fetched packages) that needs none of them — a compromised or
+            # merely chatty dependency could exfiltrate every secret with one
+            # os.environ dump. Start from the MCP SDK's safe base
+            # (HOME/LOGNAME/PATH/SHELL/TERM/USER on posix, exported shell
+            # functions skipped) — exactly what stdio_client would use if we
+            # passed env=None — then layer on only what this server's config
+            # block declares. tests/test_mcp_child_env.py pins this.
+            full_env = get_default_environment()
+
+            # Opt-in passthrough for non-secret parent vars a server may need
+            # (e.g. proxy settings): "inheritEnv": ["NAME", ...]. Applied
+            # before the env block so explicit config values always win.
+            # Secret-shaped names are rejected by the config sentinel in
+            # tests/test_mcp_child_env.py; no shipped server uses this today.
+            for inherited_name in config.get("inheritEnv", []):
+                if inherited_name in os.environ:
+                    full_env[inherited_name] = os.environ[inherited_name]
+
             for key, value in env.items():
                 if isinstance(value, str):
                     import re

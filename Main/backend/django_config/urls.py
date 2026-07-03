@@ -1,4 +1,5 @@
 """URL configuration for chat_server."""
+from django.conf import settings
 from django.urls import path
 from api import views
 from api import openai_views
@@ -24,11 +25,19 @@ urlpatterns = [
     path('api/axioms/validate/', views.validate_claims, name='axioms_validate'),
     path('api/axioms/has_claims/', views.has_axiom_claims, name='axioms_has_claims'),
     path('api/axioms/xbrl/<str:filename>/', views.xbrl_filing_download, name='axioms_xbrl_filing'),
-    
-    # Debug/diagnostic endpoints
-    path('debug/memory/', views_debug.debug_memory, name='debug_memory'),
 
     # Standard OpenAI-compatible API
     path('v1/models', openai_views.models_list, name='openai_models_list'),
     path('v1/chat/completions', openai_views.chat_completions, name='openai_chat_completions'),
 ]
+
+# Root G hygiene: /debug/memory/ leaks allocator tracebacks (absolute paths + line numbers)
+# and lets a caller start tracemalloc (persistent RAM overhead — a DoS lever) behind a single
+# static shared token. Defense in depth on top of that token: the route only exists when
+# DEBUG=True, so production (DJANGO_DEBUG unset -> False) 404s before the view is reachable,
+# even if DEBUG_MEMORY_TOKEN leaks or gets set by mistake. Gating pinned by
+# tests/test_debug_route_gating.py — keep this registration inside `if settings.DEBUG:`.
+if settings.DEBUG:
+    urlpatterns += [
+        path('debug/memory/', views_debug.debug_memory, name='debug_memory'),
+    ]

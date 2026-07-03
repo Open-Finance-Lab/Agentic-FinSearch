@@ -18,14 +18,17 @@ _previous_snapshot = None
 
 
 def _check_token(request: HttpRequest) -> bool:
-    """Verify the debug token from query param or header."""
+    """Verify the debug token from the X-Debug-Token header.
+
+    Header only, deliberately: ?token= was dropped because query strings are
+    recorded verbatim by the Caddy edge access log (and gunicorn's, before its
+    format was redacted), so accepting the credential there turned every
+    authenticated call into a plaintext token write to the log pipeline.
+    """
     configured_token = os.environ.get('DEBUG_MEMORY_TOKEN', '')
     if not configured_token:
         return False
-    request_token = request.GET.get('token', '')
-    if not request_token:
-        request_token = request.headers.get('X-Debug-Token', '')
-    return request_token == configured_token
+    return request.headers.get('X-Debug-Token', '') == configured_token
 
 
 @csrf_exempt

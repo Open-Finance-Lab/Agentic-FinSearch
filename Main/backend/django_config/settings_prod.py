@@ -14,6 +14,11 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = os.getenv('SECURE_HSTS_INCLUDE_SUBDOMAINS', 'Tr
 SECURE_HSTS_PRELOAD = os.getenv('SECURE_HSTS_PRELOAD', 'True').strip().lower() in ('true', '1', 't')
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
+# Referrer-Policy at the app layer too, not only the Caddy edge headers: the
+# edge copy protects proxied traffic, but a direct backend hit or an edge
+# header regression must still ship the same policy (two-layer principle —
+# same reason SecurityMiddleware repeats HSTS/nosniff behind the proxy).
+SECURE_REFERRER_POLICY = "no-referrer"
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 USE_X_FORWARDED_HOST = True
