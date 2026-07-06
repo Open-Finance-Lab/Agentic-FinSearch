@@ -17,7 +17,7 @@
 - Backend tests run as `uv run pytest tests -q` from `Main/backend/` (CI: `.github/workflows/backend-deploy.yml`). No new dependencies in `pyproject.toml`; `jsonschema` is used via `pytest.importorskip` (present transitively in `uv.lock`).
 - Label threshold is **±0.20** (`SIGNALS_THRESHOLD`, spec §4.2 amended); damping caps |score| at **0.7** when a ticker has **< 2 distinct** stories.
 - Write ordering is **artifact first, state second** (spec §6.2). Never blanket-catch `OSError` around the temp-write + `os.replace` step (ENOSPC must abort the run).
-- Exit codes: `0` = normal AND poison-pill (§6.1), `2` = config error (missing API key), `3` = lock already held (mirrors heartbeat).
+- Exit codes: `0` = normal AND poison-pill (§6.1), `1` = canary-stale (`--canary` mode only), `2` = config error (missing API key), `3` = lock already held (mirrors heartbeat).
 - Artifact JSON field names and order follow spec §4.2 exactly; diagnostics has exactly 10 keys.
 - Commit style: conventional commits (`feat(signals): …`, `test(signals): …`, `docs(signals): …`), branch `feat/news-signals`.
 - All new Heartbeat code mirrors `news_heartbeat.py` idioms: `log()` print-with-flush, `load_env_file()`, `.json.tmp` + `os.replace`, `fcntl.flock(LOCK_EX | LOCK_NB)`.
@@ -445,7 +445,7 @@ def load_config():
         "damp_cap": float(os.environ.get("SIGNALS_DAMP_CAP", "0.7")),
         "damp_min_articles": int(os.environ.get("SIGNALS_DAMP_MIN_ARTICLES", "2")),
         "max_file_mb": int(os.environ.get("SIGNALS_MAX_FILE_MB", "10")),
-        "staleness_alert_h": float(os.environ.get("SIGNALS_STALENESS_ALERT_H", "30")),
+        "staleness_alert_h": float(os.environ.get("SIGNALS_STALENESS_ALERT_H", "20")),
     }
 ```
 
@@ -597,7 +597,7 @@ git commit -m "feat(signals): validation gate — poison pill on batch defects, 
 
 > **USER CONTRIBUTION:** `ROUNDUP_PATTERNS` and `TICKER_ALIASES` are the judgment-heavy quality lever reserved for the project owner. Implement the defaults below so tests pass, then **pause and ask the owner to review/tune both constants before merging** — they shape which stories the LLM ever sees.
 
-**Matching policy (decided, spec D8):** a story is *subject* for a ticker iff its title is not a roundup/listicle AND (the raw title contains the ticker symbol as a case-sensitive word-bounded token — only for symbols ≥ 3 chars, so `V`/`MA`/`BA`… never false-match — OR the lowercased title contains a company-name alias).
+**Matching policy (decided, spec D8):** a story is *subject* for a ticker iff its title is not a roundup/listicle AND (the raw title contains the ticker symbol as a case-sensitive word-bounded token — only for symbols ≥ 3 chars, so `V`/`MA`/`BA`… never false-match — OR the lowercased title contains a company-name alias **as a word-bounded token, not a bare substring** — a naive `in` check lets `"intel"` match inside `"intelligence"`, `"cisco"` inside `"francisco"`, and `"visa"` inside `"advisable"`).
 
 - [ ] **Step 1: Write the failing tests** — append:
 
@@ -626,6 +626,32 @@ class TestSubjectGate(unittest.TestCase):
     def test_hyphenated_symbols_match(self):
         self.assertTrue(ns.is_subject("BRK-B edges higher after 13F", "BRK-B"))
         self.assertTrue(ns.is_subject("Bitcoin tops $120k", "BTC-USD"))
+
+    def test_alias_match_is_word_bounded_not_substring(self):
+        # A naive `alias in lowered` substring check false-matches company
+        # aliases embedded inside unrelated words. All three are real words
+        # that show up routinely in financial headlines.
+        self.assertFalse(ns.is_subject(
+            "This Magnificent Artificial Intelligence Stock Rallies", "INTC"))
+        self.assertFalse(ns.is_subject(
+            "San Francisco Fed officials weigh in on rate path", "CSCO"))
+        self.assertFalse(ns.is_subject(
+            "Analysts say the merger looks advisable for shareholders", "V"))
+        # genuine mentions must still pass once word-bounded
+        self.assertTrue(ns.is_subject("Intel unveils new AI chip", "INTC"))
+        self.assertTrue(ns.is_subject("Cisco beats on earnings", "CSCO"))
+
+    def test_alias_3m_does_not_match_bare_dollar_or_share_figures(self):
+        # "3m" is the only way to catch prose that names the company as "3M"
+        # rather than the ticker "MMM" — but a plain \b3m\b still matches
+        # "$3M" ($ and digit-then-nonword are boundaries too), so the numeric
+        # alias needs an extra exclusion on top of word-boundaries.
+        self.assertFalse(ns.is_subject("Company reports $3M in quarterly losses", "MMM"))
+        self.assertFalse(ns.is_subject("Firm raised $13M in its latest round", "MMM"))
+        self.assertFalse(ns.is_subject("Stock trades 133M shares in a single session", "MMM"))
+        # genuine mentions must still pass
+        self.assertTrue(ns.is_subject("3M raises full-year guidance", "MMM"))
+        self.assertTrue(ns.is_subject("Shares of 3M rose after an analyst upgrade", "MMM"))
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -670,26 +696,52 @@ TICKER_ALIASES = {
 }
 SYMBOL_MATCH_MIN_LEN = 3
 
+# Aliases that collide with common dollar/share-count shorthand ("$3M",
+# "133M shares") once lowercased — word-boundaries alone don't save them,
+# since "$" and digit-to-nonword transitions are boundaries too. Excluded
+# from matching only when immediately preceded by "$", "." or a digit.
+_ALIAS_NUMERIC = frozenset({"3m"})
+
+
+def _alias_pattern(alias):
+    pattern = rf"\b{re.escape(alias)}\b"
+    if alias in _ALIAS_NUMERIC:
+        pattern = r"(?<![\d$.])" + pattern
+    return re.compile(pattern)
+
+
+# Precompiled per-alias patterns. Built once at import time from the
+# owner-tuned TICKER_ALIASES data above.
+ALIAS_RE = {ticker: [_alias_pattern(a) for a in aliases]
+            for ticker, aliases in TICKER_ALIASES.items()}
+
 
 def is_subject(title, ticker):
     """Entity-as-subject heuristic (spec D8): mention-only and roundup
-    stories never reach the LLM."""
+    stories never reach the LLM. Alias matches are word-bounded, never a
+    bare substring check — `"intel" in lowered` would also match inside
+    "intelligence", `"cisco"` inside "francisco", `"visa"` inside
+    "advisable". The numeric alias "3m" (MMM) additionally excludes a
+    preceding "$", "." or digit so dollar/share-count figures ("$3M",
+    "133M shares") don't false-tag MMM as subject."""
     lowered = title.lower()
     if any(p.search(lowered) for p in ROUNDUP_RE):
         return False
     if len(ticker) >= SYMBOL_MATCH_MIN_LEN and re.search(
             rf"(?<![A-Z0-9-]){re.escape(ticker)}(?![A-Z0-9-])", title):
         return True
-    return any(alias in lowered for alias in TICKER_ALIASES.get(ticker, ()))
+    return any(p.search(lowered) for p in ALIAS_RE.get(ticker, ()))
 ```
 
-(The lookaround pair instead of `\b` makes hyphenated symbols like `BRK-B` match as one token and stops `NVDA` matching inside `XNVDAY`.)
+(The lookaround pair instead of `\b` makes hyphenated symbols like `BRK-B` match as one token and stops `NVDA` matching inside `XNVDAY`. Same reasoning extends to aliases: plain `\b...\b` handles multi-word aliases like `"home depot"` and `"jp morgan"` fine since the boundary only needs to hold at the two ends of the phrase.)
+
+**Residual risk (owner-review item, spec D8/§7.3-adjacent):** even with the `$`/`.`/digit exclusion, `"3m"` cannot be distinguished from a bare, whitespace-preceded quantity phrase with no dollar sign — e.g. "shares jumped 3M times" or "traded 3m shares today" is lexically identical to a genuine "3M-the-company" mention and will still pass. This is narrower and rarer than the dollar-figure collision just closed. At the Step 5 pause below, the owner has two options: accept this narrowed residual (recommended — it's materially rarer than what's now excluded), or drop the `"3m"` alias entirely and rely on the case-sensitive `MMM` symbol-token match alone (which will rarely fire, since headline prose overwhelmingly writes "3M" rather than the bare ticker "MMM").
 
 - [ ] **Step 4: Run to verify pass**
 
-Run: `python3 -m unittest tests.test_news_signals -v` — Expected: PASS (16 tests).
+Run: `python3 -m unittest tests.test_news_signals -v` — Expected: PASS (18 tests).
 
-- [ ] **Step 5: ⚠ PAUSE — request owner review of `ROUNDUP_PATTERNS` + `TICKER_ALIASES`** (the two `>>> OWNER-TUNED` constants). Apply any tuning they give, re-run the suite, then continue.
+- [ ] **Step 5: ⚠ PAUSE — request owner review of `ROUNDUP_PATTERNS` + `TICKER_ALIASES`** (the two `>>> OWNER-TUNED` constants), **plus the `"3m"` residual risk called out above** (whitespace-preceded bare quantity phrasing, e.g. "traded 3m shares today", still false-matches MMM; owner picks accept-residual vs. drop-the-alias). Apply any tuning they give, re-run the suite, then continue.
 
 - [ ] **Step 6: Commit**
 
@@ -825,7 +877,7 @@ def select_candidates(stories, watchlist, cfg):
 
 - [ ] **Step 4: Run to verify pass**
 
-Run: `python3 -m unittest tests.test_news_signals -v` — Expected: PASS (20 tests).
+Run: `python3 -m unittest tests.test_news_signals -v` — Expected: PASS (22 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -988,7 +1040,7 @@ def derive_label(score, threshold):
 
 - [ ] **Step 4: Run to verify pass**
 
-Run: `python3 -m unittest tests.test_news_signals -v` — Expected: PASS (25 tests).
+Run: `python3 -m unittest tests.test_news_signals -v` — Expected: PASS (27 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -1106,6 +1158,29 @@ class TestProcessBatch(unittest.TestCase):
         artifact = ns.process_batch(p, self.cfg, time.time(), llm=must_not_call)
         self.assertEqual(artifact["status"], "ok")
         self.assertEqual(artifact["signals"], {})
+
+    def test_near_dup_collapse_and_damping_compose_end_to_end(self):
+        # Regression guard for the composed defense (spec §7.3): near-dup
+        # collapse (D9) must run BEFORE damping sees n_articles, so 3 raw
+        # copies of one story can never satisfy the corroboration damper.
+        p = write_items(self.td, [
+            make_story(guid="d1", title="Nvidia unveils next-gen GPU lineup",
+                       tickers=["NVDA"], score=6.0),
+            make_story(guid="d2", title="Nvidia unveils next-gen GPU lineup!",
+                       tickers=["NVDA"], score=5.0),
+            make_story(guid="d3", title="Nvidia unveils next-gen GPU lineup.",
+                       tickers=["NVDA"], score=4.0),
+        ])
+        llm = fake_llm_factory({"overview": "o", "tickers":
+            {"NVDA": {"score": 0.95, "guid": "d1", "rationale": "r"}}})
+        artifact = ns.process_batch(p, self.cfg, time.time(), llm=llm)
+        entry = artifact["signals"]["NVDA"]
+        self.assertEqual(entry["n_articles"], 1,
+                          "3 near-dup copies must collapse to 1 distinct story")
+        self.assertEqual(entry["score"], 0.7,
+                          "under-corroborated despite 3 raw copies -> damped")
+        self.assertEqual(artifact["diagnostics"]["scores_damped"], 1)
+        self.assertEqual(artifact["diagnostics"]["near_dups_collapsed"], 2)
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -1201,7 +1276,7 @@ def process_batch(items_path, cfg, now, llm=call_llm):
 
 - [ ] **Step 4: Run to verify pass**
 
-Run: `python3 -m unittest tests.test_news_signals -v` — Expected: PASS (31 tests).
+Run: `python3 -m unittest tests.test_news_signals -v` — Expected: PASS (34 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -1241,6 +1316,17 @@ def make_cfg(home: Path):
 
 OK_LLM = fake_llm_factory({"overview": "o", "tickers":
     {"MSFT": {"score": 0.3, "guid": "g1", "rationale": "r"}}})
+
+
+class TestAtomicWrite(unittest.TestCase):
+    def test_write_json_atomic_replaces_and_leaves_no_tmp(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "signals-2026-07-06.json"
+            path.write_text('{"old": true}', encoding="utf-8")
+            ns.write_json_atomic({"new": True}, path)
+            self.assertEqual(json.loads(path.read_text()), {"new": True})
+            leftovers = [p.name for p in Path(td).iterdir() if p.name != path.name]
+            self.assertEqual(leftovers, [], "temp file must not survive the write")
 
 
 class TestSweep(unittest.TestCase):
@@ -1371,7 +1457,7 @@ def run_sweep(cfg, now=None, llm=call_llm):
 
 - [ ] **Step 4: Run to verify pass**
 
-Run: `python3 -m unittest tests.test_news_signals -v` — Expected: PASS (35 tests).
+Run: `python3 -m unittest tests.test_news_signals -v` — Expected: PASS (39 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -1628,8 +1714,14 @@ PrivateTmp=true
 Description=Daily staleness check for news-signals artifacts
 
 [Timer]
-# 13:00 UTC = 2 h after the daily beat; a healthy pipeline has a ~1 h-old
-# artifact by then, so the 30 h threshold only fires when a full day is missed.
+# 13:00 UTC = 2 h after the daily 11:00 UTC beat; a healthy pipeline has a
+# ~1-2 h-old artifact by then. A single fully-missed day leaves the newest
+# artifact ~25.5 h old at the NEXT day's 13:00 UTC check (24 h + the ~1.5 h
+# healthy lag) — comfortably past the 20 h threshold (SIGNALS_STALENESS_ALERT_H),
+# so one missed day reliably fires. A 30 h threshold (the original default)
+# does NOT: 25.5 h < 30 h, so it silently absorbs one entire missed day and
+# only fires after a SECOND consecutive miss (~49.5 h) — verified by hand,
+# this is why the default was lowered to 20.
 OnCalendar=*-*-* 13:00:00 UTC
 Persistent=true
 RandomizedDelaySec=300
@@ -1652,7 +1744,7 @@ WantedBy=timers.target
 # SIGNALS_DAMP_CAP=0.7
 # SIGNALS_DAMP_MIN_ARTICLES=2
 # SIGNALS_MAX_FILE_MB=10
-# SIGNALS_STALENESS_ALERT_H=30
+# SIGNALS_STALENESS_ALERT_H=20
 ```
 
 - [ ] **Step 6: Append a "News → signals" section to `Heartbeat/README.md`**
@@ -1667,7 +1759,9 @@ A 20-minute systemd user timer sweeps unprocessed batches (tracked in
 `signals_state.json`); one batched LLM call per batch; artifacts are written
 atomically **before** state, so a crash costs a duplicate LLM call, never a
 silent gap. A daily canary alerts on Discord when the newest artifact is
-older than `SIGNALS_STALENESS_ALERT_H` (default 30 h).
+older than `SIGNALS_STALENESS_ALERT_H` (default 20 h — tuned so a single
+fully-missed day reliably fires; see the timer's own comment for the
+arithmetic).
 
 Manual run (same env file as the heartbeat):
 
@@ -2132,7 +2226,7 @@ and add to `urlpatterns` directly after the `axioms_xbrl_filing` line:
 - [ ] **Step 6: Run to verify pass**
 
 Run (from `Main/backend/`): `uv run pytest tests/test_signals_endpoint.py -q`
-Expected: 8 passed.
+Expected: 7 passed.
 
 - [ ] **Step 7: Run the whole backend suite for regressions**
 
@@ -2183,6 +2277,7 @@ Then in the `Deploy heartbeat script to droplet` step, add `EXPECTED_SIGNALS_SHA
             echo "$EXPECTED_SIGNALS_SHA256  $tmp" | sha256sum -c -
             python3 -m py_compile "$tmp"
             grep -m1 '^VERSION' "$tmp"
+            rm -rf "$HEARTBEAT_HOME/__pycache__"
             chmod 644 "$tmp"
             mv "$tmp" "$HEARTBEAT_HOME/news_signals.py"
             trap - EXIT
@@ -2219,6 +2314,14 @@ git commit -m "ci(signals): ship news_signals.py to droplet; mount signals dir :
 - [ ] Optional end-to-end smoke with a real key (repo root, uses the real prod batch if present):
   `HEARTBEAT_HOME=/tmp/sig-smoke python3 Heartbeat/news_signals.py --env-file Main/backend/.env` after copying an `items-*.jsonl` into `/tmp/sig-smoke/digests/` — inspect `/tmp/sig-smoke/signals/`.
 - [ ] Push branch, open PR against `main`. Droplet rollout (units, env change, mkdir, staging checklist) happens at deploy time per the README section from Task 11 — it is **not** part of this plan's execution.
+
+## Known seam debt carried from the spec (not built this session)
+
+The amended spec's closing note (`2026-07-06-news-to-signals-pipeline-design.md` §10) names several items as "deliberately deferred to the implementation plan, not the spec." Three of them get no treatment anywhere above; recorded here so the omission reads as a decision, not an oversight — consistent with how every other spec-deferred item (blocklist patterns/alias map — Task 5; dedup algorithm choice — Task 6; datamarking delimiter format — Tasks 3/7) got an explicit resolution instead of silence.
+
+- **Novelty-over-rehash preference within the per-ticker cap** (research-benchmark P1). Task 6's `select_candidates` implements only the spec-pinned deterministic default (editorial score desc, then recency desc, spec §3) — it does not additionally prefer novel stories over rehashes among score-near-ties. Judged sufficient for this session's walking-skeleton scope: D9's near-dup collapse already removes exact/near-duplicate rehashes before the cap is filled, so the residual "rehash" risk here is narrower than the sample batch's original roundup-dilution problem (already fixed by D8). Revisit if production diagnostics show `tickers_capped` batches where the LLM's chosen representative story is a stale rehash of older news rather than the freshest distinct angle — that observation is the trigger condition for adding a novelty tiebreak.
+- **Label-disguise defense (LDD) for the sentiment output** (research-benchmark P2). Not implemented. The input-side rails already built — the subject gate (D8, Task 5), datamarking (§4.3, Task 7), and the corroboration damper counted over distinct stories (D9, Task 8) — keep attacker text out of the prompt or mark it untrusted within it, but none of them detect a well-formed score/rationale pair that has been steered to disguise its true polarity. Re-deferred with the same posture as spec §7.3's accepted residual: acceptable while consumers are backtest/paper only against a locked universe; revisit before any live-capital wiring, in the same pass as the named SecAlign-class scorer upgrade (D6 swap seam).
+- **Batch-mean de-biasing.** Spec frames this as conditional ("optional, only if broad-market bias shows up in practice"), unlike LDD's unconditional deferral. Not implemented because the triggering evidence — a persistent non-zero mean score across tickers in production artifacts — has not been observed yet (the one real sample batch so far, `tmp-signals-review.txt`, has a mean score of +0.05 across 10 tickers, i.e. no visible bias). Trigger condition for revisiting: a sustained non-zero mean `score` across a batch's `signals` values over multiple consecutive artifacts. Constraint for whoever implements it: `diagnostics` is pinned to exactly 10 keys (Global Constraints, Task 2's schema) — instrumenting the trigger requires either a `schema_version: 2` bump or folding the signal into logs/`news_overview` rather than the diagnostics contract; de-biasing itself should land in `validate_response` behind a new `SIGNALS_DEBIAS_ENABLED` flag defaulting off, as its own task with its own tests, not folded into Task 8's existing clamp/damp logic.
 
 ## Deferred to the ATL-side plan (separate repo, next session)
 

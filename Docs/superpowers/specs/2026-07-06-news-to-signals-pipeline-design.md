@@ -1,7 +1,7 @@
 # News → Signals Pipeline — Design Spec
 
 **Date:** 2026-07-06
-**Status:** Formats pinned; producer-side prototype validated against real prod data. ATL-side adapter, Django endpoint, and droplet deployment are specified here but built in a future session. **Amended 2026-07-06** after the research benchmark (companion doc below): subject-relevance gate (D8) and near-dup collapse (D9) added, prompt datamarking pinned, label-deadband default widened to ±0.20.
+**Status:** Formats pinned; producer-side prototype validated against real prod data. ATL-side adapter, Django endpoint, and droplet deployment are specified here but built in a future session. **Amended 2026-07-06** after the research benchmark (companion doc below): subject-relevance gate (D8) and near-dup collapse (D9) added, prompt datamarking pinned, label-deadband default widened to ±0.20. **Amended 2026-07-07** after an adversarial review of the implementation plan: `SIGNALS_STALENESS_ALERT_H` default corrected 30→20 (§5) — the 30 h default never actually caught a single missed day (see the corrected §5 note); the plan additionally hardens `TICKER_ALIASES` substring matching to word-bounded (Task 5) after confirming real collisions (`"intel"`⊂`"intelligence"`, `"cisco"`⊂`"francisco"`), and records novelty-preference/LDD/batch-mean-de-biasing as explicit (not silent) deferrals in the plan's new "Known seam debt" section.
 **Relates to:** `Docs/superpowers/specs/2026-06-10-news-heartbeat-design.md` (producer), `2026-07-06-news-to-signals-research-benchmark.md` (research benchmark driving the 2026-07-06 amendments), `/mnt/d/Documents/ATL Materials/FinSearch-to-ATL-Integration-Plan.html` (Plan 1), ATL repo `dashboard/backend/api/v2/models.py` (frozen consumer contract).
 
 ---
@@ -190,7 +190,7 @@ Env vars read by `news_signals.py` (module constants as defaults). This is the s
 | `SIGNALS_DAMP_CAP` | `0.7` | Max \|score\| when under-corroborated |
 | `SIGNALS_DAMP_MIN_ARTICLES` | `2` | Corroboration needed for \|score\| > damp cap |
 | `SIGNALS_MAX_FILE_MB` | `10` | Reject oversized items files |
-| `SIGNALS_STALENESS_ALERT_H` | `30` | Canary threshold (§6-C) |
+| `SIGNALS_STALENESS_ALERT_H` | `20` | Canary threshold (§6-C). Tuned, not arbitrary: the daily canary check runs 2 h after the daily beat, so a single fully-missed day leaves the newest artifact ~25.5 h old at the *next* day's check — a 30 h threshold would not cross that (it silently absorbs one entire missed day, only firing after a second consecutive miss); 20 h does. |
 
 ## 6. Failure policy (every mode decided)
 
