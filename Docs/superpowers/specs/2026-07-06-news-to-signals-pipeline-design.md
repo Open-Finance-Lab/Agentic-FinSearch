@@ -1,8 +1,8 @@
 # News → Signals Pipeline — Design Spec
 
 **Date:** 2026-07-06
-**Status:** Formats pinned; producer-side prototype validated against real prod data. ATL-side adapter, Django endpoint, and droplet deployment are specified here but built in a future session.
-**Relates to:** `Docs/superpowers/specs/2026-06-10-news-heartbeat-design.md` (producer), `/mnt/d/Documents/ATL Materials/FinSearch-to-ATL-Integration-Plan.html` (Plan 1), ATL repo `dashboard/backend/api/v2/models.py` (frozen consumer contract).
+**Status:** Formats pinned; producer-side prototype validated against real prod data. ATL-side adapter, Django endpoint, and droplet deployment are specified here but built in a future session. **Amended 2026-07-06** after the research benchmark (companion doc below): subject-relevance gate (D8) and near-dup collapse (D9) added, prompt datamarking pinned, label-deadband default widened to ±0.20.
+**Relates to:** `Docs/superpowers/specs/2026-06-10-news-heartbeat-design.md` (producer), `2026-07-06-news-to-signals-research-benchmark.md` (research benchmark driving the 2026-07-06 amendments), `/mnt/d/Documents/ATL Materials/FinSearch-to-ATL-Integration-Plan.html` (Plan 1), ATL repo `dashboard/backend/api/v2/models.py` (frozen consumer contract).
 
 ---
 
@@ -29,6 +29,8 @@ Guardrail (advisor): signals are **observational/measurement only**, not alpha-s
 | D5 | Trigger mechanism | **systemd timer sweep (15–30 min) — confirmed 2026-07-06** | Panel-recommended, user-confirmed. Not just simpler than inotify: under a future near-real-time feed (stories arriving every few dozen seconds), per-arrival triggering would drive one LLM call per story — the wrong cost shape. The sweep interval doubles as the micro-batch accumulator, so the timer is the destination design, not a stopgap. Interval becomes a tuning knob when feed frequency rises. |
 | D6 | Sentiment method v1 | **Batched gpt-4o-mini call** (OpenAI-compatible, same key discipline as heartbeat digest) | FinBERT-class local inference does not fit the droplet (128MB unit cap / ~300MB free RAM); a future swap of `compute_sentiment` internals is an **infra decision** (hosted inference or new host), interface unchanged. |
 | D7 | Retention-prune interlock | **Declined** | Making the heartbeat's prune aware of signals state couples stages the design deliberately keeps ignorant of each other. Residual risk (pipeline dead AND canary ignored for 90 days) accepted; the staleness canary (§6-C) covers realistic cases. |
+| D8 | Subject-relevance gate | **Deterministic pre-LLM heuristic** (ticker or company-alias token in headline + roundup/listicle title blocklist), NOT an LLM-returned relevance field | Research benchmark P0: every serious pipeline gates on entity-as-*subject*, and the sample's 9× `0.00` was roundup dilution, not a scorer bug. Pre-LLM placement is the only one that fixes context dilution (a post-hoc LLM field still spends the per-ticker cap and tokens on roundups), keeps the gate outside the injection blast radius (a self-reported `is_subject` is computed from attacker-influenceable text), stays deterministic/testable, and keeps the §4.3 swap point thin (a FinBERT-class swap needn't reimplement relevance). The LLM's existing freedom to omit tickers remains the second-line filter. Consequence: mention-only tickers now come out **absent** instead of `0.00` — consumers already tolerate absent tickers (D2). Exact blocklist patterns + alias map are implementation-plan detail. |
+| D9 | Within-batch near-dup collapse | **Collapse near-duplicate stories per ticker before `n_articles` and the cap** | Research benchmark P0/P1: ~80% of incoming financial news is near-duplicate (Feedly), so without collapse the corroboration damper (§7.3) can be satisfied by 20 copies of one roundup — illusory corroboration. Semantics pinned here (`n_articles` counts *distinct* stories); the algorithm (normalized-title match vs MinHash) is a two-way door for the implementation plan. Cross-batch/cross-producer dedup remains seam debt (§8). |
 
 ## 3. Architecture & data flow
 
@@ -47,7 +49,7 @@ finsearch-signals.service (oneshot) → Heartbeat/news_signals.py
         │  3. validation gate (§7.1): size caps, JSONL parse, field caps,
         │     published sanity, control/bidi strip  — poison pill → §6.1
         │  4. candidate selection: ticker-tagged stories, editorial score gate,
-        │     per-ticker cap
+        │     subject-relevance gate (D8), near-dup collapse (D9), per-ticker cap
         │  5. ONE batched LLM call → per-ticker {score, guid, rationale} (§4.3)
         │  6. guid-membership check per ticker; join guid → real story fields;
         │     clamp; corroboration damping; derive label
@@ -61,6 +63,8 @@ ATL get_news_sentiment(universe, timestamp) — projection rules (§4.5)
 ```
 
 Each `items-X.jsonl` yields exactly one `signals-X.json` (same stem) — traceable and diffable. Every batch covers a rolling 24 h window, so the latest artifact is self-contained; nothing ever merges.
+
+Cap selection: when more than `SIGNALS_PER_TICKER_CAP` distinct subject-stories survive D8/D9 for a ticker, the cap is filled deterministically by (editorial score desc, recency desc). A novelty-over-rehash preference within the cap (research P1; novelty gating is an evidenced alpha lever) is a deliberate implementation-plan refinement, not pinned here.
 
 ## 4. Pinned contracts
 
@@ -100,6 +104,8 @@ File: `$HEARTBEAT_HOME/signals/signals-<stem>.json` where `<stem>` matches the s
   "news_overview": "One-line market synthesis (≤300 chars) or null.",
   "diagnostics": {
     "stories_total": 82,
+    "candidates_dropped_not_subject": 41,
+    "near_dups_collapsed": 12,
     "candidates_selected": 34,
     "tickers_with_candidates": 14,
     "tickers_no_candidates": 22,
@@ -128,10 +134,10 @@ Field rules (normative):
 
 - **`signals`** — keyed by uppercase ticker. A ticker is present **iff** it had ≥1 valid candidate AND the LLM returned a valid, gate-passing entry. Absent = no data. Never emit `n_articles: 0`.
 - **`score`** — float in [-1, 1] (clamped). **Source of truth.** Damping: if `n_articles < SIGNALS_DAMP_MIN_ARTICLES`, |score| is capped at `SIGNALS_DAMP_CAP` (anti prompt-injection rail, §7.3).
-- **`sentiment`** — **derived** deterministically: `score ≥ +0.15` → `bullish`; `score ≤ −0.15` → `bearish`; else `neutral`. Consumers wanting custom thresholds re-derive from `score`; the label is a convenience.
-- **`headline` / `source` / `url` / `published` / `guid`** — copied from the representative story (the LLM-chosen guid, validated to be a member of *that ticker's* candidate set; §6.3). Never LLM-authored text. `guid` persists the exact join key for traceability.
+- **`sentiment`** — **derived** deterministically: `score ≥ +0.20` → `bullish`; `score ≤ −0.20` → `bearish`; else `neutral`. Default widened from ±0.15 per the research benchmark (the 40/60 band is the one deadband with direct empirical backing; ±0.10-class bands over-fire). Asymmetric bands (negatives more informative) are a consumer-side option — consumers wanting custom thresholds re-derive from `score`; the label is a convenience.
+- **`headline` / `source` / `url` / `published` / `guid`** — copied from the representative story (the LLM-chosen guid, validated to be a member of *that ticker's* candidate set; §3 step 6, §7.3). Never LLM-authored text. `guid` persists the exact join key for traceability.
 - **`rationale`** — LLM text, plain text, ≤ 280 chars, control/bidi chars stripped. Artifact-only; never reaches the ATL 7-field contract.
-- **`n_articles`** — count of that ticker's candidate stories in this batch (post-dedup, pre-cap).
+- **`n_articles`** — count of that ticker's **distinct** candidate stories in this batch (post subject-gate D8 and near-dup collapse D9, pre-cap). Duplicates must never satisfy the corroboration damper.
 - **`age_hours` is deliberately absent** — consumers compute it at read time against their own timestamp; staleness is never baked into the artifact.
 - **`status`** — `"ok"` or `"degraded"`. On whole-call LLM failure the artifact is still written (preserving 1:1 mapping and the audit trail) with `signals: {}`, `status: "degraded"`, and a `status_reason`. There is no extractive fallback for sentiment — we never fabricate scores.
 - **`source_items`** — basename only, never a path.
@@ -143,7 +149,7 @@ A machine-readable JSON Schema ships at `Heartbeat/schemas/signals-v1.schema.jso
 
 `compute_sentiment(candidates_by_ticker) -> (overview, {ticker: {score, guid, rationale}})`
 
-- Request: one chat-completions call, `response_format: json_object`, temperature 0.2, max_tokens 2000, 120 s socket timeout, 1 retry. Skeptical-analyst system prompt; **feed text is data, never instructions**. Per candidate: `guid`, ticker, title, source, age-hours, description capped at `SIGNALS_DESC_CAP`.
+- Request: one chat-completions call, `response_format: json_object`, temperature 0.2, max_tokens 2000, 120 s socket timeout, 1 retry. Skeptical-analyst system prompt; **feed text is data, never instructions** — enforced structurally, not just verbally: each candidate's title/description is **datamarked** (wrapped in explicit delimiters and declared untrusted data to be scored, never instructions to follow — spotlighting, shown to cut indirect-injection success from >50% to <2%). Exact delimiter format is implementation-plan detail. Per candidate: `guid`, ticker, title, source, age-hours, description capped at `SIGNALS_DESC_CAP`.
 - Response shape: `{"overview": str, "tickers": {"SYM": {"score": float, "guid": str, "rationale": str}}}`.
 - This function is the frozen swap point for the group's future Sentiment Signals models. Swapping internals must not change §4.2. A local-inference swap (FinBERT-class) is an infra decision (D6).
 
@@ -180,7 +186,7 @@ Env vars read by `news_signals.py` (module constants as defaults). This is the s
 | `SIGNALS_MIN_EDITORIAL_SCORE` | `2.0` | Candidate gate on items `score` |
 | `SIGNALS_PER_TICKER_CAP` | `3` | Candidate stories per ticker sent to LLM |
 | `SIGNALS_DESC_CAP` | `200` | Chars of description per candidate |
-| `SIGNALS_THRESHOLD` | `0.15` | ± threshold for bullish/bearish label |
+| `SIGNALS_THRESHOLD` | `0.20` | ± threshold for bullish/bearish label (40/60 band, empirically backed; was 0.15) |
 | `SIGNALS_DAMP_CAP` | `0.7` | Max \|score\| when under-corroborated |
 | `SIGNALS_DAMP_MIN_ARTICLES` | `2` | Corroboration needed for \|score\| > damp cap |
 | `SIGNALS_MAX_FILE_MB` | `10` | Reject oversized items files |
@@ -203,7 +209,7 @@ A fully-wedged pipeline must be distinguishable from a quiet news day. A separat
 
 1. **Validation gate (input trust boundary):** max file size before open; per-field length caps (title 500, description 5000, url 2000); `published` sane within `[file mtime − 30 d, file mtime + 1 h]` (blocks recency/staleness gaming via forged epochs); strip Unicode control/bidi characters from title/description (extends the heartbeat's masked-link precedent to this pipeline).
 2. **Serving trust boundary:** signals live in their own directory; the future endpoint container mounts **only** that directory, runtime-enforced `:ro`. A Django-container compromise must not be able to forge or overwrite artifacts. Public serialization strips model/prompt metadata (§4.4).
-3. **Prompt injection (residual, accepted for now):** feed text is attacker-influenceable; the guid-join kills fabricated provenance and the membership check kills cross-wiring, but a well-formed *steered* score for a real ticker survives prompt-level defenses. Structural rail: the corroboration damper (§4.2) — one crafted story cannot push a ticker past ±`SIGNALS_DAMP_CAP`. Residual risk acceptable while consumers are backtest/paper only against a locked universe; **revisit before any live-capital wiring**. Cross-ticker contamination within the single batched call is a known residual (full isolation = per-ticker calls; not worth the cost today).
+3. **Prompt injection (residual, accepted for now):** feed text is attacker-influenceable; the guid-join kills fabricated provenance and the membership check kills cross-wiring, but a well-formed *steered* score for a real ticker survives prompt-level defenses. Structural rails, layered: the subject gate (D8) keeps most mention-bait out of the prompt entirely; datamarking (§4.3) marks what does enter as untrusted; the corroboration damper (§4.2) — now counted over *distinct* stories (D9), so duplicates can't satisfy it — means one crafted story cannot push a ticker past ±`SIGNALS_DAMP_CAP`. Residual risk acceptable while consumers are backtest/paper only against a locked universe; **revisit before any live-capital wiring** (named upgrade path: a SecAlign-class fine-tuned scorer via the D6 swap seam; prompt-level defenses reduce but never eliminate attack success). Cross-ticker contamination within the single batched call is a known residual (full isolation = per-ticker calls; not worth the cost today).
 4. **Key handling:** dedicated env file (`.env.heartbeat` posture), mode 600, never logged.
 5. **Multi-producer future:** today the only writer of `digests/` is the heartbeat under the same user — one trust domain. Before onboarding producer #2: producer identity in the filename convention + allowlist in `news_signals.py` ("well-formed JSONL" must stop being the entire trust check).
 
@@ -211,12 +217,14 @@ A fully-wedged pipeline must be distinguishable from a quiet news day. A separat
 
 - **Producer #2 requires real design work, not config:** cross-batch/cross-source dedup has no owning stage (same story under two guid schemes inflates `n_articles`/corroboration); filename scheme has no producer tag (collision risk); the `score` calibration contract (§4.1) must be enforced. Do not bolt on a second producer without this.
 - **Model swap = infra decision** (D6).
+- **Aggregation upgrade path (documented, not built):** the per-batch snapshot is *correct* for the current short-horizon consumer (research-verified, not a stopgap). When a longer-horizon consumer appears, the specified swap is EWMA with half-life ≈ decision horizon (~6 h for intraday, ~90 d for multi-week momentum), or per-article recency weight `λ^age_days` with λ ≈ 0.89 (1-day horizon) → 0.97 (1-month). Whether it lives consumer-side or artifact-side is decided then.
+- **Source-tier hardening (producer-side, future):** extend the editorial gate with explicit exclusion of PR-wire/promotional/robo-generated sources (the MarketPsych pattern). Lives in the heartbeat's scoring, not in `news_signals.py`.
 - **Per-user variants:** cost crosses from noise (~$0.001–0.004/run today) into real money around 10K–50K calls/day (users × batches). A hard call-volume budget gate must exist before any per-user feature ships.
 - **`AMEX` typo in ATL's `DJIA_30`** — flag to ATL maintainers (likely `AMGN` intended).
 
 ## 9. Testing strategy
 
-- **Unit (`Heartbeat/tests/test_news_signals.py`):** validation gate (size/field/published/bidi cases), candidate selection + caps, prompt assembly, response validation (guid membership, clamping, damping, label derivation), poison-pill state handling, artifact-before-state ordering (crash injection between writes), degraded-artifact path, atomic write.
+- **Unit (`Heartbeat/tests/test_news_signals.py`):** validation gate (size/field/published/bidi cases), candidate selection + caps, subject gate (ticker/alias-in-headline passes; roundup-blocklist title drops; a ticker whose candidates are all gated emits *absent*, not `0.00`), near-dup collapse (`n_articles` counts distinct stories; damper not satisfiable by duplicates), prompt assembly (datamarking delimiters present around every candidate), response validation (guid membership, clamping, damping, label derivation), poison-pill state handling, artifact-before-state ordering (crash injection between writes), degraded-artifact path, atomic write.
 - **Contract:** sample artifacts validate against `signals-v1.schema.json`; a fixture copy + the same schema go to the ATL repo next session (its adapter tests validate projection from the same fixture).
 - **Staging (deploy session):** drop two items files back-to-back, confirm sweep processes both exactly once; kill the process mid-LLM-call, confirm no state corruption and reprocessing next sweep.
 
@@ -230,3 +238,5 @@ A fully-wedged pipeline must be distinguishable from a quiet news day. A separat
 - Q7 reality check **CONCERN accepted**: plug-and-unplug is real for consumers and the model swap's data contract; overstated for producer #2 and model-swap infra — both written down in §8 instead of hand-waved.
 
 Planning call: every box is named, every seam has a contract, every failure has a decided behavior → walking skeleton is specable; build this session's slice.
+
+**Post-review amendment (2026-07-06, research benchmark):** the benchmark verified two P0 gaps against the field — entity-as-subject relevance and near-dup collapse — which entered the design as D8/D9; prompt datamarking was adopted into §4.3/§7.3 and the label deadband default widened to ±0.20. Panel verdicts unchanged; the Q6 residual now has a named live-capital upgrade path (SecAlign-class scorer). Items deliberately deferred to the implementation plan, not the spec: exact blocklist patterns + company-alias map, dedup algorithm choice (normalized-title vs MinHash), datamarking delimiter format, novelty-over-rehash preference within the per-ticker cap (§3 pins the deterministic default ordering), label-disguise defense (LDD) for the sentiment output, batch-mean de-biasing.
