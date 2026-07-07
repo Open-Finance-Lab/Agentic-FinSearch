@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import news_signals as ns
 
-NOW = 1783350000.0  # 2026-07-06T12:20:00Z — fixed so the artifact is stable
+NOW = 1783350000.0  # 2026-07-06T15:00:00Z — fixed so the artifact is stable
 
 ITEMS = [
     {"guid": "fix-msft-1", "title": "Microsoft raises Azure guidance after record quarter",

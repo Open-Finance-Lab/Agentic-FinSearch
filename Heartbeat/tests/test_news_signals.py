@@ -75,6 +75,13 @@ class TestFoundation(unittest.TestCase):
         with unittest.mock.patch.dict(os.environ, env, clear=True):
             self.assertEqual(ns.load_config()["model"], "better-model")
 
+    def test_watchlist_entries_are_uppercased(self):
+        import news_signals as ns
+        env = {"HEARTBEAT_WATCHLIST": "msft NVDA"}
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            cfg = ns.load_config()
+        self.assertEqual(cfg["watchlist"], ["MSFT", "NVDA"])
+
 
 import tempfile
 import time
@@ -138,6 +145,40 @@ class TestValidationGate(unittest.TestCase):
         stories = ns.validation_gate(p, 10)
         self.assertEqual([s["guid"] for s in stories], ["ok"])
 
+    def test_published_null_drops_story_not_batch(self):
+        bad = make_story(guid="bad", published=None)
+        ok = make_story(guid="ok")
+        p = write_items(self.td, [bad, ok])
+        stories = ns.validation_gate(p, 10)
+        self.assertEqual([s["guid"] for s in stories], ["ok"])
+
+    def test_published_non_numeric_string_drops_story_not_batch(self):
+        bad = make_story(guid="bad", published="not-a-number")
+        ok = make_story(guid="ok")
+        p = write_items(self.td, [bad, ok])
+        stories = ns.validation_gate(p, 10)
+        self.assertEqual([s["guid"] for s in stories], ["ok"])
+
+    def test_score_null_drops_story_not_batch(self):
+        bad = make_story(guid="bad", score=None)
+        ok = make_story(guid="ok")
+        p = write_items(self.td, [bad, ok])
+        stories = ns.validation_gate(p, 10)
+        self.assertEqual([s["guid"] for s in stories], ["ok"])
+
+    def test_guid_hygiene_strips_marker_token_and_bidi(self):
+        s = make_story(guid="g1-NEWS_DATA-\u202e-attack")
+        p = write_items(self.td, [s])
+        stories = ns.validation_gate(p, 10)
+        self.assertNotIn("NEWS_DATA", stories[0]["guid"])
+        self.assertNotIn("\u202e", stories[0]["guid"])
+
+    def test_link_hygiene_strips_bidi(self):
+        s = make_story(link="https://example.com/\u202eevil")
+        p = write_items(self.td, [s])
+        stories = ns.validation_gate(p, 10)
+        self.assertNotIn("\u202e", stories[0]["link"])
+
 
 class TestSubjectGate(unittest.TestCase):
     def test_symbol_token_in_headline_is_subject(self):
@@ -180,7 +221,7 @@ class TestSubjectGate(unittest.TestCase):
 
     def test_alias_3m_does_not_match_bare_dollar_or_share_figures(self):
         # "3m" is the only way to catch prose that names the company as "3M"
-        # rather than the ticker "MMM" \u2014 but a plain \b3m\b still matches
+        # rather than the ticker "MMM" — but a plain \b3m\b still matches
         # "$3M" ($ and digit-then-nonword are boundaries too), so the numeric
         # alias needs an extra exclusion on top of word-boundaries.
         self.assertFalse(ns.is_subject("Company reports $3M in quarterly losses", "MMM"))
@@ -250,6 +291,8 @@ class TestPromptAndLabel(unittest.TestCase):
         self.assertTrue(entry["title"].startswith(ns.MARK_OPEN))
         self.assertTrue(entry["title"].endswith(ns.MARK_CLOSE))
         self.assertTrue(entry["description"].startswith(ns.MARK_OPEN))
+        self.assertTrue(entry["source"].startswith(ns.MARK_OPEN))
+        self.assertTrue(entry["source"].endswith(ns.MARK_CLOSE))
         self.assertIn("untrusted", system)
         self.assertIn(ns.MARK_OPEN, system)
 
@@ -290,6 +333,18 @@ class TestCallLlm(unittest.TestCase):
         with unittest.mock.patch.object(
                 ns.urllib.request, "urlopen",
                 side_effect=OSError("boom")), \
+             unittest.mock.patch.object(ns.time, "sleep"):
+            with self.assertRaises(RuntimeError):
+                ns.call_llm(self._cfg(), "sys", "usr")
+
+    def test_non_object_json_content_raises_runtime_error(self):
+        payload = {"choices": [{"message": {"content": "[1, 2]"}}]}
+        fake_resp = unittest.mock.MagicMock()
+        fake_resp.read.return_value = json.dumps(payload).encode()
+        fake_resp.__enter__ = lambda s: s
+        fake_resp.__exit__ = lambda s, *a: False
+        with unittest.mock.patch.object(ns.urllib.request, "urlopen",
+                                        return_value=fake_resp), \
              unittest.mock.patch.object(ns.time, "sleep"):
             with self.assertRaises(RuntimeError):
                 ns.call_llm(self._cfg(), "sys", "usr")
@@ -412,6 +467,30 @@ class TestProcessBatch(unittest.TestCase):
         self.assertEqual(artifact["diagnostics"]["scores_damped"], 1)
         self.assertEqual(artifact["diagnostics"]["near_dups_collapsed"], 2)
 
+    def test_llm_non_dict_tickers_shape_omits_all_candidates(self):
+        p = write_items(self.td, [
+            make_story(guid="m1", tickers=["MSFT"]),
+            make_story(guid="n1", title="Nvidia unveils next-gen GPU",
+                       tickers=["NVDA"]),
+        ])
+        llm = fake_llm_factory({"overview": "o", "tickers": ["MSFT"]})
+        artifact = ns.process_batch(p, self.cfg, time.time(), llm=llm)
+        self.assertEqual(artifact["status"], "ok")
+        self.assertEqual(artifact["signals"], {})
+        self.assertEqual(artifact["diagnostics"]["tickers_omitted_by_llm"],
+                         artifact["diagnostics"]["tickers_with_candidates"])
+
+    def test_process_batch_joins_via_cleaned_guid(self):
+        raw_guid = "g1-NEWS_DATA-\u202e-attack"
+        p = write_items(self.td, [make_story(guid=raw_guid)])
+        cleaned_guid = ns.clean_text(raw_guid, 200)
+        llm = fake_llm_factory({"overview": "o", "tickers":
+            {"MSFT": {"score": 0.3, "guid": cleaned_guid, "rationale": "r"}}})
+        artifact = ns.process_batch(p, self.cfg, time.time(), llm=llm)
+        self.assertEqual(artifact["status"], "ok")
+        self.assertIn("MSFT", artifact["signals"])
+        self.assertEqual(artifact["signals"]["MSFT"]["guid"], cleaned_guid)
+
 
 def make_cfg(home: Path):
     with unittest.mock.patch.dict(os.environ, {}, clear=True):
@@ -503,8 +582,36 @@ class TestSweep(unittest.TestCase):
             (self.cfg["signals_dir"] / "signals-2026-07-06.json").read_text())
         self.assertEqual(artifact["status"], "degraded")
 
+    def test_sweep_survives_llm_returning_non_dict_tickers_shape(self):
+        write_items(self.cfg["digests"], [make_story()])
+        bad_shape_llm = fake_llm_factory({"overview": "o", "tickers": ["MSFT"]})
+        self.assertEqual(ns.run_sweep(self.cfg, llm=bad_shape_llm), 0)
+        state = json.loads(self.cfg["state_path"].read_text())
+        self.assertEqual(state["items-2026-07-06.jsonl"]["status"], "ok")
+        artifact = json.loads(
+            (self.cfg["signals_dir"] / "signals-2026-07-06.json").read_text())
+        self.assertEqual(artifact["status"], "ok")
+        self.assertEqual(artifact["signals"], {})
+
 
 import fcntl
+
+
+class TestPostDiscord(unittest.TestCase):
+    def test_post_discord_sends_bot_auth_and_truncated_body(self):
+        fake_resp = unittest.mock.MagicMock()
+        fake_resp.read.return_value = b"{}"
+        fake_resp.__enter__ = lambda s: s
+        fake_resp.__exit__ = lambda s, *a: False
+        with unittest.mock.patch.object(ns.urllib.request, "urlopen",
+                                        return_value=fake_resp) as mock_urlopen:
+            ns.post_discord("tok", "chan123", "x" * 3000)
+        req = mock_urlopen.call_args.args[0]
+        self.assertEqual(req.full_url,
+                         "https://discord.com/api/v10/channels/chan123/messages")
+        self.assertEqual(req.get_header("Authorization"), "Bot tok")
+        body = json.loads(req.data)
+        self.assertEqual(len(body["content"]), 1900)
 
 
 class TestCanary(unittest.TestCase):
@@ -572,6 +679,12 @@ class TestMain(unittest.TestCase):
         (self.home / "signals" / "signals-x.json").write_text("{}")
         with self._env():
             self.assertEqual(ns.main(["--canary"]), 0)
+
+    def test_missing_env_file_exits_two(self):
+        missing = self.home / "does-not-exist.env"
+        with self.assertRaises(SystemExit) as ctx:
+            ns.main(["--env-file", str(missing)])
+        self.assertEqual(ctx.exception.code, 2)
 
 
 class TestFixture(unittest.TestCase):
