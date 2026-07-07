@@ -160,7 +160,7 @@ A machine-readable JSON Schema ships at `Heartbeat/schemas/signals-v1.schema.jso
 - **200** — public serialization of the newest `signals-*.json` (newest = greatest mtime, filename as a deterministic tiebreak; same-day supplemental stems sort lexicographically before the date-only stem, so stem order alone is not recency): the artifact **minus** `generator`, `model`, `prompt_version` (recon-value stripping), **plus** `"staleness_hours"` computed server-side from `generated_at`.
 - `?tickers=AAPL,MSFT` — optional filter on `signals` keys (case-insensitive; unknown tickers simply absent).
 - **404** `{"error": "no_signals"}` — no artifact exists.
-- Headers: `ETag` (from `generated_at`), `Last-Modified`, `Cache-Control: public, max-age=300`; conditional GET returns 304. Rate-limited via the existing `django_ratelimit` + `api.identity.ratelimit_key` infra.
+- Headers: `ETag` (from `generated_at` + `source_items` + the normalized tickers filter, `+`-joined — Django's `parse_etags()` rejects commas inside an ETag), `Last-Modified` **on the unfiltered variant only** (it is identical across tickers variants, so an `If-Modified-Since`-only revalidation of a filtered request must get a full 200, never a 304 pointing at a differently-filtered cached body), `Cache-Control: public, max-age=300`; conditional GET returns 304. Rate-limited via the existing `django_ratelimit` + `api.identity.ratelimit_key` infra.
 - Serving path: container gets a **runtime-enforced `:ro` mount of `$HEARTBEAT_HOME/signals/` only** — never the whole digests tree (§7.2).
 
 ### 4.5 ATL adapter projection (future session; pinned now)
