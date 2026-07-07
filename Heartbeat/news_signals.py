@@ -131,3 +131,74 @@ def validation_gate(path, max_file_mb):
         story["tickers"] = [t.upper() for t in story.get("tickers", [])]
         stories.append(story)
     return stories
+
+
+# --- Subject-relevance gate (spec D8) -------------------------------------
+# ROUNDUP_PATTERNS and TICKER_ALIASES are deliberately plain data: they are
+# the candidate-quality tuning surface. >>> OWNER-TUNED: review before merge.
+ROUNDUP_PATTERNS = (
+    r"\bcompany news for\b",
+    r"\bnews roundup\b",
+    r"\bstocks to watch\b",
+    r"\bearnings preview\b",
+    r"\b\d+ (?:stocks|reasons|things)\b",
+    r"\bjoined the dow\b",
+)
+ROUNDUP_RE = [re.compile(p) for p in ROUNDUP_PATTERNS]
+
+# Lowercase name tokens per ticker (union watchlist, spec D2). Symbols shorter
+# than SYMBOL_MATCH_MIN_LEN rely on aliases alone. >>> OWNER-TUNED.
+TICKER_ALIASES = {
+    "AAPL": ("apple",), "AMZN": ("amazon",),
+    "AXP": ("american express", "amex"), "BA": ("boeing",),
+    "BRK-B": ("berkshire",), "BTC-USD": ("bitcoin",),
+    "CAT": ("caterpillar",), "CSCO": ("cisco",), "CVX": ("chevron",),
+    "DIS": ("disney",), "GOOGL": ("google", "alphabet"),
+    "GS": ("goldman",), "HD": ("home depot",), "IBM": ("ibm",),
+    "INTC": ("intel",), "JNJ": ("johnson & johnson",),
+    "JPM": ("jpmorgan", "jp morgan"), "KO": ("coca-cola",),
+    "MA": ("mastercard",), "MCD": ("mcdonald",),
+    "META": ("meta platforms", "facebook", "instagram"), "MMM": ("3m",),
+    "MRK": ("merck",), "MSFT": ("microsoft",), "NKE": ("nike",),
+    "NVDA": ("nvidia",), "PFE": ("pfizer",), "PG": ("procter",),
+    "TRV": ("travelers",), "TSLA": ("tesla",), "UNH": ("unitedhealth",),
+    "V": ("visa",), "WBA": ("walgreens",), "WMT": ("walmart",),
+    "XOM": ("exxon",),
+}
+SYMBOL_MATCH_MIN_LEN = 3
+
+# Aliases that collide with common dollar/share-count shorthand ("$3M",
+# "133M shares") once lowercased — word-boundaries alone don't save them,
+# since "$" and digit-to-nonword transitions are boundaries too. Excluded
+# from matching only when immediately preceded by "$", "." or a digit.
+_ALIAS_NUMERIC = frozenset({"3m"})
+
+
+def _alias_pattern(alias):
+    pattern = rf"\b{re.escape(alias)}\b"
+    if alias in _ALIAS_NUMERIC:
+        pattern = r"(?<![\d$.])" + pattern
+    return re.compile(pattern)
+
+
+# Precompiled per-alias patterns. Built once at import time from the
+# owner-tuned TICKER_ALIASES data above.
+ALIAS_RE = {ticker: [_alias_pattern(a) for a in aliases]
+            for ticker, aliases in TICKER_ALIASES.items()}
+
+
+def is_subject(title, ticker):
+    """Entity-as-subject heuristic (spec D8): mention-only and roundup
+    stories never reach the LLM. Alias matches are word-bounded, never a
+    bare substring check — `"intel" in lowered` would also match inside
+    "intelligence", `"cisco"` inside "francisco", `"visa"` inside
+    "advisable". The numeric alias "3m" (MMM) additionally excludes a
+    preceding "$", "." or digit so dollar/share-count figures ("$3M",
+    "133M shares") don't false-tag MMM as subject."""
+    lowered = title.lower()
+    if any(p.search(lowered) for p in ROUNDUP_RE):
+        return False
+    if len(ticker) >= SYMBOL_MATCH_MIN_LEN and re.search(
+            rf"(?<![A-Z0-9-]){re.escape(ticker)}(?![A-Z0-9-])", title):
+        return True
+    return any(p.search(lowered) for p in ALIAS_RE.get(ticker, ()))

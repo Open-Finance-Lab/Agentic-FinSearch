@@ -137,3 +137,55 @@ class TestValidationGate(unittest.TestCase):
         p = write_items(self.td, [future, ancient, ok])
         stories = ns.validation_gate(p, 10)
         self.assertEqual([s["guid"] for s in stories], ["ok"])
+
+
+class TestSubjectGate(unittest.TestCase):
+    def test_symbol_token_in_headline_is_subject(self):
+        self.assertTrue(ns.is_subject("NVDA jumps 5% on record orders", "NVDA"))
+
+    def test_company_alias_is_subject(self):
+        self.assertTrue(ns.is_subject("Nvidia unveils next-gen GPU", "NVDA"))
+        self.assertTrue(ns.is_subject("Alphabet beats on ad revenue", "GOOGL"))
+
+    def test_mention_only_is_not_subject(self):
+        self.assertFalse(ns.is_subject("Tech megacaps rally into the close", "NVDA"))
+
+    def test_roundup_titles_are_blocked_even_with_symbol(self):
+        self.assertFalse(ns.is_subject("Company News for July 6, 2026", "AAPL"))
+        self.assertFalse(ns.is_subject("MSFT, AAPL are part of Zacks Earnings Preview", "MSFT"))
+        self.assertFalse(ns.is_subject("5 stocks to watch this week: NVDA leads", "NVDA"))
+        self.assertFalse(ns.is_subject("This AI stock joined the Dow", "NVDA"))
+
+    def test_short_symbols_require_alias_not_token(self):
+        self.assertFalse(ns.is_subject("GTA V breaks sales records", "V"))
+        self.assertTrue(ns.is_subject("Visa expands stablecoin settlement", "V"))
+
+    def test_hyphenated_symbols_match(self):
+        self.assertTrue(ns.is_subject("BRK-B edges higher after 13F", "BRK-B"))
+        self.assertTrue(ns.is_subject("Bitcoin tops $120k", "BTC-USD"))
+
+    def test_alias_match_is_word_bounded_not_substring(self):
+        # A naive `alias in lowered` substring check false-matches company
+        # aliases embedded inside unrelated words. All three are real words
+        # that show up routinely in financial headlines.
+        self.assertFalse(ns.is_subject(
+            "This Magnificent Artificial Intelligence Stock Rallies", "INTC"))
+        self.assertFalse(ns.is_subject(
+            "San Francisco Fed officials weigh in on rate path", "CSCO"))
+        self.assertFalse(ns.is_subject(
+            "Analysts say the merger looks advisable for shareholders", "V"))
+        # genuine mentions must still pass once word-bounded
+        self.assertTrue(ns.is_subject("Intel unveils new AI chip", "INTC"))
+        self.assertTrue(ns.is_subject("Cisco beats on earnings", "CSCO"))
+
+    def test_alias_3m_does_not_match_bare_dollar_or_share_figures(self):
+        # "3m" is the only way to catch prose that names the company as "3M"
+        # rather than the ticker "MMM" \u2014 but a plain \b3m\b still matches
+        # "$3M" ($ and digit-then-nonword are boundaries too), so the numeric
+        # alias needs an extra exclusion on top of word-boundaries.
+        self.assertFalse(ns.is_subject("Company reports $3M in quarterly losses", "MMM"))
+        self.assertFalse(ns.is_subject("Firm raised $13M in its latest round", "MMM"))
+        self.assertFalse(ns.is_subject("Stock trades 133M shares in a single session", "MMM"))
+        # genuine mentions must still pass
+        self.assertTrue(ns.is_subject("3M raises full-year guidance", "MMM"))
+        self.assertTrue(ns.is_subject("Shares of 3M rose after an analyst upgrade", "MMM"))
