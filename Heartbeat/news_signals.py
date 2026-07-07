@@ -104,3 +104,30 @@ def load_config():
         "max_file_mb": int(os.environ.get("SIGNALS_MAX_FILE_MB", "10")),
         "staleness_alert_h": float(os.environ.get("SIGNALS_STALENESS_ALERT_H", "20")),
     }
+
+
+def validation_gate(path, max_file_mb):
+    """Input trust boundary (spec §7.1). Batch-level defects raise ValueError
+    (poison pill, §6.1); a bad `published` drops only that story."""
+    if path.stat().st_size > max_file_mb * 1024 * 1024:
+        raise ValueError(f"file exceeds {max_file_mb}MB")
+    mtime = path.stat().st_mtime
+    lo, hi = mtime - 30 * 86400, mtime + 3600
+    stories = []
+    for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        story = json.loads(line)  # JSONDecodeError is a ValueError → poison pill
+        for field in REQUIRED_FIELDS:
+            if field not in story:
+                raise ValueError(f"line {i}: missing required field {field}")
+        if not (lo <= float(story["published"]) <= hi):
+            continue  # forged/insane epoch: drop the story, keep the batch
+        story["title"] = clean_text(story["title"], FIELD_CAPS["title"])
+        story["description"] = clean_text(story.get("description", ""),
+                                          FIELD_CAPS["description"])
+        story["source"] = clean_text(story["source"], FIELD_CAPS["source"])
+        story["link"] = str(story["link"])[:FIELD_CAPS["link"]]
+        story["tickers"] = [t.upper() for t in story.get("tickers", [])]
+        stories.append(story)
+    return stories

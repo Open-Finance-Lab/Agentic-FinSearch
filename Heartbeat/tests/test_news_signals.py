@@ -74,3 +74,66 @@ class TestFoundation(unittest.TestCase):
         env = {"SIGNALS_MODEL": "better-model", "HEARTBEAT_MODEL": "worse-model"}
         with unittest.mock.patch.dict(os.environ, env, clear=True):
             self.assertEqual(ns.load_config()["model"], "better-model")
+
+
+import tempfile
+import time
+
+import news_signals as ns
+
+
+def make_story(**over):
+    s = {
+        "guid": "g1", "title": "Microsoft raises Azure guidance",
+        "link": "https://example.com/a", "source": "Reuters",
+        "published": time.time() - 3600, "description": "desc",
+        "tickers": ["MSFT"], "feeds": ["news"], "score": 5.0,
+    }
+    s.update(over)
+    return s
+
+
+def write_items(dirpath, stories, name="items-2026-07-06.jsonl"):
+    p = Path(dirpath) / name
+    p.write_text("\n".join(json.dumps(s) for s in stories) + "\n", encoding="utf-8")
+    return p
+
+
+class TestValidationGate(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.td = self._td.name
+        self.addCleanup(self._td.cleanup)
+
+    def test_happy_path_cleans_and_uppercases(self):
+        p = write_items(self.td, [make_story(title="ok\u202etitle",
+                                             tickers=["msft"])])
+        stories = ns.validation_gate(p, 10)
+        self.assertEqual(stories[0]["title"], "oktitle")
+        self.assertEqual(stories[0]["tickers"], ["MSFT"])
+
+    def test_missing_required_field_is_poison_pill(self):
+        s = make_story()
+        del s["source"]
+        p = write_items(self.td, [s])
+        with self.assertRaises(ValueError):
+            ns.validation_gate(p, 10)
+
+    def test_malformed_json_line_is_poison_pill(self):
+        p = Path(self.td) / "items-x.jsonl"
+        p.write_text('{"broken\n', encoding="utf-8")
+        with self.assertRaises(ValueError):
+            ns.validation_gate(p, 10)
+
+    def test_oversized_file_is_poison_pill(self):
+        p = write_items(self.td, [make_story()])
+        with self.assertRaises(ValueError):
+            ns.validation_gate(p, 0)  # 0 MB cap
+
+    def test_published_outside_sanity_window_drops_story_not_batch(self):
+        future = make_story(guid="future", published=time.time() + 7200)
+        ancient = make_story(guid="ancient", published=time.time() - 40 * 86400)
+        ok = make_story(guid="ok")
+        p = write_items(self.td, [future, ancient, ok])
+        stories = ns.validation_gate(p, 10)
+        self.assertEqual([s["guid"] for s in stories], ["ok"])
