@@ -202,3 +202,54 @@ def is_subject(title, ticker):
             rf"(?<![A-Z0-9-]){re.escape(ticker)}(?![A-Z0-9-])", title):
         return True
     return any(p.search(lowered) for p in ALIAS_RE.get(ticker, ()))
+
+
+# --- Candidate selection (spec §3 step 4, D9) --------------------------------
+_TITLE_NORM_RE = re.compile(r"[^a-z0-9 ]+")
+
+
+def normalize_title(title):
+    return " ".join(_TITLE_NORM_RE.sub(" ", title.lower()).split())
+
+
+def collapse_near_dups(stories):
+    """Keep the first story per normalized title (input sorted best-first).
+    Duplicates must never inflate n_articles / satisfy the damper (spec D9)."""
+    seen, kept, collapsed = set(), [], 0
+    for story in stories:
+        key = normalize_title(story["title"])
+        if key in seen:
+            collapsed += 1
+            continue
+        seen.add(key)
+        kept.append(story)
+    return kept, collapsed
+
+
+def select_candidates(stories, watchlist, cfg):
+    """Spec §3 step 4: editorial gate → subject gate (D8) → per-ticker
+    best-first sort → near-dup collapse (D9) → cap."""
+    diag = {"candidates_dropped_not_subject": 0, "near_dups_collapsed": 0,
+            "tickers_capped": 0}
+    by_ticker = {}
+    for story in stories:
+        if float(story["score"]) < cfg["min_editorial"]:
+            continue
+        for ticker in story["tickers"]:
+            if ticker not in watchlist:
+                continue
+            if not is_subject(story["title"], ticker):
+                diag["candidates_dropped_not_subject"] += 1
+                continue
+            by_ticker.setdefault(ticker, []).append(story)
+    capped, n_articles = {}, {}
+    for ticker in sorted(by_ticker):
+        lst = by_ticker[ticker]
+        lst.sort(key=lambda s: (-float(s["score"]), -float(s["published"])))
+        lst, collapsed = collapse_near_dups(lst)
+        diag["near_dups_collapsed"] += collapsed
+        n_articles[ticker] = len(lst)
+        if len(lst) > cfg["per_ticker_cap"]:
+            diag["tickers_capped"] += 1
+        capped[ticker] = lst[:cfg["per_ticker_cap"]]
+    return capped, n_articles, diag

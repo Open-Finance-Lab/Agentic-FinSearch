@@ -189,3 +189,53 @@ class TestSubjectGate(unittest.TestCase):
         # genuine mentions must still pass
         self.assertTrue(ns.is_subject("3M raises full-year guidance", "MMM"))
         self.assertTrue(ns.is_subject("Shares of 3M rose after an analyst upgrade", "MMM"))
+
+
+class TestSelection(unittest.TestCase):
+    def _cfg(self):
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
+            return ns.load_config()
+
+    def test_near_dups_collapse_and_n_articles_counts_distinct(self):
+        stories = [
+            make_story(guid="a", title="Microsoft raises Azure guidance", score=6.0),
+            make_story(guid="b", title="Microsoft raises Azure guidance!", score=3.0),
+            make_story(guid="c", title="Microsoft cloud momentum lifts outlook", score=4.0),
+        ]
+        capped, n_articles, diag = ns.select_candidates(
+            stories, ["MSFT"], self._cfg())
+        self.assertEqual(n_articles["MSFT"], 2)  # dup collapsed BEFORE count
+        self.assertEqual(diag["near_dups_collapsed"], 1)
+        self.assertEqual([s["guid"] for s in capped["MSFT"]], ["a", "c"])
+
+    def test_subject_gate_drops_feed_into_diagnostics(self):
+        stories = [
+            make_story(guid="r", title="Company News for July 6, 2026",
+                       tickers=["AAPL", "GOOGL"]),
+            make_story(guid="s", title="Apple raises iPhone guidance",
+                       tickers=["AAPL"]),
+        ]
+        capped, n_articles, diag = ns.select_candidates(
+            stories, ["AAPL", "GOOGL"], self._cfg())
+        self.assertEqual(diag["candidates_dropped_not_subject"], 2)
+        self.assertEqual(list(capped), ["AAPL"])
+        self.assertEqual(n_articles["AAPL"], 1)
+
+    def test_editorial_gate_and_cap_order(self):
+        cfg = self._cfg()
+        stories = [make_story(guid="low", score=1.0)] + [
+            make_story(guid=f"g{i}", score=3.0 + i,
+                       title=f"Microsoft ships product number {i} today",
+                       published=time.time() - i * 60)
+            for i in range(5)
+        ]
+        capped, n_articles, diag = ns.select_candidates(stories, ["MSFT"], cfg)
+        self.assertEqual(n_articles["MSFT"], 5)          # low-editorial excluded
+        self.assertEqual(len(capped["MSFT"]), cfg["per_ticker_cap"])
+        self.assertEqual([s["guid"] for s in capped["MSFT"]], ["g4", "g3", "g2"])
+        self.assertEqual(diag["tickers_capped"], 1)
+
+    def test_non_watchlist_tickers_ignored(self):
+        stories = [make_story(tickers=["ZZZZ"])]
+        capped, n_articles, diag = ns.select_candidates(stories, ["MSFT"], self._cfg())
+        self.assertEqual(capped, {})
