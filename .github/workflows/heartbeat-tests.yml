@@ -71,9 +71,11 @@ jobs:
             echo "enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Compute artifact checksum
+      - name: Compute artifact checksums
         id: artifact
-        run: echo "sha256=$(sha256sum Heartbeat/news_heartbeat.py | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "sha256=$(sha256sum Heartbeat/news_heartbeat.py | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "signals_sha256=$(sha256sum Heartbeat/news_signals.py | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       # The droplet fetches the script straight from this commit (the repo is
       # public), verifies it against the checksum computed from the checkout
@@ -88,12 +90,13 @@ jobs:
           REPO: ${{ github.repository }}
           COMMIT_SHA: ${{ github.sha }}
           EXPECTED_SHA256: ${{ steps.artifact.outputs.sha256 }}
+          EXPECTED_SIGNALS_SHA256: ${{ steps.artifact.outputs.signals_sha256 }}
         with:
           host: ${{ env.DROPLET_HOST }}
           username: ${{ env.DROPLET_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: 22
-          envs: REPO,COMMIT_SHA,EXPECTED_SHA256,HEARTBEAT_HOME
+          envs: REPO,COMMIT_SHA,EXPECTED_SHA256,HEARTBEAT_HOME,EXPECTED_SIGNALS_SHA256
           script: |
             set -euo pipefail
             tmp=$(mktemp "$HEARTBEAT_HOME/.news_heartbeat.deploy.XXXXXX")
@@ -107,3 +110,14 @@ jobs:
             mv "$tmp" "$HEARTBEAT_HOME/news_heartbeat.py"
             trap - EXIT
             echo "Deployed news_heartbeat.py @ $COMMIT_SHA"
+            tmp=$(mktemp "$HEARTBEAT_HOME/.news_signals.deploy.XXXXXX")
+            trap 'rm -f "$tmp"' EXIT
+            curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "https://raw.githubusercontent.com/$REPO/$COMMIT_SHA/Heartbeat/news_signals.py" -o "$tmp"
+            echo "$EXPECTED_SIGNALS_SHA256  $tmp" | sha256sum -c -
+            python3 -m py_compile "$tmp"
+            grep -m1 '^VERSION' "$tmp"
+            rm -rf "$HEARTBEAT_HOME/__pycache__"
+            chmod 644 "$tmp"
+            mv "$tmp" "$HEARTBEAT_HOME/news_signals.py"
+            trap - EXIT
+            echo "Deployed news_signals.py @ $COMMIT_SHA"
