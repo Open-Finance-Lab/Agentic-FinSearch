@@ -239,3 +239,57 @@ class TestSelection(unittest.TestCase):
         stories = [make_story(tickers=["ZZZZ"])]
         capped, n_articles, diag = ns.select_candidates(stories, ["MSFT"], self._cfg())
         self.assertEqual(capped, {})
+
+
+class TestPromptAndLabel(unittest.TestCase):
+    def test_every_candidate_text_is_datamarked(self):
+        cands = {"MSFT": [make_story(description="Azure demand is strong")]}
+        system, user = ns.build_prompt(cands, time.time(), 200)
+        payload = json.loads(user)
+        entry = payload["MSFT"][0]
+        self.assertTrue(entry["title"].startswith(ns.MARK_OPEN))
+        self.assertTrue(entry["title"].endswith(ns.MARK_CLOSE))
+        self.assertTrue(entry["description"].startswith(ns.MARK_OPEN))
+        self.assertIn("untrusted", system)
+        self.assertIn(ns.MARK_OPEN, system)
+
+    def test_description_capped_and_guid_passthrough(self):
+        cands = {"MSFT": [make_story(description="x" * 500)]}
+        _, user = ns.build_prompt(cands, time.time(), 200)
+        entry = json.loads(user)["MSFT"][0]
+        self.assertLessEqual(
+            len(entry["description"]) - len(ns.MARK_OPEN) - len(ns.MARK_CLOSE) - 2,
+            200)
+        self.assertEqual(entry["guid"], "g1")
+
+    def test_derive_label_thresholds(self):
+        self.assertEqual(ns.derive_label(0.20, 0.20), "bullish")
+        self.assertEqual(ns.derive_label(0.19, 0.20), "neutral")
+        self.assertEqual(ns.derive_label(-0.20, 0.20), "bearish")
+        self.assertEqual(ns.derive_label(0.0, 0.20), "neutral")
+
+
+class TestCallLlm(unittest.TestCase):
+    def _cfg(self):
+        with unittest.mock.patch.dict(os.environ, {"OPENAI_API_KEY": "k"}, clear=True):
+            return ns.load_config()
+
+    def test_returns_parsed_content_json(self):
+        payload = {"choices": [{"message": {"content":
+                   json.dumps({"overview": "o", "tickers": {}})}}]}
+        fake_resp = unittest.mock.MagicMock()
+        fake_resp.read.return_value = json.dumps(payload).encode()
+        fake_resp.__enter__ = lambda s: s
+        fake_resp.__exit__ = lambda s, *a: False
+        with unittest.mock.patch.object(ns.urllib.request, "urlopen",
+                                        return_value=fake_resp):
+            out = ns.call_llm(self._cfg(), "sys", "usr")
+        self.assertEqual(out["overview"], "o")
+
+    def test_raises_runtime_error_after_retries(self):
+        with unittest.mock.patch.object(
+                ns.urllib.request, "urlopen",
+                side_effect=OSError("boom")), \
+             unittest.mock.patch.object(ns.time, "sleep"):
+            with self.assertRaises(RuntimeError):
+                ns.call_llm(self._cfg(), "sys", "usr")
