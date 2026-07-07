@@ -326,3 +326,86 @@ def derive_label(score, threshold):
     if score <= -threshold:
         return "bearish"
     return "neutral"
+
+
+def validate_response(out, cands, n_articles, cfg, diag):
+    """Fail-closed post-processing (spec §3 step 6): guid membership, clamp,
+    damp over DISTINCT stories (D9), derived label, server-side join."""
+    overview = clean_text(str(out.get("overview") or ""), 300) or None
+    returned = out.get("tickers") or {}
+    signals = {}
+    for ticker, stories in cands.items():
+        entry = returned.get(ticker)
+        if not isinstance(entry, dict):
+            diag["tickers_omitted_by_llm"] += 1
+            continue
+        by_guid = {s["guid"]: s for s in stories}
+        rep = by_guid.get(str(entry.get("guid", "")))
+        if rep is None:  # membership check: omit, never guess
+            diag["tickers_dropped_guid_mismatch"] += 1
+            continue
+        try:
+            score = max(-1.0, min(1.0, float(entry.get("score"))))
+        except (TypeError, ValueError):
+            diag["tickers_omitted_by_llm"] += 1
+            continue
+        if (n_articles[ticker] < cfg["damp_min_articles"]
+                and abs(score) > cfg["damp_cap"]):
+            score = cfg["damp_cap"] if score > 0 else -cfg["damp_cap"]
+            diag["scores_damped"] += 1
+        signals[ticker] = {
+            "sentiment": derive_label(score, cfg["threshold"]),
+            "score": round(score, 2),
+            "rationale": clean_text(str(entry.get("rationale") or ""), 280),
+            "headline": rep["title"],
+            "source": rep["source"],
+            "url": rep["link"],
+            "published": float(rep["published"]),
+            "guid": rep["guid"],
+            "n_articles": n_articles[ticker],
+        }
+    return overview, dict(sorted(signals.items()))
+
+
+def process_batch(items_path, cfg, now, llm=call_llm):
+    """items-*.jsonl -> artifact dict (spec §4.2). Raises ValueError only for
+    poison pills; an LLM failure degrades, never fabricates."""
+    stories = validation_gate(items_path, cfg["max_file_mb"])
+    cands, n_articles, sel_diag = select_candidates(stories, cfg["watchlist"], cfg)
+    diag = {
+        "stories_total": len(stories),
+        "candidates_dropped_not_subject": sel_diag["candidates_dropped_not_subject"],
+        "near_dups_collapsed": sel_diag["near_dups_collapsed"],
+        "candidates_selected": sum(len(v) for v in cands.values()),
+        "tickers_with_candidates": len(cands),
+        "tickers_no_candidates": len(cfg["watchlist"]) - len(cands),
+        "tickers_capped": sel_diag["tickers_capped"],
+        "tickers_omitted_by_llm": 0,
+        "tickers_dropped_guid_mismatch": 0,
+        "scores_damped": 0,
+    }
+    status, status_reason, overview, signals = "ok", None, None, {}
+    if cands:
+        system, user = build_prompt(cands, now, cfg["desc_cap"])
+        try:
+            out = llm(cfg, system, user)
+            overview, signals = validate_response(out, cands, n_articles, cfg, diag)
+        except RuntimeError as exc:
+            status, status_reason = "degraded", str(exc)[:200]
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "profile": "default",
+        "generated_at": datetime.fromtimestamp(
+            now, timezone.utc).isoformat(timespec="seconds"),
+        "generator": f"news_signals.py/{VERSION}",
+        "model": cfg["model"],
+        "prompt_version": PROMPT_VERSION,
+        "source_items": items_path.name,
+        "window_hours": cfg["window_hours"],
+        "watchlist": cfg["watchlist"],
+        "status": status,
+        "status_reason": status_reason,
+        "news_overview": overview,
+        "diagnostics": diag,
+        "signals": signals,
+    }

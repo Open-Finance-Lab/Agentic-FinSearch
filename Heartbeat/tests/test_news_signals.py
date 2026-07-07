@@ -293,3 +293,121 @@ class TestCallLlm(unittest.TestCase):
              unittest.mock.patch.object(ns.time, "sleep"):
             with self.assertRaises(RuntimeError):
                 ns.call_llm(self._cfg(), "sys", "usr")
+
+
+def fake_llm_factory(response):
+    def fake_llm(cfg, system, user):
+        return response
+    return fake_llm
+
+
+class TestValidateResponse(unittest.TestCase):
+    def _setup(self):
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
+            cfg = ns.load_config()
+        cands = {"MSFT": [make_story(guid="m1"), make_story(
+            guid="m2", title="Microsoft cloud momentum lifts outlook")]}
+        n_articles = {"MSFT": 2}
+        diag = {"tickers_omitted_by_llm": 0,
+                "tickers_dropped_guid_mismatch": 0, "scores_damped": 0}
+        return cfg, cands, n_articles, diag
+
+    def test_guid_membership_violation_drops_ticker(self):
+        cfg, cands, n, diag = self._setup()
+        out = {"overview": "o", "tickers":
+               {"MSFT": {"score": 0.5, "guid": "NOT-A-CANDIDATE", "rationale": "r"}}}
+        overview, signals = ns.validate_response(out, cands, n, cfg, diag)
+        self.assertEqual(signals, {})
+        self.assertEqual(diag["tickers_dropped_guid_mismatch"], 1)
+
+    def test_clamp_damp_and_join(self):
+        cfg, cands, n, diag = self._setup()
+        n["MSFT"] = 1  # under-corroborated
+        out = {"overview": "o", "tickers":
+               {"MSFT": {"score": 5.0, "guid": "m1", "rationale": "r"}}}
+        _, signals = ns.validate_response(out, cands, n, cfg, diag)
+        e = signals["MSFT"]
+        self.assertEqual(e["score"], 0.7)          # clamped to 1.0 then damped
+        self.assertEqual(e["sentiment"], "bullish")
+        self.assertEqual(diag["scores_damped"], 1)
+        self.assertEqual(e["headline"], "Microsoft raises Azure guidance")
+        self.assertEqual(e["url"], "https://example.com/a")   # joined, not LLM text
+        self.assertEqual(e["n_articles"], 1)
+
+    def test_omitted_and_malformed_tickers_counted(self):
+        cfg, cands, n, diag = self._setup()
+        out = {"overview": "o", "tickers":
+               {"MSFT": {"score": "not-a-number", "guid": "m1", "rationale": "r"}}}
+        _, signals = ns.validate_response(out, cands, n, cfg, diag)
+        self.assertEqual(signals, {})
+        self.assertEqual(diag["tickers_omitted_by_llm"], 1)
+
+
+class TestProcessBatch(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.td = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
+            self.cfg = ns.load_config()
+        self.cfg["watchlist"] = ["AAPL", "GOOGL", "MSFT", "NVDA"]
+
+    def test_ok_artifact_shape_and_diagnostics(self):
+        p = write_items(self.td, [
+            make_story(guid="m1"),
+            make_story(guid="roundup", title="Company News for July 6, 2026",
+                       tickers=["AAPL", "GOOGL"]),
+        ])
+        llm = fake_llm_factory({"overview": "calm day", "tickers":
+            {"MSFT": {"score": 0.3, "guid": "m1", "rationale": "r"}}})
+        artifact = ns.process_batch(p, self.cfg, time.time(), llm=llm)
+        self.assertEqual(artifact["schema_version"], 1)
+        self.assertEqual(artifact["status"], "ok")
+        self.assertEqual(artifact["source_items"], p.name)
+        self.assertEqual(list(artifact["signals"]), ["MSFT"])
+        d = artifact["diagnostics"]
+        self.assertEqual(d["stories_total"], 2)
+        self.assertEqual(d["candidates_dropped_not_subject"], 2)
+        self.assertEqual(d["candidates_selected"], 1)
+        self.assertEqual(d["tickers_no_candidates"], 3)
+        self.assertEqual(sorted(d), sorted(DIAG_KEYS))
+
+    def test_llm_failure_yields_degraded_artifact(self):
+        p = write_items(self.td, [make_story()])
+        def broken_llm(cfg, system, user):
+            raise RuntimeError("LLM call failed after 2 attempts: boom")
+        artifact = ns.process_batch(p, self.cfg, time.time(), llm=broken_llm)
+        self.assertEqual(artifact["status"], "degraded")
+        self.assertEqual(artifact["signals"], {})
+        self.assertIsNotNone(artifact["status_reason"])
+
+    def test_no_candidates_still_writes_ok_artifact_without_llm(self):
+        p = write_items(self.td, [make_story(tickers=["ZZZZ"])])
+        def must_not_call(cfg, system, user):
+            raise AssertionError("LLM must not be called with zero candidates")
+        artifact = ns.process_batch(p, self.cfg, time.time(), llm=must_not_call)
+        self.assertEqual(artifact["status"], "ok")
+        self.assertEqual(artifact["signals"], {})
+
+    def test_near_dup_collapse_and_damping_compose_end_to_end(self):
+        # Regression guard for the composed defense (spec §7.3): near-dup
+        # collapse (D9) must run BEFORE damping sees n_articles, so 3 raw
+        # copies of one story can never satisfy the corroboration damper.
+        p = write_items(self.td, [
+            make_story(guid="d1", title="Nvidia unveils next-gen GPU lineup",
+                       tickers=["NVDA"], score=6.0),
+            make_story(guid="d2", title="Nvidia unveils next-gen GPU lineup!",
+                       tickers=["NVDA"], score=5.0),
+            make_story(guid="d3", title="Nvidia unveils next-gen GPU lineup.",
+                       tickers=["NVDA"], score=4.0),
+        ])
+        llm = fake_llm_factory({"overview": "o", "tickers":
+            {"NVDA": {"score": 0.95, "guid": "d1", "rationale": "r"}}})
+        artifact = ns.process_batch(p, self.cfg, time.time(), llm=llm)
+        entry = artifact["signals"]["NVDA"]
+        self.assertEqual(entry["n_articles"], 1,
+                          "3 near-dup copies must collapse to 1 distinct story")
+        self.assertEqual(entry["score"], 0.7,
+                          "under-corroborated despite 3 raw copies -> damped")
+        self.assertEqual(artifact["diagnostics"]["scores_damped"], 1)
+        self.assertEqual(artifact["diagnostics"]["near_dups_collapsed"], 2)
