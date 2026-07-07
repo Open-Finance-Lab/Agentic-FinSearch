@@ -2,7 +2,9 @@
 serialization stripping, staleness_hours, tickers filter, conditional GET,
 fail-closed 404s."""
 import json
+import os
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -86,6 +88,30 @@ class SignalsEndpointTests(SimpleTestCase):
         self.assertTrue(resp.has_header("ETag"))
         self.assertTrue(resp.has_header("Last-Modified"))
 
+    def test_serves_newest_by_mtime_not_stem_for_same_day_supplemental(self):
+        # Same-day supplemental stems (items-<date>-<HHMMSS>.jsonl ->
+        # signals-<date>-<HHMMSS>.json) sort lexicographically BEFORE the
+        # date-only stem ("." > "-" in ASCII), so a same-day re-run must be
+        # selected by mtime, not by stem order (regression guard, F2).
+        morning = make_artifact(self._recent_iso(hours_ago=8.0), signals={
+            "MSFT": dict(make_artifact("x")["signals"]["MSFT"], guid="morning"),
+        })
+        supplemental = make_artifact(self._recent_iso(hours_ago=0.1), signals={
+            "MSFT": dict(make_artifact("x")["signals"]["MSFT"], guid="supplemental"),
+        })
+        self._write("2026-07-06", morning)
+        supplemental_path = self.dir / "signals-2026-07-06-153042.json"
+        supplemental_path.write_text(json.dumps(supplemental), encoding="utf-8")
+        # Deterministic mtimes, independent of wall-clock write timing: the
+        # date-only stem is strictly OLDER, the supplemental strictly NEWER.
+        now = time.time()
+        os.utime(self.dir / "signals-2026-07-06.json", (now - 100, now - 100))
+        os.utime(supplemental_path, (now, now))
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["signals"]["MSFT"]["guid"], "supplemental")
+
     def test_tickers_filter_case_insensitive(self):
         art = make_artifact(self._recent_iso(), signals={
             "MSFT": make_artifact("x")["signals"]["MSFT"],
@@ -103,6 +129,22 @@ class SignalsEndpointTests(SimpleTestCase):
             etag = first["ETag"]
             second = self.client.get(URL, HTTP_IF_NONE_MATCH=etag)
         self.assertEqual(second.status_code, 304)
+
+    def test_etag_is_variant_specific_to_tickers_filter(self):
+        self._write("2026-07-06", make_artifact(self._recent_iso()))
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            unfiltered = self.client.get(URL)
+            unfiltered_etag = unfiltered["ETag"]
+            # Unfiltered ETag must not satisfy a differently-scoped request.
+            filtered = self.client.get(URL, {"tickers": "msft"},
+                                       HTTP_IF_NONE_MATCH=unfiltered_etag)
+            self.assertEqual(filtered.status_code, 200)
+            filtered_etag = filtered["ETag"]
+            self.assertNotEqual(filtered_etag, unfiltered_etag)
+            # The filtered variant's own ETag still revalidates correctly.
+            repeat = self.client.get(URL, {"tickers": "msft"},
+                                     HTTP_IF_NONE_MATCH=filtered_etag)
+        self.assertEqual(repeat.status_code, 304)
 
     def test_malformed_newest_artifact_404s_fail_closed(self):
         (self.dir / "signals-2026-07-06.json").write_text("{broken",

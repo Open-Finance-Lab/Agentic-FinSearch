@@ -2,7 +2,9 @@
 
 Contract: signals spec §4.4 (Docs/superpowers/specs/
 2026-07-06-news-to-signals-pipeline-design.md). Serves the newest
-signals-*.json (greatest filename stem) from settings.SIGNALS_DIR, minus
+signals-*.json (newest by mtime, filename as a deterministic tiebreak —
+same-day supplemental stems sort lexicographically before the date-only
+stem, so stem order alone is not recency) from settings.SIGNALS_DIR, minus
 generator/model/prompt_version, plus server-computed staleness_hours.
 Every failure path is a 404 {"error": "no_signals"} — never a 500 leaking
 pipeline state.
@@ -34,7 +36,12 @@ def _load_latest():
     candidates = sorted(directory.glob("signals-*.json"))
     if not candidates:
         return None
-    newest = candidates[-1]  # greatest stem == newest (date-stamped stems)
+    # Newest by mtime, filename as a deterministic tiebreak: same-day
+    # supplemental stems (items-<date>-<HHMMSS>.jsonl ->
+    # signals-<date>-<HHMMSS>.json) sort lexicographically BEFORE the
+    # date-only stem ("." > "-" in ASCII), so stem order alone is not
+    # recency — a same-day re-run would otherwise serve the stale artifact.
+    newest = max(candidates, key=lambda p: (p.stat().st_mtime, p.name))
     try:
         artifact = json.loads(newest.read_text(encoding="utf-8"))
         datetime.fromisoformat(artifact["generated_at"])  # must parse
@@ -48,7 +55,10 @@ def _load_latest():
 
 def _etag(request: HttpRequest):
     artifact = _load_latest()
-    return f'"{artifact["generated_at"]}"' if artifact else None
+    if artifact is None:
+        return None
+    tickers = (request.GET.get("tickers") or "").upper().replace(" ", "")
+    return f'"{artifact["generated_at"]}|{artifact.get("source_items", "")}|{tickers}"'
 
 
 def _last_modified(request: HttpRequest):
