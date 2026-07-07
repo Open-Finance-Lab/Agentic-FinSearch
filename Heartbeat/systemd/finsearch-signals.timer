@@ -1,0 +1,10 @@
+[Unit]
+Description=20-minute sweep for the Agentic FinSearch news→signals generator (spec D5)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=20min
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
