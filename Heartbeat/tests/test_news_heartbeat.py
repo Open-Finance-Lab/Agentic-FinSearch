@@ -658,5 +658,20 @@ class TestFakeAliveDetection(unittest.TestCase):
         self.assertFalse(nh.looks_like_market_clone(legit, market_guids))
 
 
+class TestAtomicItemsWrite(unittest.TestCase):
+    def test_write_jsonl_atomic_replaces_and_leaves_no_tmp(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "items-2026-07-06.jsonl"
+            path.write_text('{"old": true}\n', encoding="utf-8")
+            rows = [{"guid": "a", "n": 1}, {"guid": "b", "n": 2}]
+            nh.write_jsonl_atomic(path, rows)
+            lines = path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual([json.loads(l)["guid"] for l in lines], ["a", "b"])
+            leftovers = [p.name for p in Path(td).iterdir() if p.name != path.name]
+            self.assertEqual(leftovers, [], "temp file must not survive the write")
+
+
 if __name__ == "__main__":
     unittest.main()

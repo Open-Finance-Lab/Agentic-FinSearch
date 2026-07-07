@@ -124,6 +124,16 @@ def log(msg):
     print(f"[{ts}] {msg}", flush=True)
 
 
+def write_jsonl_atomic(path, rows):
+    """Write rows as JSONL via temp + os.replace so a reader (the signals
+    sweep) can never observe a half-written batch (signals spec §3)."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    os.replace(tmp, path)
+
+
 # ---------------------------------------------------------------- parsing ---
 
 def _parse_date(text):
@@ -853,9 +863,7 @@ def main(argv=None):
     md_path = digests / f"digest-{stem}.md"
     jsonl_path = digests / f"items-{stem}.jsonl"
     md_path.write_text(markdown, encoding="utf-8")
-    with jsonl_path.open("w", encoding="utf-8") as fh:
-        for s in ranked:
-            fh.write(json.dumps(s, ensure_ascii=False) + "\n")
+    write_jsonl_atomic(jsonl_path, ranked)
     log(f"digest written: {md_path}")
     prune_old_digests(digests, now)
 
