@@ -4,6 +4,7 @@ from django.urls import path
 from api import views
 from api import openai_views
 from api import views_debug
+from api import signals_views
 
 urlpatterns = [
     path('health/', views.health, name='health'),
@@ -22,6 +23,7 @@ urlpatterns = [
     path('api/axioms/validate/', views.validate_claims, name='axioms_validate'),
     path('api/axioms/has_claims/', views.has_axiom_claims, name='axioms_has_claims'),
     path('api/axioms/xbrl/<str:filename>/', views.xbrl_filing_download, name='axioms_xbrl_filing'),
+    path('api/signals/news/', signals_views.news_signals, name='news_signals'),
 
     # Standard OpenAI-compatible API
     path('v1/models', openai_views.models_list, name='openai_models_list'),
