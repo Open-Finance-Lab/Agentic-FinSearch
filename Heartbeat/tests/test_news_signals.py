@@ -572,3 +572,18 @@ class TestMain(unittest.TestCase):
         (self.home / "signals" / "signals-x.json").write_text("{}")
         with self._env():
             self.assertEqual(ns.main(["--canary"]), 0)
+
+
+class TestFixture(unittest.TestCase):
+    def test_committed_fixture_matches_regeneration(self):
+        fixtures = Path(__file__).parent / "fixtures"
+        sys.path.insert(0, str(fixtures))
+        try:
+            import make_signals_fixture
+        finally:
+            sys.path.pop(0)
+        committed = json.loads(
+            (fixtures / "signals-fixture.json").read_text(encoding="utf-8"))
+        self.assertEqual(make_signals_fixture.build(), committed,
+                         "pipeline semantics changed — regenerate the fixture "
+                         "deliberately: python3 tests/fixtures/make_signals_fixture.py")
