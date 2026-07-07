@@ -2,6 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Post-review amendment (2026-07-07):** the shipped code diverges from this
+> plan's text in two reviewed ways — `collapse_near_dups` was renamed
+> `collapse_dup_titles` (exact normalized-title semantics; deliberately
+> distinct from `news_heartbeat.collapse_near_dups`'s Jaccard overlap), and
+> the `_ALIAS_NUMERIC` frozenset became a structural rule (any alias matching
+> `\d+[a-z]*` gets the dollar/digit guard). Plan text below is the historical
+> record and was not rewritten.
+
 **Goal:** Build the production news→signals generator (`Heartbeat/news_signals.py`), its schema, systemd units, the Django `GET /api/signals/news/` endpoint, and a committed contract fixture — everything the amended spec `Docs/superpowers/specs/2026-07-06-news-to-signals-pipeline-design.md` pins for the FinSearch repo.
 
 **Architecture:** Contract-first pipes-and-filters (spec §3). The heartbeat writes `items-*.jsonl` (patched here to write atomically); a 20-min systemd timer sweeps unprocessed batches through validation gate → subject gate (D8) → near-dup collapse (D9) → one batched, datamarked LLM call → guid-membership join → atomic `signals-*.json` artifact written **before** state. A read-only Django view serves the newest artifact. Every boundary fails closed.

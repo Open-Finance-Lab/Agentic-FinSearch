@@ -6,14 +6,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import news_signals as ns
+
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "signals-v1.schema.json"
 
-DIAG_KEYS = [
-    "stories_total", "candidates_dropped_not_subject", "near_dups_collapsed",
-    "candidates_selected", "tickers_with_candidates", "tickers_no_candidates",
-    "tickers_capped", "tickers_omitted_by_llm", "tickers_dropped_guid_mismatch",
-    "scores_damped",
-]
+# Derived from the generator's single source of truth; the schema-parity
+# test pins it against the published contract independently.
+DIAG_KEYS = list(ns.DIAGNOSTIC_FIELDS)
 SIGNAL_KEYS = [
     "sentiment", "score", "rationale", "headline", "source", "url",
     "published", "guid", "n_articles",
@@ -37,6 +36,16 @@ class TestSchemaFile(unittest.TestCase):
                          ["bullish", "bearish", "neutral"])
         self.assertEqual(schema["properties"]["status"]["enum"], ["ok", "degraded"])
 
+    def test_diagnostic_fields_constant_is_the_single_source_of_truth(self):
+        # The generator exports DIAGNOSTIC_FIELDS; the schema's independent
+        # required list (the published contract) must stay in lockstep, and
+        # so must the schema's property enumeration.
+        import news_signals as ns
+        schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+        diag = schema["properties"]["diagnostics"]
+        self.assertEqual(sorted(ns.DIAGNOSTIC_FIELDS), sorted(diag["required"]))
+        self.assertEqual(sorted(ns.DIAGNOSTIC_FIELDS), sorted(diag["properties"]))
+
 
 import os
 import unittest.mock
@@ -53,6 +62,38 @@ class TestFoundation(unittest.TestCase):
         import news_signals as ns
         self.assertEqual(ns.clean_text(None, 5), "")
         self.assertEqual(ns.clean_text("x" * 10, 5), "xxxxx")
+
+    def test_clean_text_collapses_embedded_newlines_and_tabs(self):
+        # A multi-line feed title must not let forged-looking lines reach
+        # logs or artifact consumers: headline/rationale/source/guid are
+        # single-line fields, so linebreak runs collapse to one space.
+        import news_signals as ns
+        s = "Acme Corp\nSTATUS: system healthy\r\tend"
+        self.assertEqual(ns.clean_text(s, 100),
+                         "Acme Corp STATUS: system healthy end")
+
+    def test_clean_text_collapses_every_line_boundary_not_just_ascii(self):
+        # Every str.splitlines() boundary: \x0b/\x0c/\x1c-\x1e must not be
+        # stripped to nothing (fusing adjacent words), and U+2028/U+2029/NEL
+        # render as hard line breaks in many downstream consumers.
+        import news_signals as ns
+        for sep in ("\x0b", "\x0c", "\x1c", "\x1d", "\x1e",
+                    "\x85", "\u2028", "\u2029"):  # escapes only, never literal
+            with self.subTest(sep=hex(ord(sep))):
+                self.assertEqual(
+                    ns.clean_text(f"Acme Corp{sep}STATUS ok", 100),
+                    "Acme Corp STATUS ok")
+
+    def test_load_config_rejects_non_positive_window_hours(self):
+        # signals-v1 schema pins window_hours minimum 1; nothing validates
+        # artifacts at runtime, so the floor must hold at config load.
+        import news_signals as ns
+        for bad in ("0", "-3"):
+            env = {"HEARTBEAT_WINDOW_HOURS": bad}
+            with unittest.mock.patch.dict(os.environ, env, clear=True):
+                with self.assertRaises(SystemExit) as ctx:
+                    ns.load_config()
+            self.assertEqual(ctx.exception.code, 2)
 
     def test_load_config_defaults_and_fallbacks(self):
         import news_signals as ns
@@ -85,8 +126,6 @@ class TestFoundation(unittest.TestCase):
 
 import tempfile
 import time
-
-import news_signals as ns
 
 
 def make_story(**over):
@@ -231,6 +270,17 @@ class TestSubjectGate(unittest.TestCase):
         self.assertTrue(ns.is_subject("3M raises full-year guidance", "MMM"))
         self.assertTrue(ns.is_subject("Shares of 3M rose after an analyst upgrade", "MMM"))
 
+    def test_numeric_alias_guard_is_structural_not_a_hardcoded_list(self):
+        # The dollar/digit exclusion must apply to ANY alias shaped like a
+        # bare quantity, not to a hand-maintained set containing only "3m" —
+        # otherwise the next numeric-ish alias silently reopens the "$3M"
+        # collision class until someone remembers the second edit.
+        pat = ns._alias_pattern("7up")  # hypothetical future numeric alias
+        self.assertIsNone(pat.search("the firm raised $7up in funding"))
+        self.assertIsNotNone(pat.search("7up sales climbed last quarter"))
+        # prose aliases keep plain word-boundary matching
+        self.assertIsNotNone(ns._alias_pattern("apple").search("apple beats"))
+
 
 class TestSelection(unittest.TestCase):
     def _cfg(self):
@@ -280,6 +330,52 @@ class TestSelection(unittest.TestCase):
         stories = [make_story(tickers=["ZZZZ"])]
         capped, n_articles, diag = ns.select_candidates(stories, ["MSFT"], self._cfg())
         self.assertEqual(capped, {})
+
+    def test_collapse_dup_titles_exact_normalized_match_only(self):
+        # Deliberately NOT news_heartbeat.collapse_near_dups (Jaccard token
+        # overlap): spec D9 pins exact normalized-title identity, so a title
+        # differing by one word survives as a distinct story.
+        a = make_story(guid="a", title="Fed hikes rates")
+        b = make_story(guid="b", title="Fed hikes rates!")
+        c = make_story(guid="c", title="Fed hikes rates again")
+        kept, collapsed = ns.collapse_dup_titles([a, b, c])
+        self.assertEqual([s["guid"] for s in kept], ["a", "c"])
+        self.assertEqual(collapsed, 1)
+
+    def test_multi_ticker_headline_is_dropped_as_roundup_without_phrase_match(self):
+        # Structural backstop (spec D8): a title that is "subject" for
+        # ROUNDUP_TICKER_LIMIT+ distinct watchlist tickers is a market
+        # wrap/listicle even when no ROUNDUP_PATTERNS phrasing matches.
+        stories = [make_story(
+            guid="wrap",
+            title="Apple, Microsoft and Nvidia lead premarket movers",
+            tickers=["AAPL", "MSFT", "NVDA"])]
+        capped, n_articles, diag = ns.select_candidates(
+            stories, ["AAPL", "MSFT", "NVDA"], self._cfg())
+        self.assertEqual(capped, {})
+        self.assertEqual(diag["candidates_dropped_not_subject"], 3)
+
+    def test_two_subject_tickers_still_pass_the_structural_roundup_gate(self):
+        stories = [make_story(
+            guid="duo", title="Microsoft and Apple deepen AI partnership",
+            tickers=["AAPL", "MSFT"])]
+        capped, _, diag = ns.select_candidates(
+            stories, ["AAPL", "MSFT"], self._cfg())
+        self.assertEqual(sorted(capped), ["AAPL", "MSFT"])
+        self.assertEqual(diag["candidates_dropped_not_subject"], 0)
+
+    def test_duplicate_ticker_tags_in_a_story_count_once(self):
+        # A producer double-tagging one story ["MSFT", "MSFT"] must yield
+        # one candidate, not two: dup tags may not inflate n_articles, the
+        # roundup-limit count, or the not-subject counter.
+        dup_subject = make_story(guid="d", tickers=["MSFT", "MSFT"])
+        dup_mention = make_story(guid="m", tickers=["NVDA", "NVDA"],
+                                 title="Tech megacaps rally into the close")
+        capped, n_articles, diag = ns.select_candidates(
+            [dup_subject, dup_mention], ["MSFT", "NVDA"], self._cfg())
+        self.assertEqual(n_articles["MSFT"], 1)
+        self.assertEqual([s["guid"] for s in capped["MSFT"]], ["d"])
+        self.assertEqual(diag["candidates_dropped_not_subject"], 1)
 
 
 class TestPromptAndLabel(unittest.TestCase):
@@ -516,6 +612,32 @@ class TestAtomicWrite(unittest.TestCase):
             leftovers = [p.name for p in Path(td).iterdir() if p.name != path.name]
             self.assertEqual(leftovers, [], "temp file must not survive the write")
 
+    def test_write_json_atomic_mode_is_world_readable_regardless_of_umask(self):
+        # Artifacts are served :ro out of a rootless container through a
+        # user-namespace UID remap; the on-disk mode must not depend on
+        # whatever umask the sweep process inherited.
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "signals-x.json"
+            old = os.umask(0o077)
+            try:
+                ns.write_json_atomic({"a": 1}, path)
+            finally:
+                os.umask(old)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+
+    def test_write_json_atomic_creates_traversable_directory_despite_umask(self):
+        # chmod'ing the file is not enough: a 0700 signals/ directory (umask
+        # 077) blocks the remapped container UID from even stat()ing it.
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "signals" / "signals-x.json"  # parent missing
+            old = os.umask(0o077)
+            try:
+                ns.write_json_atomic({"a": 1}, path)
+            finally:
+                os.umask(old)
+            self.assertEqual(path.parent.stat().st_mode & 0o777, 0o755)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+
 
 class TestSweep(unittest.TestCase):
     def setUp(self):
@@ -582,6 +704,30 @@ class TestSweep(unittest.TestCase):
             (self.cfg["signals_dir"] / "signals-2026-07-06.json").read_text())
         self.assertEqual(artifact["status"], "degraded")
 
+    def test_sweep_warns_when_watchlist_ticker_has_no_alias_entry(self):
+        # TICKER_ALIASES is a hardcoded table while the watchlist is a
+        # runtime env knob — the drift must be surfaced, not silent. A short
+        # symbol without aliases can NEVER match a headline (spec D8).
+        self.cfg["watchlist"] = ["MSFT", "NFLX", "ZY"]
+        write_items(self.cfg["digests"], [make_story()], name="items-a.jsonl")
+        with unittest.mock.patch.object(ns, "log") as fake_log:
+            ns.run_sweep(self.cfg, llm=OK_LLM)
+        warnings = [c.args[0] for c in fake_log.call_args_list
+                    if c.args[0].startswith("WARN")]
+        self.assertTrue(any("ZY" in w and "NEVER" in w for w in warnings))
+        self.assertTrue(any("NFLX" in w for w in warnings))
+        self.assertFalse(any("MSFT" in w for w in warnings))
+
+    def test_empty_sweep_does_not_warn_alias_gaps(self):
+        # The warning fires only when a sweep has work: an idle 20-minute
+        # tick (72x/day) must not flood journald over a config gap that
+        # needs a code deploy to fix.
+        self.cfg["watchlist"] = ["ZY"]
+        with unittest.mock.patch.object(ns, "log") as fake_log:
+            self.assertEqual(ns.run_sweep(self.cfg, llm=OK_LLM), 0)
+        self.assertFalse(any(c.args[0].startswith("WARN")
+                             for c in fake_log.call_args_list))
+
     def test_sweep_survives_llm_returning_non_dict_tickers_shape(self):
         write_items(self.cfg["digests"], [make_story()])
         bad_shape_llm = fake_llm_factory({"overview": "o", "tickers": ["MSFT"]})
@@ -612,6 +758,57 @@ class TestPostDiscord(unittest.TestCase):
         self.assertEqual(req.get_header("Authorization"), "Bot tok")
         body = json.loads(req.data)
         self.assertEqual(len(body["content"]), 1900)
+
+    @staticmethod
+    def _http_429(retry_after="2"):
+        import io
+        from email.message import Message
+        headers = Message()
+        headers["Retry-After"] = retry_after
+        return ns.urllib.error.HTTPError(
+            "https://discord.com/api", 429, "rate limited", headers,
+            io.BytesIO(b"{}"))
+
+    @staticmethod
+    def _ok_resp():
+        fake_resp = unittest.mock.MagicMock()
+        fake_resp.read.return_value = b"{}"
+        fake_resp.__enter__ = lambda s: s
+        fake_resp.__exit__ = lambda s, *a: False
+        return fake_resp
+
+    def test_post_discord_retries_on_429_and_honors_retry_after(self):
+        # The canary CRIT alert is the one path that catches a wedged
+        # pipeline — a single-attempt post drops it on any rate limit.
+        with unittest.mock.patch.object(
+                ns.urllib.request, "urlopen",
+                side_effect=[self._http_429("2"), self._ok_resp()]) as m, \
+             unittest.mock.patch.object(ns.time, "sleep") as slept:
+            ns.post_discord("tok", "chan", "hello")
+        self.assertEqual(m.call_count, 2)
+        slept.assert_called_once_with(3.0)  # sanitized Retry-After 2 + 1
+
+    def test_post_discord_ignores_malformed_retry_after(self):
+        # Retry-After is server input: non-numeric, NaN, infinite or
+        # negative values must fall back to the exponential backoff (2s on
+        # the first retry), never a nonsensical sleep.
+        for bad in ("nan", "inf", "-5", "Wed, 21 Oct 2015 07:28:00 GMT"):
+            with self.subTest(retry_after=bad):
+                with unittest.mock.patch.object(
+                        ns.urllib.request, "urlopen",
+                        side_effect=[self._http_429(bad), self._ok_resp()]), \
+                     unittest.mock.patch.object(ns.time, "sleep") as slept:
+                    ns.post_discord("tok", "chan", "hello")
+                slept.assert_called_once_with(2)
+
+    def test_post_discord_raises_after_three_failed_attempts(self):
+        with unittest.mock.patch.object(
+                ns.urllib.request, "urlopen",
+                side_effect=OSError("boom")) as m, \
+             unittest.mock.patch.object(ns.time, "sleep"):
+            with self.assertRaises(OSError):
+                ns.post_discord("tok", "chan", "x")
+        self.assertEqual(m.call_count, 3)
 
 
 class TestCanary(unittest.TestCase):
@@ -685,6 +882,34 @@ class TestMain(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             ns.main(["--env-file", str(missing)])
         self.assertEqual(ctx.exception.code, 2)
+
+
+class TestEnvFileParity(unittest.TestCase):
+    """Drift guard (characterization, passes from day one): load_env_file is
+    deliberately duplicated in news_signals.py — the single-file deploy
+    contract forbids importing news_heartbeat — so the two copies' PARSING
+    must never drift. (The missing-file exit path differs by design:
+    signals exits 2 per its README exit-code table.)"""
+
+    def test_load_env_file_parses_identically_to_news_heartbeat(self):
+        import news_heartbeat as nh
+        content = ('# comment\nexport FOO="bar"\nBAZ=qux # inline comment\n'
+                   'ALREADY=new\nNOEQUALS\nEMPTY=\n')
+        probe = ("FOO", "BAZ", "ALREADY", "EMPTY", "NOEQUALS")
+        results = {}
+        for mod in (ns, nh):
+            with tempfile.TemporaryDirectory() as td:
+                p = Path(td) / ".env.heartbeat"
+                p.write_text(content, encoding="utf-8")
+                with unittest.mock.patch.dict(
+                        os.environ, {"ALREADY": "old"}, clear=True):
+                    mod.load_env_file(p)
+                    results[mod.__name__] = {k: os.environ.get(k)
+                                             for k in probe}
+        self.assertEqual(results["news_signals"], results["news_heartbeat"])
+        self.assertEqual(results["news_signals"]["ALREADY"], "old")
+        self.assertEqual(results["news_signals"]["FOO"], "bar")
+        self.assertEqual(results["news_signals"]["BAZ"], "qux")
 
 
 class TestFixture(unittest.TestCase):
