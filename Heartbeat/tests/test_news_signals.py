@@ -502,3 +502,73 @@ class TestSweep(unittest.TestCase):
         artifact = json.loads(
             (self.cfg["signals_dir"] / "signals-2026-07-06.json").read_text())
         self.assertEqual(artifact["status"], "degraded")
+
+
+import fcntl
+
+
+class TestCanary(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.home = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self.cfg = make_cfg(self.home)
+        self.cfg["signals_dir"].mkdir(parents=True, exist_ok=True)
+
+    def test_fresh_artifact_passes(self):
+        (self.cfg["signals_dir"] / "signals-x.json").write_text("{}")
+        self.assertEqual(ns.run_canary(self.cfg), 0)
+
+    def test_no_artifact_is_stale_and_pings_discord(self):
+        env = {"DISCORD_BOT_TOKEN": "t", "DISCORD_CHANNEL_ID": "c"}
+        with unittest.mock.patch.dict(os.environ, env), \
+             unittest.mock.patch.object(ns, "post_discord") as post:
+            self.assertEqual(ns.run_canary(self.cfg), 1)
+        post.assert_called_once()
+        self.assertIn("stale", post.call_args.args[2])
+
+    def test_old_artifact_is_stale_without_creds_no_ping(self):
+        p = self.cfg["signals_dir"] / "signals-old.json"
+        p.write_text("{}")
+        old = time.time() - 31 * 3600
+        os.utime(p, (old, old))
+        with unittest.mock.patch.dict(os.environ, {}, clear=True), \
+             unittest.mock.patch.object(ns, "post_discord") as post:
+            self.assertEqual(ns.run_canary(self.cfg), 1)
+        post.assert_not_called()
+
+
+class TestMain(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.home = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+
+    def _env(self, **extra):
+        env = {"SIGNALS_HOME": str(self.home), "OPENAI_API_KEY": "k"}
+        env.update(extra)
+        return unittest.mock.patch.dict(os.environ, env, clear=True)
+
+    def test_empty_sweep_exits_zero(self):
+        (self.home / "digests").mkdir(parents=True)
+        with self._env():
+            self.assertEqual(ns.main([]), 0)
+
+    def test_missing_api_key_exits_two(self):
+        (self.home / "digests").mkdir(parents=True)
+        with self._env(OPENAI_API_KEY=""):
+            self.assertEqual(ns.main([]), 2)
+
+    def test_held_lock_exits_three(self):
+        (self.home / "signals").mkdir(parents=True)
+        holder = (self.home / "signals" / ".lock").open("w")
+        self.addCleanup(holder.close)
+        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with self._env():
+            self.assertEqual(ns.main([]), 3)
+
+    def test_canary_flag_dispatches(self):
+        (self.home / "signals").mkdir(parents=True)
+        (self.home / "signals" / "signals-x.json").write_text("{}")
+        with self._env():
+            self.assertEqual(ns.main(["--canary"]), 0)

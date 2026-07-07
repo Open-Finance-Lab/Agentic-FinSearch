@@ -10,6 +10,7 @@ Design spec: Docs/superpowers/specs/2026-07-06-news-to-signals-pipeline-design.m
 Stdlib-only, single file (same deployability contract as news_heartbeat.py).
 """
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -461,3 +462,69 @@ def run_sweep(cfg, now=None, llm=call_llm):
         log(f"wrote {out_path.name} status={artifact['status']} "
             f"signals={len(artifact['signals'])}")
     return 0
+
+
+def post_discord(token, channel_id, content):
+    req = urllib.request.Request(
+        f"https://discord.com/api/v10/channels/{channel_id}/messages",
+        data=json.dumps({"content": content[:1900]}).encode(),
+        headers={"Authorization": f"Bot {token}",
+                 "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        resp.read()
+
+
+def run_canary(cfg, now=None):
+    """Spec §6-C: a wedged pipeline must be distinguishable from a quiet day.
+    Exit 1 (unit shows failed) + CRIT log + Discord ping when stale."""
+    now = time.time() if now is None else now
+    mtimes = [p.stat().st_mtime
+              for p in cfg["signals_dir"].glob("signals-*.json")]
+    newest = max(mtimes, default=None)
+    if newest is not None and (now - newest) <= cfg["staleness_alert_h"] * 3600:
+        log(f"canary: ok (newest artifact {(now - newest) / 3600:.1f}h old)")
+        return 0
+    age = ("none ever written" if newest is None
+           else f"{(now - newest) / 3600:.1f}h old")
+    msg = (f"CRIT news signals stale: newest artifact {age} "
+           f"(threshold {cfg['staleness_alert_h']}h)")
+    log(msg)
+    token = os.environ.get("DISCORD_BOT_TOKEN", "")
+    channel = os.environ.get("DISCORD_CHANNEL_ID", "")
+    if token and channel:
+        try:
+            post_discord(token, channel, f"\U0001f6a8 {msg}")
+        except OSError as exc:
+            log(f"ERROR canary Discord post failed: {exc}")
+    return 1
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="News → signals generator (sweep) and staleness canary")
+    parser.add_argument("--env-file",
+                        help="KEY=VALUE env file loaded before config")
+    parser.add_argument("--canary", action="store_true",
+                        help="staleness canary mode (spec §6-C)")
+    args = parser.parse_args(argv)
+    if args.env_file:
+        load_env_file(args.env_file)
+    cfg = load_config()
+    cfg["signals_dir"].mkdir(parents=True, exist_ok=True)
+    if args.canary:
+        return run_canary(cfg)
+    lock_handle = (cfg["signals_dir"] / ".lock").open("w")
+    try:
+        fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        log("ERROR another news_signals run is already in progress — exiting")
+        return 3
+    if not cfg["api_key"]:
+        log("ERROR OPENAI_API_KEY is not set — cannot score; exiting")
+        return 2
+    return run_sweep(cfg)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
