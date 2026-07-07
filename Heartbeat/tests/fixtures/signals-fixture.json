@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "profile": "default",
+  "generated_at": "2026-07-06T15:00:00+00:00",
+  "generator": "news_signals.py/2026-07-06.1",
+  "model": "gpt-4o-mini",
+  "prompt_version": 1,
+  "source_items": "items-fixture.jsonl",
+  "window_hours": 24,
+  "watchlist": [
+    "AAPL",
+    "GOOGL",
+    "MSFT",
+    "NVDA"
+  ],
+  "status": "ok",
+  "status_reason": null,
+  "news_overview": "Fixture batch: cloud strength at Microsoft and Nvidia; the rest of the tape is quiet.",
+  "diagnostics": {
+    "stories_total": 6,
+    "candidates_dropped_not_subject": 3,
+    "near_dups_collapsed": 1,
+    "candidates_selected": 3,
+    "tickers_with_candidates": 2,
+    "tickers_no_candidates": 2,
+    "tickers_capped": 0,
+    "tickers_omitted_by_llm": 0,
+    "tickers_dropped_guid_mismatch": 0,
+    "scores_damped": 1
+  },
+  "signals": {
+    "MSFT": {
+      "sentiment": "bullish",
+      "score": 0.5,
+      "rationale": "Two distinct outlets report upbeat Azure guidance.",
+      "headline": "Microsoft raises Azure guidance after record quarter",
+      "source": "Reuters",
+      "url": "https://example.com/msft-1",
+      "published": 1783335600.0,
+      "guid": "fix-msft-1",
+      "n_articles": 2
+    },
+    "NVDA": {
+      "sentiment": "bullish",
+      "score": 0.7,
+      "rationale": "Single story reports record datacenter orders.",
+      "headline": "Nvidia reports record datacenter orders",
+      "source": "CNBC",
+      "url": "https://example.com/nvda-1",
+      "published": 1783339200.0,
+      "guid": "fix-nvda-1",
+      "n_articles": 1
+    }
+  }
+}

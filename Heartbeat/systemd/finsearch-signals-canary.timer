@@ -1,0 +1,18 @@
+[Unit]
+Description=Daily staleness check for news-signals artifacts
+
+[Timer]
+# 13:00 UTC = 2 h after the daily 11:00 UTC beat; a healthy pipeline has a
+# ~1-2 h-old artifact by then. A single fully-missed day leaves the newest
+# artifact ~25.5 h old at the NEXT day's 13:00 UTC check (24 h + the ~1.5 h
+# healthy lag) — comfortably past the 20 h threshold (SIGNALS_STALENESS_ALERT_H),
+# so one missed day reliably fires. A 30 h threshold (the original default)
+# does NOT: 25.5 h < 30 h, so it silently absorbs one entire missed day and
+# only fires after a SECOND consecutive miss (~49.5 h) — verified by hand,
+# this is why the default was lowered to 20.
+OnCalendar=*-*-* 13:00:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

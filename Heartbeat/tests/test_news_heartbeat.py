@@ -4,10 +4,9 @@ Fixtures under tests/fixtures/ are real captures from the 2026-06-10 droplet
 probes of live Yahoo Finance endpoints (single-line XML, both date schemas).
 """
 
-import email.message
-import io
 import json
 import sys
+import tempfile
 import time
 import unittest
 import urllib.error
@@ -16,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import news_heartbeat as nh
+from fake_http import FakeResponse, http_429
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 NOW = 1781100000.0  # 2026-06-10 ~04:40 UTC, shortly after fixtures were captured
@@ -55,30 +55,6 @@ def bulk_digest(n=40):
 def all_descs(messages):
     return "".join(e.get("description", "")
                    for m in messages for e in m["embeds"])
-
-
-class FakeResponse:
-    """Stands in for urllib's HTTP response (context manager + read)."""
-
-    def __init__(self, body):
-        self._body = body if isinstance(body, bytes) else body.encode("utf-8")
-
-    def read(self, n=-1):
-        return self._body
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
-
-
-def http_429(retry_after):
-    headers = email.message.Message()
-    headers["Retry-After"] = retry_after
-    return urllib.error.HTTPError(
-        "https://discord.com/api", 429, "rate limited", headers,
-        io.BytesIO(b"slow down"))
 
 
 class TestParseRss(unittest.TestCase):
@@ -656,6 +632,19 @@ class TestFakeAliveDetection(unittest.TestCase):
         market_guids = {s["guid"] for s in market}
         self.assertTrue(nh.looks_like_market_clone(clone, market_guids))
         self.assertFalse(nh.looks_like_market_clone(legit, market_guids))
+
+
+class TestAtomicItemsWrite(unittest.TestCase):
+    def test_write_jsonl_atomic_replaces_and_leaves_no_tmp(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "items-2026-07-06.jsonl"
+            path.write_text('{"old": true}\n', encoding="utf-8")
+            rows = [{"guid": "a", "n": 1}, {"guid": "b", "n": 2}]
+            nh.write_jsonl_atomic(path, rows)
+            lines = path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual([json.loads(l)["guid"] for l in lines], ["a", "b"])
+            leftovers = [p.name for p in Path(td).iterdir() if p.name != path.name]
+            self.assertEqual(leftovers, [], "temp file must not survive the write")
 
 
 if __name__ == "__main__":

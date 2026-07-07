@@ -1,0 +1,18 @@
+[Unit]
+Description=Agentic FinSearch news→signals generator (sweep)
+# Deterministic local failures exit 0 (poison-pill policy, signals spec §6.1);
+# never trip start-rate limiting out of the 20-min retry loop (spec §6.4).
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/fingpt/heartbeat/news_signals.py --env-file %h/fingpt/envs/.env.heartbeat
+WorkingDirectory=%h/fingpt/heartbeat
+# Headroom over 120 s × 2 LLM attempts plus a several-batch backlog (spec §6.4)
+TimeoutStartSec=600
+# 2 GB host already runs the 1.7G-capped API container: throttle, then kill
+MemoryHigh=96M
+MemoryMax=128M
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true

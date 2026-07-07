@@ -313,7 +313,7 @@ jobs:
             cat > "$OVERRIDE_DIR/override.conf" <<EOF
             [Service]
             ExecStart=
-            ExecStart=/usr/bin/podman run --name ${SYSTEMD_UNIT} --replace --rm --cap-drop=ALL --cap-add=NET_ADMIN --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=SETPCAP --pids-limit=1024 --read-only --tmpfs=/tmp:rw,size=512m,mode=1777 --tmpfs=/app/staticfiles:rw,mode=0755 --tmpfs=/home/fingpt:rw,mode=0755 --cgroups=split --sdnotify=conmon -d --memory=1.7g --memory-swap=2g --network fingpt-net -v /home/deploy/fingpt/runtime:/app/runtime:U,Z --publish 127.0.0.1:8000:8000 --env-file /home/deploy/fingpt/envs/.env.production --env REDIS_URL=redis://fingpt-redis:6379/0 ${REMOTE_IMAGE}
+            ExecStart=/usr/bin/podman run --name ${SYSTEMD_UNIT} --replace --rm --cap-drop=ALL --cap-add=NET_ADMIN --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=SETPCAP --pids-limit=1024 --read-only --tmpfs=/tmp:rw,size=512m,mode=1777 --tmpfs=/app/staticfiles:rw,mode=0755 --tmpfs=/home/fingpt:rw,mode=0755 --cgroups=split --sdnotify=conmon -d --memory=1.7g --memory-swap=2g --network fingpt-net -v /home/deploy/fingpt/runtime:/app/runtime:U,Z -v /home/deploy/fingpt/heartbeat/signals:/app/signals:ro,Z --env SIGNALS_DIR=/app/signals --publish 127.0.0.1:8000:8000 --env-file /home/deploy/fingpt/envs/.env.production --env REDIS_URL=redis://fingpt-redis:6379/0 ${REMOTE_IMAGE}
             EOF
 
             systemctl --user daemon-reload

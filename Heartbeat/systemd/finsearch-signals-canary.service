@@ -1,0 +1,13 @@
+[Unit]
+Description=Agentic FinSearch news-signals staleness canary (spec §6-C)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/fingpt/heartbeat/news_signals.py --canary --env-file %h/fingpt/envs/.env.heartbeat
+WorkingDirectory=%h/fingpt/heartbeat
+TimeoutStartSec=120
+MemoryHigh=48M
+MemoryMax=64M
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true

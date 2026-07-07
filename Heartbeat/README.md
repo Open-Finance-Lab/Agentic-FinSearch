@@ -73,3 +73,51 @@ delivery failed after retries · `2` every feed failed (network/Yahoo outage) ·
 `3` another run already in progress. Dry runs never touch `state.json`; a
 second same-day beat writes `digest-YYYY-MM-DD-HHMMSS.md` instead of
 overwriting. Logs older than 90 days are pruned automatically.
+
+## News → signals (news_signals.py)
+
+Turns each `digests/items-*.jsonl` batch into a per-ticker sentiment artifact
+`signals/signals-<same-stem>.json` (design + contracts:
+`Docs/superpowers/specs/2026-07-06-news-to-signals-pipeline-design.md`).
+A 20-minute systemd user timer sweeps unprocessed batches (tracked in
+`signals_state.json`); one batched LLM call per batch; artifacts are written
+atomically **before** state, so a crash costs a duplicate LLM call, never a
+silent gap. A daily canary alerts on Discord when the newest artifact is
+older than `SIGNALS_STALENESS_ALERT_H` (default 20 h — tuned so a single
+fully-missed day reliably fires; see the timer's own comment for the
+arithmetic).
+
+Manual run (same env file as the heartbeat):
+
+    python3 news_signals.py --env-file ~/fingpt/envs/.env.heartbeat
+    python3 news_signals.py --canary --env-file ~/fingpt/envs/.env.heartbeat
+
+Exit codes: 0 ok (including poison-pill batches, by design), 1 canary-stale,
+2 config error, 3 another run holds the lock.
+
+Deploy (droplet, systemd --user, mirrors the heartbeat):
+
+    ssh finsearch-deploy 'mkdir -p ~/fingpt/heartbeat/signals'
+    scp Heartbeat/news_signals.py finsearch-deploy:/home/deploy/fingpt/heartbeat/
+    scp Heartbeat/systemd/finsearch-signals.* \
+        Heartbeat/systemd/finsearch-signals-canary.* \
+        finsearch-deploy:/home/deploy/.config/systemd/user/
+    ssh finsearch-deploy 'systemctl --user daemon-reload &&
+      systemctl --user enable --now finsearch-signals.timer finsearch-signals-canary.timer'
+
+Universe change (spec D2) — set on the droplet in
+`~/fingpt/envs/.env.heartbeat` (35 tickers: heartbeat default ∪ DJIA-30;
+ATL's bogus `AMEX` slot is deliberately excluded — it can never have data):
+
+    HEARTBEAT_WATCHLIST=AAPL AMZN AXP BA BRK-B BTC-USD CAT CSCO CVX DIS GOOGL GS HD IBM INTC JNJ JPM KO MA MCD META MMM MRK MSFT NKE NVDA PFE PG TRV TSLA UNH V WBA WMT XOM
+
+Staging checklist (run once at deploy time, spec §9):
+1. Drop two items files back-to-back; `systemctl --user start finsearch-signals.service`;
+   confirm both artifacts exist and a second start is a no-op.
+2. Start a run and `kill -9` the python process mid-LLM-call; confirm
+   `signals_state.json` is unchanged and the next sweep reprocesses cleanly.
+3. `SIGNALS_STALENESS_ALERT_H=0.001 python3 news_signals.py --canary --env-file …`
+   fires the Discord alert.
+4. On first deploy, drain the digests backlog with one manual sweep run
+   before enabling the timer (the droplet has months of unprocessed
+   items-*.jsonl; `TimeoutStartSec=600` assumes a modest per-tick backlog).
