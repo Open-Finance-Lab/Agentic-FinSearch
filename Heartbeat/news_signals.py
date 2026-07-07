@@ -409,3 +409,55 @@ def process_batch(items_path, cfg, now, llm=call_llm):
         "diagnostics": diag,
         "signals": signals,
     }
+
+
+def write_json_atomic(obj, path):
+    """Temp in the same directory + os.replace. Deliberately NOT wrapped in
+    a blanket except OSError: ENOSPC must abort the run (spec §6 item 5)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, indent=2, ensure_ascii=False),
+                   encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def load_state(path):
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def save_state_atomic(state, path):
+    write_json_atomic(state, path)
+
+
+def discover_unprocessed(digests, state):
+    return sorted(p for p in digests.glob("items-*.jsonl")
+                  if p.name not in state)
+
+
+def run_sweep(cfg, now=None, llm=call_llm):
+    now = time.time() if now is None else now
+    state = load_state(cfg["state_path"])
+    todo = discover_unprocessed(cfg["digests"], state)
+    if not todo:
+        log("sweep: nothing to process")
+        return 0
+    for items_path in todo:
+        stem = items_path.name.removeprefix("items-").removesuffix(".jsonl")
+        out_path = cfg["signals_dir"] / f"signals-{stem}.json"
+        try:
+            artifact = process_batch(items_path, cfg, now, llm=llm)
+        except ValueError as exc:  # poison pill (spec §6.1): exit 0, no retry
+            log(f"ERROR poison pill in {items_path.name}: {exc}")
+            state[items_path.name] = {"processed_at": now,
+                                      "status": "processed-with-error"}
+            save_state_atomic(state, cfg["state_path"])
+            continue
+        write_json_atomic(artifact, out_path)  # artifact FIRST (spec §6.2)
+        state[items_path.name] = {"processed_at": now,
+                                  "status": artifact["status"]}
+        save_state_atomic(state, cfg["state_path"])  # state SECOND
+        log(f"wrote {out_path.name} status={artifact['status']} "
+            f"signals={len(artifact['signals'])}")
+    return 0

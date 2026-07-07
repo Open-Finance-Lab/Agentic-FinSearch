@@ -411,3 +411,94 @@ class TestProcessBatch(unittest.TestCase):
                           "under-corroborated despite 3 raw copies -> damped")
         self.assertEqual(artifact["diagnostics"]["scores_damped"], 1)
         self.assertEqual(artifact["diagnostics"]["near_dups_collapsed"], 2)
+
+
+def make_cfg(home: Path):
+    with unittest.mock.patch.dict(os.environ, {}, clear=True):
+        cfg = ns.load_config()
+    cfg.update(home=home, digests=home / "digests", signals_dir=home / "signals",
+               state_path=home / "signals_state.json", api_key="test-key",
+               watchlist=["AAPL", "GOOGL", "MSFT", "NVDA"])
+    cfg["digests"].mkdir(parents=True, exist_ok=True)
+    return cfg
+
+
+OK_LLM = fake_llm_factory({"overview": "o", "tickers":
+    {"MSFT": {"score": 0.3, "guid": "g1", "rationale": "r"}}})
+
+
+class TestAtomicWrite(unittest.TestCase):
+    def test_write_json_atomic_replaces_and_leaves_no_tmp(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "signals-2026-07-06.json"
+            path.write_text('{"old": true}', encoding="utf-8")
+            ns.write_json_atomic({"new": True}, path)
+            self.assertEqual(json.loads(path.read_text()), {"new": True})
+            leftovers = [p.name for p in Path(td).iterdir() if p.name != path.name]
+            self.assertEqual(leftovers, [], "temp file must not survive the write")
+
+
+class TestSweep(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.home = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self.cfg = make_cfg(self.home)
+
+    def test_sweep_processes_each_batch_exactly_once(self):
+        write_items(self.cfg["digests"], [make_story()], name="items-a.jsonl")
+        write_items(self.cfg["digests"], [make_story()], name="items-b.jsonl")
+        calls = []
+        def counting_llm(cfg, system, user):
+            calls.append(1)
+            return {"overview": "o", "tickers":
+                    {"MSFT": {"score": 0.3, "guid": "g1", "rationale": "r"}}}
+        self.assertEqual(ns.run_sweep(self.cfg, llm=counting_llm), 0)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue((self.cfg["signals_dir"] / "signals-a.json").exists())
+        self.assertTrue((self.cfg["signals_dir"] / "signals-b.json").exists())
+        self.assertEqual(ns.run_sweep(self.cfg, llm=counting_llm), 0)
+        self.assertEqual(len(calls), 2, "second sweep must be a no-op")
+
+    def test_poison_pill_records_error_continues_and_exits_zero(self):
+        bad = self.cfg["digests"] / "items-2026-07-05.jsonl"
+        bad.write_text('{"broken\n', encoding="utf-8")
+        write_items(self.cfg["digests"], [make_story()],
+                    name="items-2026-07-06.jsonl")
+        self.assertEqual(ns.run_sweep(self.cfg, llm=OK_LLM), 0)
+        state = json.loads(self.cfg["state_path"].read_text())
+        self.assertEqual(state["items-2026-07-05.jsonl"]["status"],
+                         "processed-with-error")
+        self.assertEqual(state["items-2026-07-06.jsonl"]["status"], "ok")
+        self.assertFalse((self.cfg["signals_dir"] / "signals-2026-07-05.json").exists())
+        self.assertTrue((self.cfg["signals_dir"] / "signals-2026-07-06.json").exists())
+
+    def test_artifact_written_before_state_crash_means_reprocess(self):
+        write_items(self.cfg["digests"], [make_story()])
+        calls = []
+        def counting_llm(cfg, system, user):
+            calls.append(1)
+            return {"overview": "o", "tickers":
+                    {"MSFT": {"score": 0.3, "guid": "g1", "rationale": "r"}}}
+        with unittest.mock.patch.object(
+                ns, "save_state_atomic",
+                side_effect=OSError("simulated crash after artifact write")):
+            with self.assertRaises(OSError):
+                ns.run_sweep(self.cfg, llm=counting_llm)
+        self.assertTrue(
+            (self.cfg["signals_dir"] / "signals-2026-07-06.json").exists(),
+            "artifact must land before the state write (spec §6.2)")
+        self.assertEqual(ns.run_sweep(self.cfg, llm=counting_llm), 0)
+        self.assertEqual(len(calls), 2,
+                         "crashed batch is reprocessed — duplicate call, never a gap")
+
+    def test_degraded_batch_is_marked_processed(self):
+        write_items(self.cfg["digests"], [make_story()])
+        def broken_llm(cfg, system, user):
+            raise RuntimeError("boom")
+        self.assertEqual(ns.run_sweep(self.cfg, llm=broken_llm), 0)
+        state = json.loads(self.cfg["state_path"].read_text())
+        self.assertEqual(state["items-2026-07-06.jsonl"]["status"], "degraded")
+        artifact = json.loads(
+            (self.cfg["signals_dir"] / "signals-2026-07-06.json").read_text())
+        self.assertEqual(artifact["status"], "degraded")
