@@ -36,3 +36,41 @@ class TestSchemaFile(unittest.TestCase):
         self.assertEqual(entry["properties"]["sentiment"]["enum"],
                          ["bullish", "bearish", "neutral"])
         self.assertEqual(schema["properties"]["status"]["enum"], ["ok", "degraded"])
+
+
+import os
+import unittest.mock
+
+
+class TestFoundation(unittest.TestCase):
+    def test_clean_text_strips_control_bidi_and_marker_token(self):
+        import news_signals as ns
+        s = "a\u202eb\x00c NEWS_DATA d"  # escapes only — never paste literal bidi chars
+        out = ns.clean_text(s, 100)
+        self.assertEqual(out, "abc  d")
+
+    def test_clean_text_caps_and_handles_none(self):
+        import news_signals as ns
+        self.assertEqual(ns.clean_text(None, 5), "")
+        self.assertEqual(ns.clean_text("x" * 10, 5), "xxxxx")
+
+    def test_load_config_defaults_and_fallbacks(self):
+        import news_signals as ns
+        env = {"HEARTBEAT_HOME": "/tmp/hb-test", "HEARTBEAT_MODEL": "some-model"}
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            cfg = ns.load_config()
+        self.assertEqual(str(cfg["digests"]), "/tmp/hb-test/digests")
+        self.assertEqual(str(cfg["signals_dir"]), "/tmp/hb-test/signals")
+        self.assertEqual(str(cfg["state_path"]), "/tmp/hb-test/signals_state.json")
+        self.assertEqual(cfg["model"], "some-model")  # SIGNALS_MODEL falls back
+        self.assertEqual(cfg["threshold"], 0.20)
+        self.assertEqual(cfg["damp_cap"], 0.7)
+        self.assertEqual(cfg["damp_min_articles"], 2)
+        self.assertEqual(cfg["per_ticker_cap"], 3)
+        self.assertEqual(cfg["watchlist"], sorted(set(ns.DEFAULT_WATCHLIST.split())))
+
+    def test_signals_model_overrides_heartbeat_model(self):
+        import news_signals as ns
+        env = {"SIGNALS_MODEL": "better-model", "HEARTBEAT_MODEL": "worse-model"}
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(ns.load_config()["model"], "better-model")
