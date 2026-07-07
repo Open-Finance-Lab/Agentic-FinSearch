@@ -13,17 +13,17 @@ from django.core.cache import cache
 from django.test import SimpleTestCase, override_settings
 
 from api import signals_views
+from tests.shared_settings import HERMETIC_REQUEST_SETTINGS as _HERMETIC
 
 URL = "/api/signals/news/"
 
-# Bare pytest (no Django test runner, no pytest-django) never calls
-# setup_test_environment(), so 'testserver' is not auto-added to ALLOWED_HOSTS
-# and CommonMiddleware raises DisallowedHost before URL resolution. CI also
-# runs with no .env (DJANGO_DEBUG unset -> False), which defaults
-# SECURE_SSL_REDIRECT True and would 301 the plain-HTTP test-client request
-# before it reaches the view (the 301-trap, PR #313). Same hermeticity knobs
-# as tests/test_ratelimit_429.py and tests/test_debug_route_gating.py.
-_HERMETIC = {"ALLOWED_HOSTS": ["testserver"], "SECURE_SSL_REDIRECT": False}
+# The single MSFT signal make_artifact() emits by default; tests composing
+# custom `signals` dicts copy it instead of round-tripping a throwaway
+# make_artifact() call just to reach one nested literal.
+DEFAULT_SIGNAL = {"sentiment": "bullish", "score": 0.5, "rationale": "r",
+                  "headline": "h", "source": "Reuters",
+                  "url": "https://example.com/a", "published": 1783330000.0,
+                  "guid": "g1", "n_articles": 2}
 
 
 def make_artifact(generated_at, signals=None):
@@ -42,10 +42,7 @@ def make_artifact(generated_at, signals=None):
             "tickers_dropped_guid_mismatch": 0, "scores_damped": 0,
         },
         "signals": signals if signals is not None else {
-            "MSFT": {"sentiment": "bullish", "score": 0.5, "rationale": "r",
-                     "headline": "h", "source": "Reuters",
-                     "url": "https://example.com/a", "published": 1783330000.0,
-                     "guid": "g1", "n_articles": 2},
+            "MSFT": dict(DEFAULT_SIGNAL),
         },
     }
 
@@ -97,10 +94,10 @@ class SignalsEndpointTests(SimpleTestCase):
         # date-only stem ("." > "-" in ASCII), so a same-day re-run must be
         # selected by mtime, not by stem order (regression guard, F2).
         morning = make_artifact(self._recent_iso(hours_ago=8.0), signals={
-            "MSFT": dict(make_artifact("x")["signals"]["MSFT"], guid="morning"),
+            "MSFT": dict(DEFAULT_SIGNAL, guid="morning"),
         })
         supplemental = make_artifact(self._recent_iso(hours_ago=0.1), signals={
-            "MSFT": dict(make_artifact("x")["signals"]["MSFT"], guid="supplemental"),
+            "MSFT": dict(DEFAULT_SIGNAL, guid="supplemental"),
         })
         self._write("2026-07-06", morning)
         supplemental_path = self.dir / "signals-2026-07-06-153042.json"
@@ -117,8 +114,8 @@ class SignalsEndpointTests(SimpleTestCase):
 
     def test_tickers_filter_case_insensitive(self):
         art = make_artifact(self._recent_iso(), signals={
-            "MSFT": make_artifact("x")["signals"]["MSFT"],
-            "AAPL": dict(make_artifact("x")["signals"]["MSFT"], guid="g2"),
+            "MSFT": dict(DEFAULT_SIGNAL),
+            "AAPL": dict(DEFAULT_SIGNAL, guid="g2"),
         })
         self._write("2026-07-06", art)
         with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
@@ -178,8 +175,8 @@ class SignalsEndpointTests(SimpleTestCase):
         # The view filters on a normalized set; the ETag must key on the
         # same normalization or equivalent requests never revalidate.
         art = make_artifact(self._recent_iso(), signals={
-            "MSFT": make_artifact("x")["signals"]["MSFT"],
-            "AAPL": dict(make_artifact("x")["signals"]["MSFT"], guid="g2"),
+            "MSFT": dict(DEFAULT_SIGNAL),
+            "AAPL": dict(DEFAULT_SIGNAL, guid="g2"),
         })
         self._write("2026-07-06", art)
         with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
@@ -196,8 +193,8 @@ class SignalsEndpointTests(SimpleTestCase):
         # collide, or a 304 would point a client (or the shared proxy cache
         # behind Cache-Control: public) at a differently-filtered body.
         art = make_artifact(self._recent_iso(), signals={
-            "MSFT": make_artifact("x")["signals"]["MSFT"],
-            "AAPL": dict(make_artifact("x")["signals"]["MSFT"], guid="g2"),
+            "MSFT": dict(DEFAULT_SIGNAL),
+            "AAPL": dict(DEFAULT_SIGNAL, guid="g2"),
         })
         self._write("2026-07-06", art)
         with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):

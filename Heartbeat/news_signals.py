@@ -30,7 +30,17 @@ PROMPT_VERSION = 1
 
 DEFAULT_WATCHLIST = "AAPL MSFT NVDA GOOGL AMZN META TSLA BRK-B JPM BTC-USD"
 REQUIRED_FIELDS = ("guid", "title", "link", "source", "published", "score")
-FIELD_CAPS = {"title": 500, "description": 5000, "link": 2000, "source": 200}
+FIELD_CAPS = {"title": 500, "description": 5000, "link": 2000, "source": 200,
+              "guid": 200}
+# Caps for the LLM/exception-derived output fields, pinned by the signals-v1
+# schema's maxLength values (headline/source/url are covered by FIELD_CAPS:
+# they pass through from the validated input). Same single-source-of-truth
+# discipline as DIAGNOSTIC_FIELDS — the schema-parity test asserts the code
+# and the published contract never drift.
+OUTPUT_CAPS = {"news_overview": 300, "rationale": 280, "status_reason": 200}
+# signals-v1 pins window_hours >= 1; enforced at config load because nothing
+# validates artifacts at runtime.
+WINDOW_HOURS_MIN = 1
 LLM_TIMEOUT = 120
 LLM_RETRIES = 1
 
@@ -99,11 +109,11 @@ def load_config():
                 or os.environ.get("HEARTBEAT_HOME",
                                   Path.home() / "fingpt" / "heartbeat"))
     window_hours = int(os.environ.get("HEARTBEAT_WINDOW_HOURS", "24"))
-    if window_hours < 1:
-        # the signals-v1 schema pins window_hours >= 1 and nothing validates
-        # artifacts at runtime — hold the floor at config load (exit 2 =
-        # config error, README exit-code table)
-        log(f"ERROR HEARTBEAT_WINDOW_HOURS must be >= 1, got {window_hours}")
+    if window_hours < WINDOW_HOURS_MIN:
+        # hold the schema's floor at config load (exit 2 = config error,
+        # README exit-code table)
+        log(f"ERROR HEARTBEAT_WINDOW_HOURS must be >= {WINDOW_HOURS_MIN}, "
+            f"got {window_hours}")
         sys.exit(2)
     return {
         "home": home,
@@ -132,10 +142,10 @@ def load_config():
 def validation_gate(path, max_file_mb):
     """Input trust boundary (spec §7.1). Batch-level defects raise ValueError
     (poison pill, §6.1); a bad `published` drops only that story."""
-    if path.stat().st_size > max_file_mb * 1024 * 1024:
+    st = path.stat()
+    if st.st_size > max_file_mb * 1024 * 1024:
         raise ValueError(f"file exceeds {max_file_mb}MB")
-    mtime = path.stat().st_mtime
-    lo, hi = mtime - 30 * 86400, mtime + 3600
+    lo, hi = st.st_mtime - 30 * 86400, st.st_mtime + 3600
     stories = []
     for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
@@ -156,7 +166,7 @@ def validation_gate(path, max_file_mb):
         story["description"] = clean_text(story.get("description", ""),
                                           FIELD_CAPS["description"])
         story["source"] = clean_text(story["source"], FIELD_CAPS["source"])
-        story["guid"] = clean_text(str(story["guid"]), 200)
+        story["guid"] = clean_text(str(story["guid"]), FIELD_CAPS["guid"])
         story["link"] = clean_text(str(story["link"]), FIELD_CAPS["link"])
         story["tickers"] = [t.upper() for t in story.get("tickers", [])]
         stories.append(story)
@@ -228,9 +238,23 @@ ALIAS_RE = {ticker: [_alias_pattern(a) for a in aliases]
 
 @functools.lru_cache(maxsize=None)
 def _symbol_pattern(ticker):
-    """Word-bounded ticker-symbol pattern, cached like ALIAS_RE — is_subject
-    runs once per (story x watchlist ticker) pair every sweep."""
+    """Word-bounded ticker-symbol pattern, cached like ALIAS_RE — the
+    subject match runs once per (story x watchlist ticker) pair every
+    sweep."""
     return re.compile(rf"(?<![A-Z0-9-]){re.escape(ticker)}(?![A-Z0-9-])")
+
+
+def _is_roundup(lowered):
+    return any(p.search(lowered) for p in ROUNDUP_RE)
+
+
+def _ticker_matches(title, lowered, ticker):
+    """Word-bounded symbol-or-alias match. `lowered` is title.lower(),
+    passed in so select_candidates lowers each title once, not once per
+    tagged ticker."""
+    if len(ticker) >= SYMBOL_MATCH_MIN_LEN and _symbol_pattern(ticker).search(title):
+        return True
+    return any(p.search(lowered) for p in ALIAS_RE.get(ticker, ()))
 
 
 def is_subject(title, ticker):
@@ -240,13 +264,12 @@ def is_subject(title, ticker):
     "intelligence", `"cisco"` inside "francisco", `"visa"` inside
     "advisable". Numeric-shaped aliases ("3m" for MMM) additionally exclude
     a preceding "$", "." or digit so dollar/share-count figures ("$3M",
-    "133M shares") don't false-tag the ticker as subject."""
+    "133M shares") don't false-tag the ticker as subject.
+
+    select_candidates calls the two halves directly so the title-only
+    roundup check runs once per story, not once per tagged ticker."""
     lowered = title.lower()
-    if any(p.search(lowered) for p in ROUNDUP_RE):
-        return False
-    if len(ticker) >= SYMBOL_MATCH_MIN_LEN and _symbol_pattern(ticker).search(title):
-        return True
-    return any(p.search(lowered) for p in ALIAS_RE.get(ticker, ()))
+    return not _is_roundup(lowered) and _ticker_matches(title, lowered, ticker)
 
 
 # --- Candidate selection (spec §3 step 4, D9) --------------------------------
@@ -283,14 +306,17 @@ def select_candidates(stories, watchlist, cfg):
     for story in stories:
         if float(story["score"]) < cfg["min_editorial"]:
             continue
-        subjects = []
-        for ticker in dict.fromkeys(story["tickers"]):  # deduped, order kept
-            if ticker not in watchlist:
-                continue
-            if not is_subject(story["title"], ticker):
-                diag["candidates_dropped_not_subject"] += 1
-                continue
-            subjects.append(ticker)
+        tagged = [t for t in dict.fromkeys(story["tickers"])  # deduped, order kept
+                  if t in watchlist]
+        if not tagged:
+            continue
+        title = story["title"]
+        lowered = title.lower()
+        if _is_roundup(lowered):  # title-only: check once per story
+            diag["candidates_dropped_not_subject"] += len(tagged)
+            continue
+        subjects = [t for t in tagged if _ticker_matches(title, lowered, t)]
+        diag["candidates_dropped_not_subject"] += len(tagged) - len(subjects)
         if len(subjects) >= ROUNDUP_TICKER_LIMIT:
             # structural roundup backstop (D8): subject for this many
             # tickers at once == market wrap, whatever the phrasing
@@ -392,7 +418,8 @@ def validate_response(out, cands, n_articles, cfg, diag):
     damp over DISTINCT stories (D9), derived label, server-side join."""
     if not isinstance(out, dict):
         out = {}
-    overview = clean_text(str(out.get("overview") or ""), 300) or None
+    overview = clean_text(str(out.get("overview") or ""),
+                          OUTPUT_CAPS["news_overview"]) or None
     returned = out.get("tickers")
     if not isinstance(returned, dict):
         returned = {}
@@ -419,7 +446,8 @@ def validate_response(out, cands, n_articles, cfg, diag):
         signals[ticker] = {
             "sentiment": derive_label(score, cfg["threshold"]),
             "score": round(score, 2),
-            "rationale": clean_text(str(entry.get("rationale") or ""), 280),
+            "rationale": clean_text(str(entry.get("rationale") or ""),
+                                    OUTPUT_CAPS["rationale"]),
             "headline": rep["title"],
             "source": rep["source"],
             "url": rep["link"],
@@ -463,7 +491,8 @@ def process_batch(items_path, cfg, now, llm=call_llm):
             out = llm(cfg, system, user)
             overview, signals = validate_response(out, cands, n_articles, cfg, diag)
         except RuntimeError as exc:
-            status, status_reason = "degraded", str(exc)[:200]
+            status, status_reason = (
+                "degraded", str(exc)[:OUTPUT_CAPS["status_reason"]])
     return {
         "schema_version": SCHEMA_VERSION,
         "profile": "default",

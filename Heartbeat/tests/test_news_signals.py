@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import news_signals as ns
+from fake_http import FakeResponse, http_429
 
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "signals-v1.schema.json"
 
@@ -45,6 +46,25 @@ class TestSchemaFile(unittest.TestCase):
         diag = schema["properties"]["diagnostics"]
         self.assertEqual(sorted(ns.DIAGNOSTIC_FIELDS), sorted(diag["required"]))
         self.assertEqual(sorted(ns.DIAGNOSTIC_FIELDS), sorted(diag["properties"]))
+
+    def test_cap_constants_match_schema_pinned_limits(self):
+        # Same single-source-of-truth discipline as DIAGNOSTIC_FIELDS for
+        # the length/threshold caps: the generator's constants and the
+        # schema's independently pinned maxLength/minimum values (the
+        # published contract) must never drift.
+        schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+        props = schema["properties"]
+        entry = props["signals"]["additionalProperties"]["properties"]
+        self.assertEqual(props["news_overview"]["maxLength"],
+                         ns.OUTPUT_CAPS["news_overview"])
+        self.assertEqual(props["status_reason"]["maxLength"],
+                         ns.OUTPUT_CAPS["status_reason"])
+        self.assertEqual(entry["rationale"]["maxLength"],
+                         ns.OUTPUT_CAPS["rationale"])
+        self.assertEqual(entry["headline"]["maxLength"], ns.FIELD_CAPS["title"])
+        self.assertEqual(entry["source"]["maxLength"], ns.FIELD_CAPS["source"])
+        self.assertEqual(entry["url"]["maxLength"], ns.FIELD_CAPS["link"])
+        self.assertEqual(props["window_hours"]["minimum"], ns.WINDOW_HOURS_MIN)
 
 
 import os
@@ -416,12 +436,9 @@ class TestCallLlm(unittest.TestCase):
     def test_returns_parsed_content_json(self):
         payload = {"choices": [{"message": {"content":
                    json.dumps({"overview": "o", "tickers": {}})}}]}
-        fake_resp = unittest.mock.MagicMock()
-        fake_resp.read.return_value = json.dumps(payload).encode()
-        fake_resp.__enter__ = lambda s: s
-        fake_resp.__exit__ = lambda s, *a: False
-        with unittest.mock.patch.object(ns.urllib.request, "urlopen",
-                                        return_value=fake_resp):
+        with unittest.mock.patch.object(
+                ns.urllib.request, "urlopen",
+                return_value=FakeResponse(json.dumps(payload))):
             out = ns.call_llm(self._cfg(), "sys", "usr")
         self.assertEqual(out["overview"], "o")
 
@@ -435,12 +452,9 @@ class TestCallLlm(unittest.TestCase):
 
     def test_non_object_json_content_raises_runtime_error(self):
         payload = {"choices": [{"message": {"content": "[1, 2]"}}]}
-        fake_resp = unittest.mock.MagicMock()
-        fake_resp.read.return_value = json.dumps(payload).encode()
-        fake_resp.__enter__ = lambda s: s
-        fake_resp.__exit__ = lambda s, *a: False
-        with unittest.mock.patch.object(ns.urllib.request, "urlopen",
-                                        return_value=fake_resp), \
+        with unittest.mock.patch.object(
+                ns.urllib.request, "urlopen",
+                return_value=FakeResponse(json.dumps(payload))), \
              unittest.mock.patch.object(ns.time, "sleep"):
             with self.assertRaises(RuntimeError):
                 ns.call_llm(self._cfg(), "sys", "usr")
@@ -745,12 +759,9 @@ import fcntl
 
 class TestPostDiscord(unittest.TestCase):
     def test_post_discord_sends_bot_auth_and_truncated_body(self):
-        fake_resp = unittest.mock.MagicMock()
-        fake_resp.read.return_value = b"{}"
-        fake_resp.__enter__ = lambda s: s
-        fake_resp.__exit__ = lambda s, *a: False
-        with unittest.mock.patch.object(ns.urllib.request, "urlopen",
-                                        return_value=fake_resp) as mock_urlopen:
+        with unittest.mock.patch.object(
+                ns.urllib.request, "urlopen",
+                return_value=FakeResponse(b"{}")) as mock_urlopen:
             ns.post_discord("tok", "chan123", "x" * 3000)
         req = mock_urlopen.call_args.args[0]
         self.assertEqual(req.full_url,
@@ -759,30 +770,12 @@ class TestPostDiscord(unittest.TestCase):
         body = json.loads(req.data)
         self.assertEqual(len(body["content"]), 1900)
 
-    @staticmethod
-    def _http_429(retry_after="2"):
-        import io
-        from email.message import Message
-        headers = Message()
-        headers["Retry-After"] = retry_after
-        return ns.urllib.error.HTTPError(
-            "https://discord.com/api", 429, "rate limited", headers,
-            io.BytesIO(b"{}"))
-
-    @staticmethod
-    def _ok_resp():
-        fake_resp = unittest.mock.MagicMock()
-        fake_resp.read.return_value = b"{}"
-        fake_resp.__enter__ = lambda s: s
-        fake_resp.__exit__ = lambda s, *a: False
-        return fake_resp
-
     def test_post_discord_retries_on_429_and_honors_retry_after(self):
         # The canary CRIT alert is the one path that catches a wedged
         # pipeline — a single-attempt post drops it on any rate limit.
         with unittest.mock.patch.object(
                 ns.urllib.request, "urlopen",
-                side_effect=[self._http_429("2"), self._ok_resp()]) as m, \
+                side_effect=[http_429("2"), FakeResponse(b"{}")]) as m, \
              unittest.mock.patch.object(ns.time, "sleep") as slept:
             ns.post_discord("tok", "chan", "hello")
         self.assertEqual(m.call_count, 2)
@@ -796,7 +789,7 @@ class TestPostDiscord(unittest.TestCase):
             with self.subTest(retry_after=bad):
                 with unittest.mock.patch.object(
                         ns.urllib.request, "urlopen",
-                        side_effect=[self._http_429(bad), self._ok_resp()]), \
+                        side_effect=[http_429(bad), FakeResponse(b"{}")]), \
                      unittest.mock.patch.object(ns.time, "sleep") as slept:
                     ns.post_discord("tok", "chan", "hello")
                 slept.assert_called_once_with(2)

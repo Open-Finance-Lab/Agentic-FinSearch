@@ -99,25 +99,21 @@ jobs:
           envs: REPO,COMMIT_SHA,EXPECTED_SHA256,HEARTBEAT_HOME,EXPECTED_SIGNALS_SHA256
           script: |
             set -euo pipefail
-            tmp=$(mktemp "$HEARTBEAT_HOME/.news_heartbeat.deploy.XXXXXX")
-            trap 'rm -f "$tmp"' EXIT
-            curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "https://raw.githubusercontent.com/$REPO/$COMMIT_SHA/Heartbeat/news_heartbeat.py" -o "$tmp"
-            echo "$EXPECTED_SHA256  $tmp" | sha256sum -c -
-            python3 -m py_compile "$tmp"
-            grep -m1 '^VERSION' "$tmp"
-            rm -rf "$HEARTBEAT_HOME/__pycache__"
-            chmod 644 "$tmp"
-            mv "$tmp" "$HEARTBEAT_HOME/news_heartbeat.py"
-            trap - EXIT
-            echo "Deployed news_heartbeat.py @ $COMMIT_SHA"
-            tmp=$(mktemp "$HEARTBEAT_HOME/.news_signals.deploy.XXXXXX")
-            trap 'rm -f "$tmp"' EXIT
-            curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "https://raw.githubusercontent.com/$REPO/$COMMIT_SHA/Heartbeat/news_signals.py" -o "$tmp"
-            echo "$EXPECTED_SIGNALS_SHA256  $tmp" | sha256sum -c -
-            python3 -m py_compile "$tmp"
-            grep -m1 '^VERSION' "$tmp"
-            rm -rf "$HEARTBEAT_HOME/__pycache__"
-            chmod 644 "$tmp"
-            mv "$tmp" "$HEARTBEAT_HOME/news_signals.py"
-            trap - EXIT
-            echo "Deployed news_signals.py @ $COMMIT_SHA"
+            # deliberately no `local`: bash runs the EXIT trap after the
+            # function returns, so the trap must see a global $tmp
+            deploy_one() {
+              name=$1 expected_sha=$2
+              tmp=$(mktemp "$HEARTBEAT_HOME/.$name.deploy.XXXXXX")
+              trap 'rm -f "$tmp"' EXIT
+              curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors "https://raw.githubusercontent.com/$REPO/$COMMIT_SHA/Heartbeat/$name.py" -o "$tmp"
+              echo "$expected_sha  $tmp" | sha256sum -c -
+              python3 -m py_compile "$tmp"
+              grep -m1 '^VERSION' "$tmp"
+              rm -rf "$HEARTBEAT_HOME/__pycache__"
+              chmod 644 "$tmp"
+              mv "$tmp" "$HEARTBEAT_HOME/$name.py"
+              trap - EXIT
+              echo "Deployed $name.py @ $COMMIT_SHA"
+            }
+            deploy_one news_heartbeat "$EXPECTED_SHA256"
+            deploy_one news_signals "$EXPECTED_SIGNALS_SHA256"

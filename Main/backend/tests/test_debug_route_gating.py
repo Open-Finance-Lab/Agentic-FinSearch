@@ -20,18 +20,9 @@ from django.test import SimpleTestCase, override_settings
 from django.urls import NoReverseMatch, clear_url_caches, reverse
 
 import django_config.urls as project_urls
+from tests.shared_settings import HERMETIC_REQUEST_SETTINGS as _REQUEST_KNOBS
 
 URLS_PATH = Path(project_urls.__file__).resolve()
-
-# Shared knobs for driving a REAL request through the middleware stack under bare pytest
-# (no Django test runner, so setup_test_environment() never adds 'testserver' to
-# ALLOWED_HOSTS). SECURE_SSL_REDIRECT must be pinned off: with DEBUG=False the settings
-# default it True, and SecurityMiddleware would 301 the plain-HTTP test request BEFORE URL
-# resolution (the 301-trap, PR #313) — we'd assert on the redirect, not on routing.
-_REQUEST_KNOBS = {
-    "ALLOWED_HOSTS": ["testserver"],
-    "SECURE_SSL_REDIRECT": False,
-}
 
 
 def _reload_urlconf():

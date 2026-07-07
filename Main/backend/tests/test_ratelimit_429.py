@@ -23,6 +23,7 @@ from django_ratelimit.decorators import ratelimit
 from django_ratelimit.exceptions import Ratelimited
 
 import api.views as views_module
+from tests.shared_settings import HERMETIC_REQUEST_SETTINGS
 
 
 # Throwaway view decorated at a tight 1/m on the REAL production key function, so the second
@@ -38,16 +39,10 @@ urlpatterns = [path("limited/", _limited)]
 RL_429 = override_settings(
     RATELIMIT_ENABLE=True,
     ROOT_URLCONF=__name__,
-    # Bare pytest (no Django test runner) never calls setup_test_environment(), so 'testserver'
-    # is not auto-added to ALLOWED_HOSTS; add it or CommonMiddleware raises DisallowedHost first.
-    ALLOWED_HOSTS=["testserver"],
-    # These tests drive a REAL request through the full middleware stack, which includes
-    # SecurityMiddleware. With DEBUG=False (CI runs with no .env, so DJANGO_DEBUG is unset)
-    # SECURE_SSL_REDIRECT defaults True, and SecurityMiddleware 301-redirects the plain-HTTP
-    # test-client request to https BEFORE it reaches the limited view -- so the assertions below
-    # would see 301 instead of 200/429. Pin it off to keep the suite hermetic (independent of
-    # DEBUG / a local .env). We're exercising the rate-limit wiring, not the SSL redirect.
-    SECURE_SSL_REDIRECT=False,
+    # These tests drive a REAL request through the full middleware stack, so they need the
+    # shared hermeticity knobs (ALLOWED_HOSTS + SECURE_SSL_REDIRECT off — see conftest.py):
+    # we're exercising the rate-limit wiring, not DisallowedHost or the 301-trap.
+    **HERMETIC_REQUEST_SETTINGS,
     CACHES={
         "default": {
             "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
