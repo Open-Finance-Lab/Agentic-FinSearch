@@ -1,4 +1,4 @@
-"""GET /api/signals/news/ behavior (spec §4.4): newest-by-stem, public
+"""GET /api/signals/news/ behavior (spec §4.4): newest-by-mtime, public
 serialization stripping, staleness_hours, tickers filter, conditional GET,
 fail-closed 404s."""
 import json
