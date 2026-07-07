@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "signals-v1.schema.json",
+  "title": "FinSearch news signals artifact v1 (spec 2026-07-06 §4.2, amended)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "profile", "generated_at", "generator", "model",
+    "prompt_version", "source_items", "window_hours", "watchlist",
+    "status", "status_reason", "news_overview", "diagnostics", "signals"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "profile": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "generator": { "type": "string" },
+    "model": { "type": "string" },
+    "prompt_version": { "type": "integer", "minimum": 1 },
+    "source_items": { "type": "string", "pattern": "^items-[^/\\\\]+\\.jsonl$" },
+    "window_hours": { "type": "integer", "minimum": 1 },
+    "watchlist": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[A-Z0-9.\\-]+$" },
+      "uniqueItems": true
+    },
+    "status": { "enum": ["ok", "degraded"] },
+    "status_reason": { "type": ["string", "null"], "maxLength": 200 },
+    "news_overview": { "type": ["string", "null"], "maxLength": 300 },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stories_total", "candidates_dropped_not_subject", "near_dups_collapsed",
+        "candidates_selected", "tickers_with_candidates", "tickers_no_candidates",
+        "tickers_capped", "tickers_omitted_by_llm",
+        "tickers_dropped_guid_mismatch", "scores_damped"
+      ],
+      "properties": {
+        "stories_total": { "type": "integer", "minimum": 0 },
+        "candidates_dropped_not_subject": { "type": "integer", "minimum": 0 },
+        "near_dups_collapsed": { "type": "integer", "minimum": 0 },
+        "candidates_selected": { "type": "integer", "minimum": 0 },
+        "tickers_with_candidates": { "type": "integer", "minimum": 0 },
+        "tickers_no_candidates": { "type": "integer", "minimum": 0 },
+        "tickers_capped": { "type": "integer", "minimum": 0 },
+        "tickers_omitted_by_llm": { "type": "integer", "minimum": 0 },
+        "tickers_dropped_guid_mismatch": { "type": "integer", "minimum": 0 },
+        "scores_damped": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "signals": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Z0-9.\\-]+$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sentiment", "score", "rationale", "headline", "source", "url",
+          "published", "guid", "n_articles"
+        ],
+        "properties": {
+          "sentiment": { "enum": ["bullish", "bearish", "neutral"] },
+          "score": { "type": "number", "minimum": -1, "maximum": 1 },
+          "rationale": { "type": "string", "maxLength": 280 },
+          "headline": { "type": "string", "maxLength": 500 },
+          "source": { "type": "string", "maxLength": 200 },
+          "url": { "type": "string", "maxLength": 2000 },
+          "published": { "type": "number" },
+          "guid": { "type": "string" },
+          "n_articles": { "type": "integer", "minimum": 1 }
+        }
+      }
+    }
+  }
+}
