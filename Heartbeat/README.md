@@ -118,3 +118,6 @@ Staging checklist (run once at deploy time, spec §9):
    `signals_state.json` is unchanged and the next sweep reprocesses cleanly.
 3. `SIGNALS_STALENESS_ALERT_H=0.001 python3 news_signals.py --canary --env-file …`
    fires the Discord alert.
+4. On first deploy, drain the digests backlog with one manual sweep run
+   before enabling the timer (the droplet has months of unprocessed
+   items-*.jsonl; `TimeoutStartSec=600` assumes a modest per-tick backlog).

@@ -157,7 +157,7 @@ A machine-readable JSON Schema ships at `Heartbeat/schemas/signals-v1.schema.jso
 
 `GET /api/signals/news/` (Django, public, read-only):
 
-- **200** — public serialization of the newest `signals-*.json` (newest = greatest filename stem; date-stamped stems sort lexicographically): the artifact **minus** `generator`, `model`, `prompt_version` (recon-value stripping), **plus** `"staleness_hours"` computed server-side from `generated_at`.
+- **200** — public serialization of the newest `signals-*.json` (newest = greatest mtime, filename as a deterministic tiebreak; same-day supplemental stems sort lexicographically before the date-only stem, so stem order alone is not recency): the artifact **minus** `generator`, `model`, `prompt_version` (recon-value stripping), **plus** `"staleness_hours"` computed server-side from `generated_at`.
 - `?tickers=AAPL,MSFT` — optional filter on `signals` keys (case-insensitive; unknown tickers simply absent).
 - **404** `{"error": "no_signals"}` — no artifact exists.
 - Headers: `ETag` (from `generated_at`), `Last-Modified`, `Cache-Control: public, max-age=300`; conditional GET returns 304. Rate-limited via the existing `django_ratelimit` + `api.identity.ratelimit_key` infra.
