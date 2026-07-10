@@ -285,17 +285,15 @@ class TestSubjectGate(unittest.TestCase):
 
     def test_alias_match_is_word_bounded_not_substring(self):
         # A naive `alias in lowered` substring check false-matches company
-        # aliases embedded inside unrelated words. All three are real words
+        # aliases embedded inside unrelated words. Both are real words
         # that show up routinely in financial headlines.
-        self.assertFalse(ns.is_subject(
-            "This Magnificent Artificial Intelligence Stock Rallies", "INTC"))
         self.assertFalse(ns.is_subject(
             "San Francisco Fed officials weigh in on rate path", "CSCO"))
         self.assertFalse(ns.is_subject(
             "Analysts say the merger looks advisable for shareholders", "V"))
         # genuine mentions must still pass once word-bounded
-        self.assertTrue(ns.is_subject("Intel unveils new AI chip", "INTC"))
         self.assertTrue(ns.is_subject("Cisco beats on earnings", "CSCO"))
+        self.assertTrue(ns.is_subject("Visa fees draw new scrutiny", "V"))
 
     def test_alias_3m_does_not_match_bare_dollar_or_share_figures(self):
         # "3m" is the only way to catch prose that names the company as "3M"

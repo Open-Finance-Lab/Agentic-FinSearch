@@ -41,7 +41,19 @@ MARKET_FEEDS = {
 }
 TICKER_FEED = ("https://feeds.finance.yahoo.com/rss/2.0/headline"
                "?s={ticker}&region=US&lang=en-US")
-DEFAULT_WATCHLIST = "AAPL MSFT NVDA GOOGL AMZN META TSLA BRK-B JPM BTC-USD"
+# Dow Jones Industrial Average constituents.
+# Source: S&P Dow Jones Indices; effective 2026-06-29 (GOOGL replaced VZ).
+# Reconcile against the official index — never a hand-maintained copy — when
+# the composition changes. Parity-tested against news_heartbeat.py
+# (Heartbeat/tests/test_watchlist.py). To add/remove a ticker, edit one list.
+DOW_30 = [
+    "AAPL", "AMGN", "AMZN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS",
+    "GOOGL", "GS", "HD", "HON", "IBM", "JNJ", "JPM", "KO", "MCD", "MMM",
+    "MRK", "MSFT", "NKE", "NVDA", "PG", "SHW", "TRV", "UNH", "V", "WMT",
+]
+# Non-Dow tickers FinSearch also tracks for its own community digests.
+WATCHLIST_EXTRAS = ["META", "TSLA", "BRK-B", "BTC-USD"]
+DEFAULT_WATCHLIST = " ".join(sorted(set(DOW_30) | set(WATCHLIST_EXTRAS)))
 DISCLAIMER = ("Summaries by Agentic FinSearch · Sources: Yahoo Finance & linked "
               "publishers · Not financial advice")
 
