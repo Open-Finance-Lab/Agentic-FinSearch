@@ -24,11 +24,24 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "2026-07-06.1"
+VERSION = "2026-07-10.1"
 SCHEMA_VERSION = 1
 PROMPT_VERSION = 1
 
-DEFAULT_WATCHLIST = "AAPL MSFT NVDA GOOGL AMZN META TSLA BRK-B JPM BTC-USD"
+# Dow Jones Industrial Average constituents.
+# Source: S&P Dow Jones Indices; effective 2026-06-29 (GOOGL replaced VZ).
+# Reconcile against the official index — never a hand-maintained copy — when
+# the composition changes. Parity-tested against news_heartbeat.py
+# (Heartbeat/tests/test_watchlist.py). To add/remove a ticker, edit this
+# list and its TICKER_ALIASES entry (news_signals.py only; test-enforced).
+DOW_30 = [
+    "AAPL", "AMGN", "AMZN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS",
+    "GOOGL", "GS", "HD", "HON", "IBM", "JNJ", "JPM", "KO", "MCD", "MMM",
+    "MRK", "MSFT", "NKE", "NVDA", "PG", "SHW", "TRV", "UNH", "V", "WMT",
+]
+# Non-Dow tickers FinSearch also tracks for its own community digests.
+WATCHLIST_EXTRAS = ["META", "TSLA", "BRK-B", "BTC-USD"]
+DEFAULT_WATCHLIST = " ".join(sorted(set(DOW_30) | set(WATCHLIST_EXTRAS)))
 REQUIRED_FIELDS = ("guid", "title", "link", "source", "published", "score")
 FIELD_CAPS = {"title": 500, "description": 5000, "link": 2000, "source": 200,
               "guid": 200}
@@ -196,21 +209,21 @@ ROUNDUP_RE = [re.compile(p) for p in ROUNDUP_PATTERNS]
 # Lowercase name tokens per ticker (union watchlist, spec D2). Symbols shorter
 # than SYMBOL_MATCH_MIN_LEN rely on aliases alone. >>> OWNER-TUNED.
 TICKER_ALIASES = {
-    "AAPL": ("apple",), "AMZN": ("amazon",),
+    "AAPL": ("apple",), "AMGN": ("amgen",), "AMZN": ("amazon",),
     "AXP": ("american express", "amex"), "BA": ("boeing",),
     "BRK-B": ("berkshire",), "BTC-USD": ("bitcoin",),
-    "CAT": ("caterpillar",), "CSCO": ("cisco",), "CVX": ("chevron",),
-    "DIS": ("disney",), "GOOGL": ("google", "alphabet"),
-    "GS": ("goldman",), "HD": ("home depot",), "IBM": ("ibm",),
-    "INTC": ("intel",), "JNJ": ("johnson & johnson",),
+    "CAT": ("caterpillar",), "CRM": ("salesforce",), "CSCO": ("cisco",),
+    "CVX": ("chevron",), "DIS": ("disney",), "GOOGL": ("google", "alphabet"),
+    "GS": ("goldman",), "HD": ("home depot",), "HON": ("honeywell",),
+    "IBM": ("ibm",), "JNJ": ("johnson & johnson",),
     "JPM": ("jpmorgan", "jp morgan"), "KO": ("coca-cola",),
-    "MA": ("mastercard",), "MCD": ("mcdonald",),
+    "MCD": ("mcdonald",),
     "META": ("meta platforms", "facebook", "instagram"), "MMM": ("3m",),
     "MRK": ("merck",), "MSFT": ("microsoft",), "NKE": ("nike",),
-    "NVDA": ("nvidia",), "PFE": ("pfizer",), "PG": ("procter",),
+    "NVDA": ("nvidia",), "PG": ("procter",),
+    "SHW": ("sherwin-williams", "sherwin williams"),
     "TRV": ("travelers",), "TSLA": ("tesla",), "UNH": ("unitedhealth",),
-    "V": ("visa",), "WBA": ("walgreens",), "WMT": ("walmart",),
-    "XOM": ("exxon",),
+    "V": ("visa",), "WMT": ("walmart",),
 }
 SYMBOL_MATCH_MIN_LEN = 3
 
