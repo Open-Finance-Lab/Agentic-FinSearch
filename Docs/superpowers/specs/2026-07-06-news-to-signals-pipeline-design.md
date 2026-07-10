@@ -159,6 +159,22 @@ A machine-readable JSON Schema ships at `Heartbeat/schemas/signals-v1.schema.jso
 
 - **200** — public serialization of the newest `signals-*.json` (newest = greatest mtime, filename as a deterministic tiebreak; same-day supplemental stems sort lexicographically before the date-only stem, so stem order alone is not recency): the artifact **minus** `generator`, `model`, `prompt_version` (recon-value stripping), **plus** `"staleness_hours"` computed server-side from `generated_at`.
 - `?tickers=AAPL,MSFT` — optional filter on `signals` keys (case-insensitive; unknown tickers simply absent).
+- **`?as_of=YYYY-MM-DD` (optional):** returns the newest artifact whose batch
+  date is on or before the given day (point-in-time — no lookahead, robust to
+  weekend/missed-run gaps). Resolution is by the artifact's filename stem date
+  — candidates order by `(stem date, mtime, name)`, so a backfilled older day
+  never outranks a newer day; `(mtime, name)` stays the same-day-supplemental
+  tiebreak. Absent → newest overall.
+  A date earlier than all retained artifacts → `404 {"error": "no_signals"}`;
+  a future date → the latest artifact; a malformed value → `400 {"error":
+  "bad_as_of"}`. History depth is bounded by retention (`SIGNALS_KEEP_N`,
+  default 14 dated artifacts): a date older than the oldest retained artifact
+  404s identically to "never produced" — callers cannot distinguish the two
+  from the response alone. The per-date ticker set is whatever the watchlist
+  was when that artifact was produced — it can change across the retained
+  window (e.g. a watchlist deploy). Callers detect a gap by comparing the
+  requested date to the returned `generated_at`. `staleness_hours` is
+  unchanged (relative to now). Composes with `?tickers=`.
 - **404** `{"error": "no_signals"}` — no artifact exists.
 - Headers: `ETag` (from `generated_at` + `source_items` + the normalized tickers filter, `+`-joined — Django's `parse_etags()` rejects commas inside an ETag), `Last-Modified` **on the unfiltered variant only** (it is identical across tickers variants, so an `If-Modified-Since`-only revalidation of a filtered request must get a full 200, never a 304 pointing at a differently-filtered cached body), `Cache-Control: public, max-age=300`; conditional GET returns 304. Rate-limited via the existing `django_ratelimit` + `api.identity.ratelimit_key` infra.
 - Serving path: container gets a **runtime-enforced `:ro` mount of `$HEARTBEAT_HOME/signals/` only** — never the whole digests tree (§7.2).
