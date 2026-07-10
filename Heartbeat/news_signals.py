@@ -677,8 +677,14 @@ def run_canary(cfg, now=None):
     """Spec §6-C: a wedged pipeline must be distinguishable from a quiet day.
     Exit 1 (unit shows failed) + CRIT log + Discord ping when stale."""
     now = time.time() if now is None else now
-    mtimes = [p.stat().st_mtime
-              for p in cfg["signals_dir"].glob("signals-*.json")]
+    mtimes = []
+    for p in cfg["signals_dir"].glob("signals-*.json"):
+        try:
+            mtimes.append(p.stat().st_mtime)
+        except FileNotFoundError:
+            # pruned by a concurrent sweep between glob and stat — a race,
+            # not staleness; skip it
+            continue
     newest = max(mtimes, default=None)
     if newest is not None and (now - newest) <= cfg["staleness_alert_h"] * 3600:
         log(f"canary: ok (newest artifact {(now - newest) / 3600:.1f}h old)")

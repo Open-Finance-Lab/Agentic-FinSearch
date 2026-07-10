@@ -955,6 +955,15 @@ class TestCanary(unittest.TestCase):
             self.assertEqual(ns.run_canary(self.cfg), 1)
         post.assert_not_called()
 
+    def test_canary_tolerates_artifact_pruned_mid_glob(self):
+        # A concurrent sweep can unlink an artifact between the canary's glob
+        # and its stat(). The canary must skip the vanished file, not crash.
+        fresh = self.cfg["signals_dir"] / "signals-fresh.json"
+        fresh.write_text("{}", encoding="utf-8")
+        ghost = self.cfg["signals_dir"] / "signals-ghost.json"  # never created
+        with unittest.mock.patch("pathlib.Path.glob", return_value=[ghost, fresh]):
+            self.assertEqual(ns.run_canary(self.cfg), 0)
+
 
 class TestMain(unittest.TestCase):
     def setUp(self):
