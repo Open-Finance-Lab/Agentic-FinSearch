@@ -24,7 +24,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "2026-07-06.1"
+VERSION = "2026-07-10.1"
 SCHEMA_VERSION = 1
 PROMPT_VERSION = 1
 
