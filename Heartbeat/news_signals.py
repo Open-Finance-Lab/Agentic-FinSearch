@@ -575,6 +575,35 @@ def warn_alias_gaps(watchlist):
                 f"— only symbol-in-headline stories will match (spec D8)")
 
 
+def prune_artifacts(cfg):
+    """Rolling retention cap (spec 2026-07-10): keep only the newest
+    cfg["keep_n"] signals-*.json artifacts, unlink the rest. Ordered by
+    (mtime, name) descending so "most recent" matches the canary's staleness
+    notion, with name as a deterministic tiebreaker. Best-effort: a failed
+    unlink logs a WARN and is skipped — the artifacts are already durably
+    written, so cleanup failure must not fail the sweep. signals_state.json is
+    left untouched by design (deleting a state entry would invite reprocessing).
+    Runs under the sweep's flock, so no concurrent sweep races it; a file that
+    vanishes between glob and stat is skipped rather than raised, keeping the
+    never-raise contract."""
+    artifacts = []
+    for p in cfg["signals_dir"].glob("signals-*.json"):
+        try:
+            artifacts.append((p.stat().st_mtime, p.name, p))
+        except OSError:
+            # a globbed file can vanish (or become unreadable) before its
+            # stat() — a race, not a retention decision; skip it so prune never
+            # raises and can't fail an otherwise-successful sweep
+            continue
+    artifacts.sort(key=lambda t: (t[0], t[1]), reverse=True)
+    for _, _, p in artifacts[cfg["keep_n"]:]:
+        try:
+            p.unlink()
+            log(f"pruned old artifact {p.name}")
+        except OSError as exc:
+            log(f"WARN could not prune {p.name}: {exc}")
+
+
 def run_sweep(cfg, now=None, llm=call_llm):
     now = time.time() if now is None else now
     state = load_state(cfg["state_path"])
