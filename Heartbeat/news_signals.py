@@ -575,6 +575,26 @@ def warn_alias_gaps(watchlist):
                 f"— only symbol-in-headline stories will match (spec D8)")
 
 
+def _list_signals_artifacts(signals_dir):
+    """(mtime, name, path) for every signals-*.json artifact, skipping any that
+    vanish or become unreadable between glob and stat. That race is real for
+    both callers — the lock-free canary races an in-flight prune, and even the
+    flock-held pruner can have a file removed out from under it — and it can
+    surface as FileNotFoundError or, on the droplet's rootless UID-remapped :ro
+    artifact mount, as a PermissionError; both are OSError, so catch broadly and
+    skip (matching news_heartbeat.prune_old_digests). Never raises, so no caller
+    can be failed by a listing that races a delete."""
+    out = []
+    for p in signals_dir.glob("signals-*.json"):
+        try:
+            out.append((p.stat().st_mtime, p.name, p))
+        except OSError:
+            # vanished or unreadable mid-enumeration — a race, not a
+            # retention/staleness decision; skip it
+            continue
+    return out
+
+
 def prune_artifacts(cfg):
     """Rolling retention cap (spec 2026-07-10): keep only the newest
     cfg["keep_n"] signals-*.json artifacts, unlink the rest. Ordered by
@@ -583,19 +603,8 @@ def prune_artifacts(cfg):
     unlink logs a WARN and is skipped — the artifacts are already durably
     written, so cleanup failure must not fail the sweep. signals_state.json is
     left untouched by design (deleting a state entry would invite reprocessing).
-    Runs under the sweep's flock, so no concurrent sweep races it; a file that
-    vanishes between glob and stat is skipped rather than raised, keeping the
-    never-raise contract."""
-    artifacts = []
-    for p in cfg["signals_dir"].glob("signals-*.json"):
-        try:
-            artifacts.append((p.stat().st_mtime, p.name, p))
-        except OSError:
-            # a globbed file can vanish (or become unreadable) before its
-            # stat() — a race, not a retention decision; skip it so prune never
-            # raises and can't fail an otherwise-successful sweep
-            continue
-    artifacts.sort(key=lambda t: (t[0], t[1]), reverse=True)
+    Runs under the sweep's flock, so no concurrent sweep races it."""
+    artifacts = sorted(_list_signals_artifacts(cfg["signals_dir"]), reverse=True)
     for _, _, p in artifacts[cfg["keep_n"]:]:
         try:
             p.unlink()
@@ -677,14 +686,7 @@ def run_canary(cfg, now=None):
     """Spec §6-C: a wedged pipeline must be distinguishable from a quiet day.
     Exit 1 (unit shows failed) + CRIT log + Discord ping when stale."""
     now = time.time() if now is None else now
-    mtimes = []
-    for p in cfg["signals_dir"].glob("signals-*.json"):
-        try:
-            mtimes.append(p.stat().st_mtime)
-        except FileNotFoundError:
-            # pruned by a concurrent sweep between glob and stat — a race,
-            # not staleness; skip it
-            continue
+    mtimes = [mtime for mtime, _, _ in _list_signals_artifacts(cfg["signals_dir"])]
     newest = max(mtimes, default=None)
     if newest is not None and (now - newest) <= cfg["staleness_alert_h"] * 3600:
         log(f"canary: ok (newest artifact {(now - newest) / 3600:.1f}h old)")
