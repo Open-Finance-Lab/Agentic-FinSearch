@@ -167,7 +167,7 @@ A machine-readable JSON Schema ships at `Heartbeat/schemas/signals-v1.schema.jso
   older day never outranks a newer day; `(mtime, name)` stays the
   same-day-supplemental tiebreak. Absent → newest overall.
   A date earlier than all retained artifacts → `404 {"error": "no_signals"}`;
-  a future date → the latest artifact; a malformed value → `400 {"error":
+  a future date → the latest dated artifact; a malformed value → `400 {"error":
   "bad_as_of"}`. History depth is bounded by retention (`SIGNALS_KEEP_N`,
   default 14 dated artifacts): a date older than the oldest retained artifact
   404s identically to "never produced" — callers cannot distinguish the two

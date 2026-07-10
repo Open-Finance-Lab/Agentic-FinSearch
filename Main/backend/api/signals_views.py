@@ -64,15 +64,17 @@ def _load_artifact(as_of=None):
     if not directory.is_dir():
         return None
     candidates = list(directory.glob("signals-*.json"))
-    if as_of is not None:
-        # Point-in-time: keep only artifacts whose batch date is on or before
-        # as_of. Non-dated stems (_stem_date is None) are skipped.
-        candidates = [p for p in candidates
-                      if (d := _stem_date(p)) is not None and d <= as_of]
-    if not candidates:
-        return None
     newest = None
     try:
+        if as_of is not None:
+            # Point-in-time: keep only artifacts whose batch date is on or
+            # before as_of. Non-dated stems (_stem_date is None) are skipped.
+            # Inside the try so a bad as_of argument fails closed (None ->
+            # 404), never a 500 — the module contract.
+            candidates = [p for p in candidates
+                          if (d := _stem_date(p)) is not None and d <= as_of]
+        if not candidates:
+            return None
         if as_of is None:
             newest = max(candidates, key=lambda p: (p.stat().st_mtime, p.name))
         else:
