@@ -130,6 +130,25 @@ class TestFoundation(unittest.TestCase):
         self.assertEqual(cfg["per_ticker_cap"], 3)
         self.assertEqual(cfg["watchlist"], sorted(set(ns.DEFAULT_WATCHLIST.split())))
 
+    def test_load_config_defaults_keep_n_to_14(self):
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
+            cfg = ns.load_config()
+        self.assertEqual(cfg["keep_n"], 14)
+
+    def test_load_config_honors_keep_n_override(self):
+        with unittest.mock.patch.dict(os.environ, {"SIGNALS_KEEP_N": "30"}, clear=True):
+            cfg = ns.load_config()
+        self.assertEqual(cfg["keep_n"], 30)
+
+    def test_load_config_rejects_non_positive_keep_n(self):
+        # A keep_n of 0 or negative would delete every artifact on the next
+        # sweep — fail closed at config load rather than wipe the directory.
+        for bad in ("0", "-5"):
+            with unittest.mock.patch.dict(os.environ, {"SIGNALS_KEEP_N": bad}, clear=True):
+                with self.assertRaises(SystemExit) as ctx:
+                    ns.load_config()
+            self.assertEqual(ctx.exception.code, 2)
+
     def test_signals_model_overrides_heartbeat_model(self):
         import news_signals as ns
         env = {"SIGNALS_MODEL": "better-model", "HEARTBEAT_MODEL": "worse-model"}
@@ -753,6 +772,108 @@ class TestSweep(unittest.TestCase):
         self.assertEqual(artifact["status"], "ok")
         self.assertEqual(artifact["signals"], {})
 
+    def test_sweep_prunes_to_keep_n_but_leaves_state(self):
+        # Pre-seed keep_n old artifacts, then process one fresh digest: the
+        # directory must settle at keep_n, and every state entry survives.
+        self.cfg["keep_n"] = 2
+        base = 1_700_000_000
+        for i in range(2):
+            p = self.cfg["signals_dir"] / f"signals-old-{i}.json"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("{}", encoding="utf-8")
+            os.utime(p, (base + i, base + i))
+        # seed a matching (stale) state entry that must NOT be pruned
+        self.cfg["state_path"].write_text(
+            json.dumps({"items-old.jsonl": {"processed_at": base, "status": "ok"}}),
+            encoding="utf-8")
+        write_items(self.cfg["digests"], [make_story()], name="items-2026-07-06.jsonl")
+        self.assertEqual(ns.run_sweep(self.cfg, llm=OK_LLM), 0)
+        arts = list(self.cfg["signals_dir"].glob("signals-*.json"))
+        self.assertEqual(len(arts), 2, "sweep must hold the directory at keep_n")
+        self.assertTrue((self.cfg["signals_dir"] / "signals-2026-07-06.json").exists(),
+                        "the freshly written artifact must be one of the survivors")
+        state = json.loads(self.cfg["state_path"].read_text())
+        self.assertIn("items-old.jsonl", state, "state entries must survive pruning")
+        self.assertIn("items-2026-07-06.jsonl", state)
+
+
+class TestPrune(unittest.TestCase):
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.home = Path(self._td.name)
+        self.addCleanup(self._td.cleanup)
+        self.cfg = make_cfg(self.home)
+        self.cfg["signals_dir"].mkdir(parents=True, exist_ok=True)
+
+    def _make_artifact(self, name, mtime):
+        p = self.cfg["signals_dir"] / name
+        p.write_text("{}", encoding="utf-8")
+        os.utime(p, (mtime, mtime))
+        return p
+
+    def test_prune_keeps_newest_n_by_mtime(self):
+        self.cfg["keep_n"] = 2
+        base = 1_700_000_000
+        for i in range(5):  # signals-0 oldest .. signals-4 newest
+            self._make_artifact(f"signals-{i}.json", base + i)
+        ns.prune_artifacts(self.cfg)
+        remaining = sorted(p.name for p in self.cfg["signals_dir"].glob("signals-*.json"))
+        self.assertEqual(remaining, ["signals-3.json", "signals-4.json"])
+
+    def test_prune_is_noop_when_at_or_below_cap(self):
+        self.cfg["keep_n"] = 5
+        base = 1_700_000_000
+        for i in range(3):
+            self._make_artifact(f"signals-{i}.json", base + i)
+        ns.prune_artifacts(self.cfg)
+        self.assertEqual(len(list(self.cfg["signals_dir"].glob("signals-*.json"))), 3)
+
+    def test_prune_only_touches_signal_artifacts(self):
+        self.cfg["keep_n"] = 1
+        base = 1_700_000_000
+        self._make_artifact("signals-0.json", base)
+        self._make_artifact("signals-1.json", base + 1)
+        lock = self.cfg["signals_dir"] / ".lock"
+        lock.write_text("", encoding="utf-8")
+        other = self.cfg["signals_dir"] / "signals_state.json"  # not signals-*.json
+        other.write_text("{}", encoding="utf-8")
+        ns.prune_artifacts(self.cfg)
+        self.assertTrue(lock.exists(), "the sweep .lock must never be pruned")
+        self.assertTrue(other.exists(), "non-artifact files must never be pruned")
+        self.assertTrue((self.cfg["signals_dir"] / "signals-1.json").exists())
+        self.assertFalse((self.cfg["signals_dir"] / "signals-0.json").exists())
+
+    def test_prune_survives_unlink_failure_without_raising(self):
+        self.cfg["keep_n"] = 1
+        base = 1_700_000_000
+        self._make_artifact("signals-0.json", base)
+        self._make_artifact("signals-1.json", base + 1)
+        with unittest.mock.patch("pathlib.Path.unlink",
+                                 side_effect=OSError("read-only fs")), \
+             unittest.mock.patch.object(ns, "log") as fake_log:
+            ns.prune_artifacts(self.cfg)  # must not raise
+        self.assertTrue(any("WARN" in c.args[0] for c in fake_log.call_args_list))
+
+    def test_prune_skips_file_vanishing_before_stat(self):
+        # A globbed artifact can be removed before its stat() is read (a race
+        # with an external actor; the sweep's own flock only serializes sweeps).
+        # prune must skip the vanished file, not raise, and still retain the
+        # newest keep_n — otherwise an uncaught raise would fail the sweep.
+        self.cfg["keep_n"] = 1
+        base = 1_700_000_000
+        self._make_artifact("signals-0.json", base)
+        self._make_artifact("signals-1.json", base + 1)
+        real_stat = Path.stat
+        def flaky_stat(p, *a, **k):
+            if p.name == "signals-0.json":
+                raise FileNotFoundError(p.name)
+            return real_stat(p, *a, **k)
+        with unittest.mock.patch.object(Path, "stat", flaky_stat):
+            ns.prune_artifacts(self.cfg)  # must not raise
+        # signals-0 was skipped during sorting (treated as already gone);
+        # signals-1 is the sole survivor within keep_n=1.
+        self.assertTrue((self.cfg["signals_dir"] / "signals-1.json").exists())
+
 
 import fcntl
 
@@ -833,6 +954,15 @@ class TestCanary(unittest.TestCase):
              unittest.mock.patch.object(ns, "post_discord") as post:
             self.assertEqual(ns.run_canary(self.cfg), 1)
         post.assert_not_called()
+
+    def test_canary_tolerates_artifact_pruned_mid_glob(self):
+        # A concurrent sweep can unlink an artifact between the canary's glob
+        # and its stat(). The canary must skip the vanished file, not crash.
+        fresh = self.cfg["signals_dir"] / "signals-fresh.json"
+        fresh.write_text("{}", encoding="utf-8")
+        ghost = self.cfg["signals_dir"] / "signals-ghost.json"  # never created
+        with unittest.mock.patch("pathlib.Path.glob", return_value=[ghost, fresh]):
+            self.assertEqual(ns.run_canary(self.cfg), 0)
 
 
 class TestMain(unittest.TestCase):

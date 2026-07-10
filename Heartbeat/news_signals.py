@@ -115,6 +115,12 @@ def load_config():
         log(f"ERROR HEARTBEAT_WINDOW_HOURS must be >= {WINDOW_HOURS_MIN}, "
             f"got {window_hours}")
         sys.exit(2)
+    keep_n = int(os.environ.get("SIGNALS_KEEP_N", "14"))
+    if keep_n < 1:
+        # a non-positive cap would prune every artifact on the next sweep;
+        # fail closed (exit 2 = config error, README exit-code table)
+        log(f"ERROR SIGNALS_KEEP_N must be >= 1, got {keep_n}")
+        sys.exit(2)
     return {
         "home": home,
         "digests": home / "digests",
@@ -135,6 +141,7 @@ def load_config():
         "damp_cap": float(os.environ.get("SIGNALS_DAMP_CAP", "0.7")),
         "damp_min_articles": int(os.environ.get("SIGNALS_DAMP_MIN_ARTICLES", "2")),
         "max_file_mb": int(os.environ.get("SIGNALS_MAX_FILE_MB", "10")),
+        "keep_n": keep_n,
         "staleness_alert_h": float(os.environ.get("SIGNALS_STALENESS_ALERT_H", "20")),
     }
 
@@ -568,6 +575,44 @@ def warn_alias_gaps(watchlist):
                 f"— only symbol-in-headline stories will match (spec D8)")
 
 
+def _list_signals_artifacts(signals_dir):
+    """(mtime, name, path) for every signals-*.json artifact, skipping any that
+    vanish or become unreadable between glob and stat. That race is real for
+    both callers — the lock-free canary races an in-flight prune, and even the
+    flock-held pruner can have a file removed out from under it — and it can
+    surface as FileNotFoundError or, on the droplet's rootless UID-remapped :ro
+    artifact mount, as a PermissionError; both are OSError, so catch broadly and
+    skip (matching news_heartbeat.prune_old_digests). Never raises, so no caller
+    can be failed by a listing that races a delete."""
+    out = []
+    for p in signals_dir.glob("signals-*.json"):
+        try:
+            out.append((p.stat().st_mtime, p.name, p))
+        except OSError:
+            # vanished or unreadable mid-enumeration — a race, not a
+            # retention/staleness decision; skip it
+            continue
+    return out
+
+
+def prune_artifacts(cfg):
+    """Rolling retention cap (spec 2026-07-10): keep only the newest
+    cfg["keep_n"] signals-*.json artifacts, unlink the rest. Ordered by
+    (mtime, name) descending so "most recent" matches the canary's staleness
+    notion, with name as a deterministic tiebreaker. Best-effort: a failed
+    unlink logs a WARN and is skipped — the artifacts are already durably
+    written, so cleanup failure must not fail the sweep. signals_state.json is
+    left untouched by design (deleting a state entry would invite reprocessing).
+    Runs under the sweep's flock, so no concurrent sweep races it."""
+    artifacts = sorted(_list_signals_artifacts(cfg["signals_dir"]), reverse=True)
+    for _, _, p in artifacts[cfg["keep_n"]:]:
+        try:
+            p.unlink()
+            log(f"pruned old artifact {p.name}")
+        except OSError as exc:
+            log(f"WARN could not prune {p.name}: {exc}")
+
+
 def run_sweep(cfg, now=None, llm=call_llm):
     now = time.time() if now is None else now
     state = load_state(cfg["state_path"])
@@ -594,6 +639,7 @@ def run_sweep(cfg, now=None, llm=call_llm):
         save_state_atomic(state, cfg["state_path"])  # state SECOND
         log(f"wrote {out_path.name} status={artifact['status']} "
             f"signals={len(artifact['signals'])}")
+    prune_artifacts(cfg)
     return 0
 
 
@@ -640,8 +686,7 @@ def run_canary(cfg, now=None):
     """Spec §6-C: a wedged pipeline must be distinguishable from a quiet day.
     Exit 1 (unit shows failed) + CRIT log + Discord ping when stale."""
     now = time.time() if now is None else now
-    mtimes = [p.stat().st_mtime
-              for p in cfg["signals_dir"].glob("signals-*.json")]
+    mtimes = [mtime for mtime, _, _ in _list_signals_artifacts(cfg["signals_dir"])]
     newest = max(mtimes, default=None)
     if newest is not None and (now - newest) <= cfg["staleness_alert_h"] * 3600:
         log(f"canary: ok (newest artifact {(now - newest) / 3600:.1f}h old)")
