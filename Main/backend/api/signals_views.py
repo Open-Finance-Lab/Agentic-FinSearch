@@ -75,6 +75,8 @@ def _load_artifact(as_of=None):
                           if (d := _stem_date(p)) is not None and d <= as_of]
         if not candidates:
             return None
+        # stat() stays inside the try in both branches: a file pruned between
+        # glob() and stat() fails closed, never 500s.
         if as_of is None:
             newest = max(candidates, key=lambda p: (p.stat().st_mtime, p.name))
         else:
