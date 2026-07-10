@@ -45,7 +45,8 @@ TICKER_FEED = ("https://feeds.finance.yahoo.com/rss/2.0/headline"
 # Source: S&P Dow Jones Indices; effective 2026-06-29 (GOOGL replaced VZ).
 # Reconcile against the official index — never a hand-maintained copy — when
 # the composition changes. Parity-tested against news_heartbeat.py
-# (Heartbeat/tests/test_watchlist.py). To add/remove a ticker, edit one list.
+# (Heartbeat/tests/test_watchlist.py). To add/remove a ticker, edit this
+# list and its TICKER_ALIASES entry (news_signals.py only; test-enforced).
 DOW_30 = [
     "AAPL", "AMGN", "AMZN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS",
     "GOOGL", "GS", "HD", "HON", "IBM", "JNJ", "JPM", "KO", "MCD", "MMM",
