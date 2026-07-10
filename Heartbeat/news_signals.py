@@ -630,6 +630,7 @@ def run_sweep(cfg, now=None, llm=call_llm):
         save_state_atomic(state, cfg["state_path"])  # state SECOND
         log(f"wrote {out_path.name} status={artifact['status']} "
             f"signals={len(artifact['signals'])}")
+    prune_artifacts(cfg)
     return 0
 
 

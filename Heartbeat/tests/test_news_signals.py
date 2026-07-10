@@ -772,6 +772,30 @@ class TestSweep(unittest.TestCase):
         self.assertEqual(artifact["status"], "ok")
         self.assertEqual(artifact["signals"], {})
 
+    def test_sweep_prunes_to_keep_n_but_leaves_state(self):
+        # Pre-seed keep_n old artifacts, then process one fresh digest: the
+        # directory must settle at keep_n, and every state entry survives.
+        self.cfg["keep_n"] = 2
+        base = 1_700_000_000
+        for i in range(2):
+            p = self.cfg["signals_dir"] / f"signals-old-{i}.json"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("{}", encoding="utf-8")
+            os.utime(p, (base + i, base + i))
+        # seed a matching (stale) state entry that must NOT be pruned
+        self.cfg["state_path"].write_text(
+            json.dumps({"items-old.jsonl": {"processed_at": base, "status": "ok"}}),
+            encoding="utf-8")
+        write_items(self.cfg["digests"], [make_story()], name="items-2026-07-06.jsonl")
+        self.assertEqual(ns.run_sweep(self.cfg, llm=OK_LLM), 0)
+        arts = list(self.cfg["signals_dir"].glob("signals-*.json"))
+        self.assertEqual(len(arts), 2, "sweep must hold the directory at keep_n")
+        self.assertTrue((self.cfg["signals_dir"] / "signals-2026-07-06.json").exists(),
+                        "the freshly written artifact must be one of the survivors")
+        state = json.loads(self.cfg["state_path"].read_text())
+        self.assertIn("items-old.jsonl", state, "state entries must survive pruning")
+        self.assertIn("items-2026-07-06.jsonl", state)
+
 
 class TestPrune(unittest.TestCase):
     def setUp(self):
