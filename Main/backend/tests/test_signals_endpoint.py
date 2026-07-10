@@ -209,8 +209,8 @@ class SignalsEndpointTests(SimpleTestCase):
         # without per-request memoization one GET pays 3x glob+stat+read.
         self._write("2026-07-06", make_artifact(self._recent_iso()))
         with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC), \
-             mock.patch.object(signals_views, "_load_latest",
-                               wraps=signals_views._load_latest) as loader:
+             mock.patch.object(signals_views, "_load_artifact",
+                               wraps=signals_views._load_artifact) as loader:
             resp = self.client.get(URL)
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(loader.call_count, 1)
@@ -268,3 +268,114 @@ class SignalsEndpointTests(SimpleTestCase):
         self.assertEqual(plain.status_code, 404)
         self.assertEqual(filtered.status_code, 404)
         self.assertEqual(filtered.json(), {"error": "no_signals"})
+
+    def test_as_of_serves_that_days_artifact(self):
+        self._write("2026-07-05", make_artifact(self._recent_iso(50.0), signals={
+            "MSFT": dict(DEFAULT_SIGNAL, guid="d05")}))
+        self._write("2026-07-06", make_artifact(self._recent_iso(1.0), signals={
+            "MSFT": dict(DEFAULT_SIGNAL, guid="d06")}))
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL, {"as_of": "2026-07-05"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["signals"]["MSFT"]["guid"], "d05")
+
+    def test_as_of_falls_back_to_nearest_earlier_on_gap(self):
+        # No 07-05 artifact; point-in-time on-or-before resolves to 07-03.
+        self._write("2026-07-03", make_artifact(self._recent_iso(80.0), signals={
+            "MSFT": dict(DEFAULT_SIGNAL, guid="d03")}))
+        self._write("2026-07-06", make_artifact(self._recent_iso(1.0), signals={
+            "MSFT": dict(DEFAULT_SIGNAL, guid="d06")}))
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL, {"as_of": "2026-07-05"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["signals"]["MSFT"]["guid"], "d03")
+
+    def test_as_of_before_all_history_404s(self):
+        self._write("2026-07-06", make_artifact(self._recent_iso(1.0)))
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL, {"as_of": "2026-07-01"})
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json(), {"error": "no_signals"})
+
+    def test_malformed_as_of_400s(self):
+        self._write("2026-07-06", make_artifact(self._recent_iso(1.0)))
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            for bad in ("2026-7-5", "07-05-2026", "yesterday",
+                        "2026-13-40", "2026-07-06T00:00:00", "2026/07/06"):
+                resp = self.client.get(URL, {"as_of": bad})
+                self.assertEqual(resp.status_code, 400, bad)
+                self.assertEqual(resp.json(), {"error": "bad_as_of"}, bad)
+
+    def test_as_of_in_future_returns_latest(self):
+        self._write("2026-07-05", make_artifact(self._recent_iso(50.0), signals={
+            "MSFT": dict(DEFAULT_SIGNAL, guid="d05")}))
+        self._write("2026-07-06", make_artifact(self._recent_iso(1.0), signals={
+            "MSFT": dict(DEFAULT_SIGNAL, guid="d06")}))
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL, {"as_of": "2027-01-01"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["signals"]["MSFT"]["guid"], "d06")
+
+    def test_as_of_picks_newest_same_day_supplemental_by_mtime(self):
+        morning = make_artifact(self._recent_iso(8.0), signals={
+            "MSFT": dict(DEFAULT_SIGNAL, guid="morning")})
+        supplemental = make_artifact(self._recent_iso(0.1), signals={
+            "MSFT": dict(DEFAULT_SIGNAL, guid="supplemental")})
+        self._write("2026-07-06", morning)
+        supp = self.dir / "signals-2026-07-06-153042.json"
+        supp.write_text(json.dumps(supplemental), encoding="utf-8")
+        now = time.time()
+        os.utime(self.dir / "signals-2026-07-06.json", (now - 100, now - 100))
+        os.utime(supp, (now, now))
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL, {"as_of": "2026-07-06"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["signals"]["MSFT"]["guid"], "supplemental")
+
+    def test_as_of_prefers_newer_stem_date_over_newer_mtime(self):
+        # Backfill/reprocess skew: an older-day artifact rewritten in place
+        # gets a fresh mtime; the correctly-dated 07-05 artifact must still
+        # win under as_of=2026-07-05 (calendar order beats mtime).
+        self._write("2026-07-05", make_artifact(self._recent_iso(50.0), signals={
+            "MSFT": dict(DEFAULT_SIGNAL, guid="d05")}))
+        self._write("2026-07-03", make_artifact(self._recent_iso(80.0), signals={
+            "MSFT": dict(DEFAULT_SIGNAL, guid="d03-backfilled")}))
+        now = time.time()
+        os.utime(self.dir / "signals-2026-07-05.json", (now - 100, now - 100))
+        os.utime(self.dir / "signals-2026-07-03.json", (now, now))
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL, {"as_of": "2026-07-05"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["signals"]["MSFT"]["guid"], "d05")
+
+    def test_as_of_etag_tracks_resolved_artifact(self):
+        self._write("2026-07-05", make_artifact(self._recent_iso(50.0)))
+        self._write("2026-07-06", make_artifact(self._recent_iso(1.0)))
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            e05 = self.client.get(URL, {"as_of": "2026-07-05"})["ETag"]
+            e06 = self.client.get(URL, {"as_of": "2026-07-06"})["ETag"]
+            # A future as_of resolves to the same artifact as 07-06 -> its ETag
+            # revalidates with a 304.
+            revalidated = self.client.get(URL, {"as_of": "2027-01-01"},
+                                          HTTP_IF_NONE_MATCH=e06)
+        self.assertNotEqual(e05, e06)
+        self.assertEqual(revalidated.status_code, 304)
+
+    def test_as_of_composes_with_tickers_filter(self):
+        self._write("2026-07-05", make_artifact(self._recent_iso(50.0), signals={
+            "MSFT": dict(DEFAULT_SIGNAL),
+            "AAPL": dict(DEFAULT_SIGNAL, guid="g2")}))
+        self._write("2026-07-06", make_artifact(self._recent_iso(1.0)))
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL, {"as_of": "2026-07-05", "tickers": "msft"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(list(resp.json()["signals"]), ["MSFT"])
+
+    def test_empty_as_of_400s(self):
+        # ?as_of= (present but empty) must not silently serve the latest
+        # artifact — that is the lookahead bias as_of exists to prevent.
+        self._write("2026-07-06", make_artifact(self._recent_iso(1.0)))
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL + "?as_of=")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json(), {"error": "bad_as_of"})
