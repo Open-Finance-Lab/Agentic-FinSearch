@@ -370,3 +370,12 @@ class SignalsEndpointTests(SimpleTestCase):
             resp = self.client.get(URL, {"as_of": "2026-07-05", "tickers": "msft"})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(list(resp.json()["signals"]), ["MSFT"])
+
+    def test_empty_as_of_400s(self):
+        # ?as_of= (present but empty) must not silently serve the latest
+        # artifact — that is the lookahead bias as_of exists to prevent.
+        self._write("2026-07-06", make_artifact(self._recent_iso(1.0)))
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL + "?as_of=")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.json(), {"error": "bad_as_of"})

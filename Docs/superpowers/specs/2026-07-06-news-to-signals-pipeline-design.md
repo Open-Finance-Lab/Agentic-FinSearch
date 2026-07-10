@@ -161,10 +161,11 @@ A machine-readable JSON Schema ships at `Heartbeat/schemas/signals-v1.schema.jso
 - `?tickers=AAPL,MSFT` — optional filter on `signals` keys (case-insensitive; unknown tickers simply absent).
 - **`?as_of=YYYY-MM-DD` (optional):** returns the newest artifact whose batch
   date is on or before the given day (point-in-time — no lookahead, robust to
-  weekend/missed-run gaps). Resolution is by the artifact's filename stem date
-  — candidates order by `(stem date, mtime, name)`, so a backfilled older day
-  never outranks a newer day; `(mtime, name)` stays the same-day-supplemental
-  tiebreak. Absent → newest overall.
+  weekend/missed-run gaps). Batch dates are UTC calendar dates (the producer
+  stamps artifacts with the UTC date). Resolution is by the artifact's filename
+  stem date — candidates order by `(stem date, mtime, name)`, so a backfilled
+  older day never outranks a newer day; `(mtime, name)` stays the
+  same-day-supplemental tiebreak. Absent → newest overall.
   A date earlier than all retained artifacts → `404 {"error": "no_signals"}`;
   a future date → the latest artifact; a malformed value → `400 {"error":
   "bad_as_of"}`. History depth is bounded by retention (`SIGNALS_KEEP_N`,

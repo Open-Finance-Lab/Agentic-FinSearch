@@ -37,7 +37,7 @@ def _as_of(request: HttpRequest):
     """Parse ?as_of=YYYY-MM-DD. Returns None (param absent) or a datetime.date.
     Raises ValueError on any malformed value — the view maps that to a 400."""
     raw = request.GET.get("as_of")
-    if not raw:
+    if raw is None:
         return None
     if not _AS_OF_RE.match(raw):
         raise ValueError(f"as_of must be YYYY-MM-DD, got {raw!r}")
