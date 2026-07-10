@@ -105,11 +105,13 @@ Deploy (droplet, systemd --user, mirrors the heartbeat):
     ssh finsearch-deploy 'systemctl --user daemon-reload &&
       systemctl --user enable --now finsearch-signals.timer finsearch-signals-canary.timer'
 
-Universe change (spec D2) — set on the droplet in
-`~/fingpt/envs/.env.heartbeat` (35 tickers: heartbeat default ∪ DJIA-30;
-ATL's bogus `AMEX` slot is deliberately excluded — it can never have data):
-
-    HEARTBEAT_WATCHLIST=AAPL AMZN AXP BA BRK-B BTC-USD CAT CSCO CVX DIS GOOGL GS HD IBM INTC JNJ JPM KO MA MCD META MMM MRK MSFT NKE NVDA PFE PG TRV TSLA UNH V WBA WMT XOM
+Universe (spec 2026-07-10) — the watchlist is defined **in code** as
+`DOW_30 ∪ WATCHLIST_EXTRAS` (34 tickers) in `news_signals.py` and
+`news_heartbeat.py` (parity-tested in `tests/test_watchlist.py`). The droplet
+does **not** set `HEARTBEAT_WATCHLIST`; the code default drives it, so changing
+the universe is a one-line edit + a normal deploy. `HEARTBEAT_WATCHLIST` remains
+an optional emergency override (space-separated) if you must hot-patch without a
+deploy.
 
 Staging checklist (run once at deploy time, spec §9):
 1. Drop two items files back-to-back; `systemctl --user start finsearch-signals.service`;
