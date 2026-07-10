@@ -115,6 +115,12 @@ def load_config():
         log(f"ERROR HEARTBEAT_WINDOW_HOURS must be >= {WINDOW_HOURS_MIN}, "
             f"got {window_hours}")
         sys.exit(2)
+    keep_n = int(os.environ.get("SIGNALS_KEEP_N", "14"))
+    if keep_n < 1:
+        # a non-positive cap would prune every artifact on the next sweep;
+        # fail closed (exit 2 = config error, README exit-code table)
+        log(f"ERROR SIGNALS_KEEP_N must be >= 1, got {keep_n}")
+        sys.exit(2)
     return {
         "home": home,
         "digests": home / "digests",
@@ -135,6 +141,7 @@ def load_config():
         "damp_cap": float(os.environ.get("SIGNALS_DAMP_CAP", "0.7")),
         "damp_min_articles": int(os.environ.get("SIGNALS_DAMP_MIN_ARTICLES", "2")),
         "max_file_mb": int(os.environ.get("SIGNALS_MAX_FILE_MB", "10")),
+        "keep_n": keep_n,
         "staleness_alert_h": float(os.environ.get("SIGNALS_STALENESS_ALERT_H", "20")),
     }
 

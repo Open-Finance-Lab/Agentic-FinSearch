@@ -130,6 +130,25 @@ class TestFoundation(unittest.TestCase):
         self.assertEqual(cfg["per_ticker_cap"], 3)
         self.assertEqual(cfg["watchlist"], sorted(set(ns.DEFAULT_WATCHLIST.split())))
 
+    def test_load_config_defaults_keep_n_to_14(self):
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
+            cfg = ns.load_config()
+        self.assertEqual(cfg["keep_n"], 14)
+
+    def test_load_config_honors_keep_n_override(self):
+        with unittest.mock.patch.dict(os.environ, {"SIGNALS_KEEP_N": "30"}, clear=True):
+            cfg = ns.load_config()
+        self.assertEqual(cfg["keep_n"], 30)
+
+    def test_load_config_rejects_non_positive_keep_n(self):
+        # A keep_n of 0 or negative would delete every artifact on the next
+        # sweep — fail closed at config load rather than wipe the directory.
+        for bad in ("0", "-5"):
+            with unittest.mock.patch.dict(os.environ, {"SIGNALS_KEEP_N": bad}, clear=True):
+                with self.assertRaises(SystemExit) as ctx:
+                    ns.load_config()
+            self.assertEqual(ctx.exception.code, 2)
+
     def test_signals_model_overrides_heartbeat_model(self):
         import news_signals as ns
         env = {"SIGNALS_MODEL": "better-model", "HEARTBEAT_MODEL": "worse-model"}
