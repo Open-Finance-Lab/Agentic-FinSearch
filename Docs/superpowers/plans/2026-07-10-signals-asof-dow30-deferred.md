@@ -29,3 +29,19 @@ Deferred-items log for the 2026-07-10 plan pair (`2026-07-10-signals-asof-endpoi
 - **ETag excludes the resolved as_of date:** REFUTED as a defect — `source_items` structurally embeds the batch stem (producer `news_signals.py:626-627` derives the artifact filename from the same string), so distinct days cannot collide. Optional defense-in-depth (fold `newest.name` into the ETag) noted, not needed.
 - **Non-dated stems excluded under `as_of` but not under no-param:** intentional per plan; unreachable from the producer (all stems date-prefixed); §4.4 now says "latest **dated** artifact".
 - **Test `os.utime` skew boilerplate ×3:** style nit; a `_touch()` helper if the convention ever changes.
+
+### §PR-C.1 — ATL: differently-named Dow-ish copies remain (out of guard scope)
+
+**Status: deferred 2026-07-11 in AgenticTrading#91 (defer rule D1 — modules untouched by the PR; plan-scoped out per spec D4)**
+
+**What:** `DJIA_SYMBOLS` in `dashboard/backend/domain/backtesting/baselines/paper.py:28` and `dashboard/scripts/backtest.py:55`, the list in `dashboard/scripts/alpaca_trader_with_committee.py:33-40` (carries never-members NFLX/TSLA), and the frontend `djia` preset in `dashboard/frontend/app.js:1959` (GE/INTC). All pre-existing and already divergent from the OLD list; the new AST guard covers the `DJIA_30` name only. Also noted: in-flight runs live across the deploy keep their stored symbol allowlist while bar-fetching switches to the new universe; and stored leaderboard baselines need `refresh_leaderboard_baselines.py` re-run post-merge.
+
+**Next-session entry point:** after #91 merges — grep `DJIA_SYMBOLS|djia` in ATL, reconcile or explicitly label each copy, extend the guard; run `dashboard/scripts/refresh_leaderboard_baselines.py`. Effort: ~2h.
+
+### §PR-C.2 — ATL: 3 pre-existing route-contract test failures on origin/main
+
+**Status: deferred 2026-07-11 (defer rule D1 — pre-existing on main, unrelated to the universe change)**
+
+**What:** `test_backtests_router_contract`, `test_full_route_contract_unchanged`, `test_agent_router_route_contract_unchanged` fail identically on untouched origin/main (baseline 3 failed/865 passed) and on the PR head (3 failed/869 passed).
+
+**Next-session entry point:** ATL repo, run the three tests; they assert route contracts that drifted upstream. Effort: unknown; belongs to ATL maintainers.
