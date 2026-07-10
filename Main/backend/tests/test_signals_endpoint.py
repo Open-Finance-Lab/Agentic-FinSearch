@@ -209,8 +209,8 @@ class SignalsEndpointTests(SimpleTestCase):
         # without per-request memoization one GET pays 3x glob+stat+read.
         self._write("2026-07-06", make_artifact(self._recent_iso()))
         with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC), \
-             mock.patch.object(signals_views, "_load_latest",
-                               wraps=signals_views._load_latest) as loader:
+             mock.patch.object(signals_views, "_load_artifact",
+                               wraps=signals_views._load_artifact) as loader:
             resp = self.client.get(URL)
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(loader.call_count, 1)

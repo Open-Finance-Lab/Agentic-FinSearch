@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 _PUBLIC_STRIP = ("generator", "model", "prompt_version")
 
 
-def _load_latest():
+def _load_artifact():
     configured = getattr(settings, "SIGNALS_DIR", "")
     if not configured:
         return None
@@ -66,7 +66,7 @@ def _get_artifact(request: HttpRequest):
     """One disk load per request: @condition calls _etag and _last_modified
     before the view body runs, and all three need the artifact."""
     if not hasattr(request, "_signals_artifact"):
-        request._signals_artifact = _load_latest()
+        request._signals_artifact = _load_artifact()
     return request._signals_artifact
 
 
