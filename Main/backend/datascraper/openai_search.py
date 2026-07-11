@@ -790,44 +790,29 @@ def create_responses_api_search(
     if async_client is None:
         raise RuntimeError("OPENAI_API_KEY is not configured; cannot execute OpenAI search.")
 
+    # Guard before building the coroutine: asyncio.run would raise the same
+    # error but abandon its argument (RuntimeWarning: coroutine never
+    # awaited). Callers already inside a loop must await the async API.
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            task = asyncio.create_task(
-                create_responses_api_search_async(
-                    user_query,
-                    message_history,
-                    model,
-                    preferred_links,
-                    stream=False,
-                    user_timezone=user_timezone,
-                    user_time=user_time
-                )
-            )
-            return asyncio.run_coroutine_threadsafe(task, loop).result()
-        return asyncio.run(
-            create_responses_api_search_async(
-                user_query,
-                message_history,
-                model,
-                preferred_links,
-                stream=False,
-                user_timezone=user_timezone,
-                user_time=user_time
-            )
-        )
+        asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(
-            create_responses_api_search_async(
-                user_query,
-                message_history,
-                model,
-                preferred_links,
-                stream=False,
-                user_timezone=user_timezone,
-                user_time=user_time
-            )
+        pass
+    else:
+        raise RuntimeError(
+            "create_responses_api_search() cannot be called from a running "
+            "event loop — await create_responses_api_search_async() instead."
         )
+    return asyncio.run(
+        create_responses_api_search_async(
+            user_query,
+            message_history,
+            model,
+            preferred_links,
+            stream=False,
+            user_timezone=user_timezone,
+            user_time=user_time
+        )
+    )
 
 
 def format_sources_for_frontend(

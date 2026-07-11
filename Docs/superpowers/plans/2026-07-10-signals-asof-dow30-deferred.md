@@ -32,7 +32,7 @@ Deferred-items log for the 2026-07-10 plan pair (`2026-07-10-signals-asof-endpoi
 
 ### §PR-A.4 — Two remaining get_event_loop call sites with get-or-create semantics
 
-**Status: deferred 2026-07-11 (found during §PR-A.2 execution; neither warns in the current suite)**
+**Status: RESOLVED 2026-07-11 — intent-split per site, branch `fix/event-loop-hygiene`. `mcp_manager.py:73` runs inside a coroutine, so the get-or-create semantics never engaged: it borrows the running loop (`get_running_loop()`) for `run_async_from_sync`'s cross-thread bridge. `openai_search.py:794`'s sync wrapper collapsed to guard + `asyncio.run()`: both reachable paths already ended in `asyncio.run` (Django WSGI worker threads have no loop), and the `is_running()` branch was broken-by-construction — `run_coroutine_threadsafe` rejects a Task with TypeError, and `.result()` from the loop's own thread would deadlock. The guard raises before building the coroutine so misuse from async context gets a clear RuntimeError with no abandoned-coroutine RuntimeWarning. AST sentinel (`tests/test_event_loop_hygiene.py`) pins zero `get_event_loop` call sites across backend runtime code — the 3.14-readiness criterion — plus behavior pins for both replacements.**
 
 **What:** `Main/backend/datascraper/openai_search.py:794` and `Main/backend/mcp_client/mcp_manager.py:73` still call `asyncio.get_event_loop()`. Unlike the fixed sites, these *rely* on get-or-create semantics (`mcp_manager` stores `self._loop` for later use), so a mechanical `get_running_loop()` swap could change behavior; each needs its own intent analysis. Python 3.14 makes the implicit creation an error, so these must be revisited before any 3.14 upgrade.
 

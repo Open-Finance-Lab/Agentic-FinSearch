@@ -70,7 +70,10 @@ class MCPClientManager:
 
         self._log("[MCP DEBUG] Starting MCP server connection loop...")
 
-        self._loop = asyncio.get_event_loop()
+        # Captured for run_async_from_sync's cross-thread submissions; must
+        # be the loop this coroutine (and _run_servers) runs on, so borrow
+        # the running loop — never a policy get-or-create.
+        self._loop = asyncio.get_running_loop()
 
         self._stop_event.clear()
         self._servers_ready.clear()
