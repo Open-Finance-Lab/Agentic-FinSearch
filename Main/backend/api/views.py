@@ -565,9 +565,11 @@ def chat_response_stream(request: HttpRequest) -> StreamingHttpResponse:
                 # loop is ever *running* in this sync streaming path, and
                 # get_event_loop()'s only extra behavior was auto-creating a
                 # throwaway loop (with a DeprecationWarning) merely to be
-                # saved and restored. Nothing in this backend sets a
-                # not-running loop on worker threads, so restoring None
-                # (= unset) is the correct, Python-3.14-forward binding.
+                # saved and restored. The only not-running bindings a worker
+                # thread can carry here are *closed* loops (datascraper's
+                # sync wrappers close theirs without unsetting), so restoring
+                # None (= unset) never discards a usable binding — the
+                # correct, Python-3.14-forward behavior.
                 try:
                     previous_loop = asyncio.get_running_loop()
                 except RuntimeError:
@@ -755,9 +757,11 @@ def adv_response_stream(request: HttpRequest) -> StreamingHttpResponse:
                 # loop is ever *running* in this sync streaming path, and
                 # get_event_loop()'s only extra behavior was auto-creating a
                 # throwaway loop (with a DeprecationWarning) merely to be
-                # saved and restored. Nothing in this backend sets a
-                # not-running loop on worker threads, so restoring None
-                # (= unset) is the correct, Python-3.14-forward binding.
+                # saved and restored. The only not-running bindings a worker
+                # thread can carry here are *closed* loops (datascraper's
+                # sync wrappers close theirs without unsetting), so restoring
+                # None (= unset) never discards a usable binding — the
+                # correct, Python-3.14-forward behavior.
                 try:
                     previous_loop = asyncio.get_running_loop()
                 except RuntimeError:
