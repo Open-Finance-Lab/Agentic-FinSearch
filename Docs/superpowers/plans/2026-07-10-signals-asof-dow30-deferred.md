@@ -10,7 +10,15 @@ Deferred-items log for the 2026-07-10 plan pair (`2026-07-10-signals-asof-endpoi
 
 **Why deferred:** D1 — the producer is untouched by PR #340 (`git diff origin/main...feat/signals-asof -- Heartbeat/` was empty); the design spec deliberately scoped retention out (spec §"backfilled/reprocessed" note). Pre-existing property of PR #339.
 
-**Next-session entry point:** `Heartbeat/news_signals.py:607` — align the prune sort with `(stem_date, mtime, name)` (mirroring `Main/backend/api/signals_views.py:_load_artifact`), or document mtime-based retention in the §4.4 contract. Effort: ~1h incl. a regression test.
+**Resolution (2026-07-11):** option (a) taken — `prune_artifacts` now sorts by `(stem_date, mtime, name)` via a producer-side `_stem_date` twin (name-string input); 3 `TestPrune` additions; VERSION `2026-07-11.1` + fixture regen; §4.4 retention sentence amended. The canary's staleness notion stays pure-mtime by design.
+
+### §PR-A.3 — Pre-existing ResourceWarning: unclosed `.lock` file in heartbeat suite
+
+**Status: deferred 2026-07-11 (found during §PR-A.1 execution; pre-existing on main, verified via `git stash` A/B run)**
+
+**What:** `TestMain.test_held_lock_exits_three` emits 3× `ResourceWarning: unclosed file ...signals/.lock` in the full heartbeat suite run. Unrelated to the §PR-A.1 change; breaks pristine-output discipline the same way §PR-A.2 did for the backend suite.
+
+**Next-session entry point:** `Heartbeat/tests/test_news_signals.py` (`TestMain.test_held_lock_exits_three`) — close or context-manage the lock file handle the test (or the code path it exercises) leaves open. Effort: ~15 min.
 
 ### §PR-A.2 — Flaky pre-existing DeprecationWarning in test output
 
