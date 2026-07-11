@@ -14,7 +14,7 @@ Deferred-items log for the 2026-07-10 plan pair (`2026-07-10-signals-asof-endpoi
 
 ### §PR-A.2 — Flaky pre-existing DeprecationWarning in test output
 
-**Status: deferred 2026-07-11 in PR #340 (defer rule D1 — unrelated module untouched by the PR)**
+**Status: RESOLVED 2026-07-11 — `get_running_loop()` with quiet-zero fallback, branch `fix/resource-monitor-event-loop`.**
 
 **What:** `Main/backend/api/utils/resource_monitor.py:63` — `asyncio.get_event_loop()` raises `DeprecationWarning: There is no current event loop` during `test_artifact_loaded_from_disk_once_per_request` in some runs (nondeterministic; also the lone warning in the 675-test full-suite run). Breaks pristine-output discipline.
 

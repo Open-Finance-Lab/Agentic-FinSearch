@@ -1,4 +1,5 @@
 """Tests for enhanced ResourceSnapshot with USS and GC stats."""
+import os
 import pytest
 
 
@@ -63,3 +64,27 @@ def test_to_dict_includes_new_fields():
     assert 'uss_mb' in d
     assert 'gc_counts' in d
     assert 'gc_uncollectable' in d
+
+
+# ── asyncio task count tests (§PR-A.2) ─────────────────────────────
+
+def test_asyncio_task_count_sync_context_is_quiet_zero(recwarn):
+    """§PR-A.2 regression: asyncio.get_event_loop() in a thread with no set
+    loop emitted 'DeprecationWarning: There is no current event loop'
+    (nondeterministically — it depends on whether an earlier test left a
+    loop set). get_running_loop() never warns: no running loop -> 0."""
+    from api.utils.resource_monitor import ResourceSnapshot
+    snap = ResourceSnapshot.__new__(ResourceSnapshot)
+    snap.pid = os.getpid()
+    assert snap._get_asyncio_task_count() == 0
+    assert [w for w in recwarn.list
+            if issubclass(w.category, DeprecationWarning)] == []
+
+
+async def test_asyncio_task_count_inside_running_loop_counts_current_task():
+    """The happy path still counts tasks on the running loop (at least the
+    task executing this test)."""
+    from api.utils.resource_monitor import ResourceSnapshot
+    snap = ResourceSnapshot.__new__(ResourceSnapshot)
+    snap.pid = os.getpid()
+    assert snap._get_asyncio_task_count() >= 1
