@@ -169,8 +169,11 @@ A machine-readable JSON Schema ships at `Heartbeat/schemas/signals-v1.schema.jso
   A date earlier than all retained artifacts → `404 {"error": "no_signals"}`;
   a future date → the latest dated artifact; a malformed value → `400 {"error":
   "bad_as_of"}`. History depth is bounded by retention (`SIGNALS_KEEP_N`,
-  default 14 dated artifacts): a date older than the oldest retained artifact
-  404s identically to "never produced" — callers cannot distinguish the two
+  default 14 dated artifacts; since 2026-07-11 the producer prunes by the
+  same `(stem date, mtime, name)` order as resolution, so a backfilled older
+  day can never evict a calendar-newer artifact from the window): a date
+  older than the oldest retained artifact 404s identically to "never
+  produced" — callers cannot distinguish the two
   from the response alone. The per-date ticker set is whatever the watchlist
   was when that artifact was produced — it can change across the retained
   window (e.g. a watchlist deploy). Callers detect a gap by comparing the

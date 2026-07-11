@@ -21,10 +21,10 @@ import time
 import unicodedata
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
-VERSION = "2026-07-10.1"
+VERSION = "2026-07-11.1"
 SCHEMA_VERSION = 1
 PROMPT_VERSION = 1
 
@@ -608,16 +608,39 @@ def _list_signals_artifacts(signals_dir):
     return out
 
 
+def _stem_date(name):
+    """The leading YYYY-MM-DD of a signals-<...>.json filename, or None for a
+    non-dated stem. Mirrors Main/backend/api/signals_views.py:_stem_date
+    (which takes a Path) so retention ranks artifacts exactly the way the
+    read path resolves ?as_of."""
+    head = name[len("signals-"):len("signals-") + 10]
+    try:
+        return date.fromisoformat(head)
+    except ValueError:
+        return None
+
+
 def prune_artifacts(cfg):
     """Rolling retention cap (spec 2026-07-10): keep only the newest
     cfg["keep_n"] signals-*.json artifacts, unlink the rest. Ordered by
-    (mtime, name) descending so "most recent" matches the canary's staleness
-    notion, with name as a deterministic tiebreaker. Best-effort: a failed
-    unlink logs a WARN and is skipped — the artifacts are already durably
-    written, so cleanup failure must not fail the sweep. signals_state.json is
-    left untouched by design (deleting a state entry would invite reprocessing).
-    Runs under the sweep's flock, so no concurrent sweep races it."""
-    artifacts = sorted(_list_signals_artifacts(cfg["signals_dir"]), reverse=True)
+    (stem date, mtime, name) descending — calendar date first, mirroring the
+    read path's ?as_of selection (signals_views._load_artifact) — so an older
+    day rewritten in place with a fresh mtime (state-file surgery,
+    crash-recovery reprocessing) can never evict a calendar-newer artifact
+    from the retention window (deferred item §PR-A.1). (mtime, name) stays
+    the same-day-supplemental tiebreak; non-dated stems (unreachable from
+    this producer) rank oldest and are pruned first. The canary's staleness
+    notion stays pure-mtime — staleness is about write recency, retention
+    about calendar coverage. Best-effort: a failed unlink logs a WARN and is
+    skipped — the artifacts are already durably written, so cleanup failure
+    must not fail the sweep. signals_state.json is left untouched by design
+    (deleting a state entry would invite reprocessing). Runs under the
+    sweep's flock, so no concurrent sweep races it."""
+    artifacts = sorted(
+        _list_signals_artifacts(cfg["signals_dir"]),
+        key=lambda t: (_stem_date(t[1]) or date.min, t[0], t[1]),
+        reverse=True,
+    )
     for _, _, p in artifacts[cfg["keep_n"]:]:
         try:
             p.unlink()

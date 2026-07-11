@@ -872,6 +872,46 @@ class TestPrune(unittest.TestCase):
         # signals-1 is the sole survivor within keep_n=1.
         self.assertTrue((self.cfg["signals_dir"] / "signals-1.json").exists())
 
+    def test_prune_is_calendar_aware_backfill_cannot_evict_newer_day(self):
+        # §PR-A.1 regression: an old day's artifact rewritten in place
+        # (state-file surgery / crash-recovery reprocessing -> fresh mtime)
+        # must not outrank calendar-newer artifacts at prune time; otherwise
+        # ?as_of=<evicted day> 404s inside the nominal retention window.
+        self.cfg["keep_n"] = 2
+        base = 1_700_000_000
+        self._make_artifact("signals-2026-07-08.json", base + 1)
+        self._make_artifact("signals-2026-07-09.json", base + 2)
+        # oldest calendar day, but backfilled -> newest mtime
+        self._make_artifact("signals-2026-07-07.json", base + 99)
+        ns.prune_artifacts(self.cfg)
+        remaining = sorted(p.name for p in self.cfg["signals_dir"].glob("signals-*.json"))
+        self.assertEqual(
+            remaining, ["signals-2026-07-08.json", "signals-2026-07-09.json"])
+
+    def test_prune_non_dated_stems_rank_oldest(self):
+        # Unreachable from this producer (all stems are date-prefixed), but a
+        # hand-placed non-dated stem must not crash the sort and must rank
+        # oldest (pruned first) regardless of mtime — mirroring the read
+        # path's "latest dated artifact" contract (spec §4.4).
+        self.cfg["keep_n"] = 1
+        base = 1_700_000_000
+        self._make_artifact("signals-2026-07-09.json", base)
+        self._make_artifact("signals-manual.json", base + 99)
+        ns.prune_artifacts(self.cfg)
+        remaining = [p.name for p in self.cfg["signals_dir"].glob("signals-*.json")]
+        self.assertEqual(remaining, ["signals-2026-07-09.json"])
+
+    def test_prune_same_day_supplementals_tiebreak_by_mtime(self):
+        # Pin (passes before and after): same stem date falls back to mtime,
+        # matching the read path's same-day-supplemental tiebreak.
+        self.cfg["keep_n"] = 1
+        base = 1_700_000_000
+        self._make_artifact("signals-2026-07-09.json", base + 5)
+        self._make_artifact("signals-2026-07-09-supplemental.json", base + 9)
+        ns.prune_artifacts(self.cfg)
+        remaining = [p.name for p in self.cfg["signals_dir"].glob("signals-*.json")]
+        self.assertEqual(remaining, ["signals-2026-07-09-supplemental.json"])
+
 
 import fcntl
 
