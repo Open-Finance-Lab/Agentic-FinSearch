@@ -26,7 +26,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "2026-06-10.5"
+VERSION = "2026-07-11.1"
 
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -816,92 +816,94 @@ def main(argv=None):
     state_path = home / "state.json"
 
     import fcntl
-    lock_handle = (home / ".lock").open("w")
-    try:
-        fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        log("ERROR another heartbeat run is already in progress — exiting")
-        return 3
-
-    now = time.time()
-    date = _utc_date(now)
-    log(f"heartbeat v{VERSION} start (dry_run={dry_run}, "
-        f"watchlist={' '.join(watchlist)})")
-
-    state = {}
-    if state_path.exists():
+    # Closing the handle releases the flock, so the with-block must span
+    # the whole beat; the lock is held until main() returns.
+    with (home / ".lock").open("w") as lock_handle:
         try:
-            state = json.loads(state_path.read_text())
-        except json.JSONDecodeError:
-            log("WARN state.json unreadable — starting fresh")
+            fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            log("ERROR another heartbeat run is already in progress — exiting")
+            return 3
 
-    story_lists = fetch_all(watchlist)
-    if not any(story_lists):
-        # all feeds dead ≠ no news: fail loudly so systemd records a failure
-        # (e.g. the Persistent catch-up beat firing before the network is up)
-        log("ERROR every feed failed or returned nothing — aborting beat")
-        return 2
-    merged = merge_stories(story_lists)
-    log(f"merged: {len(merged)} unique stories")
-    fresh = filter_window(merged, now=now, hours=hours, seen=state)
-    log(f"in window and unseen: {len(fresh)}")
-    if not fresh:
-        log("nothing new — no digest today")
+        now = time.time()
+        date = _utc_date(now)
+        log(f"heartbeat v{VERSION} start (dry_run={dry_run}, "
+            f"watchlist={' '.join(watchlist)})")
+
+        state = {}
+        if state_path.exists():
+            try:
+                state = json.loads(state_path.read_text())
+            except json.JSONDecodeError:
+                log("WARN state.json unreadable — starting fresh")
+
+        story_lists = fetch_all(watchlist)
+        if not any(story_lists):
+            # all feeds dead ≠ no news: fail loudly so systemd records a failure
+            # (e.g. the Persistent catch-up beat firing before the network is up)
+            log("ERROR every feed failed or returned nothing — aborting beat")
+            return 2
+        merged = merge_stories(story_lists)
+        log(f"merged: {len(merged)} unique stories")
+        fresh = filter_window(merged, now=now, hours=hours, seen=state)
+        log(f"in window and unseen: {len(fresh)}")
+        if not fresh:
+            log("nothing new — no digest today")
+            return 0
+
+        ranked = rank_stories(fresh, watchlist=set(watchlist), now=now)
+        ranked = collapse_near_dups(ranked)
+        candidates = ranked[:CANDIDATE_CAP]
+        # enrich only stories that can reach the digest; the slice shares dicts
+        # with `ranked`, so the jsonl log still sees the enriched text
+        enrich_descriptions(candidates)
+
+        digest = None
+        if api_key:
+            log(f"summarizing {len(candidates)} candidates via {model}")
+            digest = llm_digest(candidates, api_key, model, base_url, now)
+        else:
+            log("no OPENAI_API_KEY — using extractive digest")
+        if digest is None:
+            digest = extractive_digest(candidates, now=now)
+
+        idx = {s["guid"]: s for s in ranked}
+        markdown = render_markdown(digest, idx, now=now)
+        stem = date
+        if (digests / f"digest-{date}.md").exists():
+            # a second same-day beat must never clobber the morning digest
+            suffix = datetime.fromtimestamp(now, timezone.utc).strftime("%H%M%S")
+            stem = f"{date}-{suffix}"
+            log(f"WARN second beat today — writing supplemental digest-{stem}.md")
+        md_path = digests / f"digest-{stem}.md"
+        jsonl_path = digests / f"items-{stem}.jsonl"
+        md_path.write_text(markdown, encoding="utf-8")
+        write_jsonl_atomic(jsonl_path, ranked)
+        log(f"digest written: {md_path}")
+        prune_old_digests(digests, now)
+
+        if dry_run:
+            log("dry run — state untouched, skipping Discord post")
+            return 0
+
+        # persist state atomically BEFORE delivery: a Discord outage must not
+        # cause tomorrow's beat to double-post today's stories
+        for guid in compute_seen_updates(merged, fresh, now, hours):
+            state.setdefault(guid, now)
+        tmp_path = state_path.with_suffix(".json.tmp")
+        tmp_path.write_text(json.dumps(prune_state(state, now)))
+        os.replace(tmp_path, state_path)
+
+        if token and channel_id:
+            try:
+                post_discord(discord_messages(digest, idx), token, channel_id)
+            except (urllib.error.URLError, OSError) as exc:
+                log(f"ERROR Discord delivery failed after retries: {exc}")
+                return 1
+        else:
+            log("WARN live mode but DISCORD_BOT_TOKEN/DISCORD_CHANNEL_ID missing")
+        log("heartbeat done")
         return 0
-
-    ranked = rank_stories(fresh, watchlist=set(watchlist), now=now)
-    ranked = collapse_near_dups(ranked)
-    candidates = ranked[:CANDIDATE_CAP]
-    # enrich only stories that can reach the digest; the slice shares dicts
-    # with `ranked`, so the jsonl log still sees the enriched text
-    enrich_descriptions(candidates)
-
-    digest = None
-    if api_key:
-        log(f"summarizing {len(candidates)} candidates via {model}")
-        digest = llm_digest(candidates, api_key, model, base_url, now)
-    else:
-        log("no OPENAI_API_KEY — using extractive digest")
-    if digest is None:
-        digest = extractive_digest(candidates, now=now)
-
-    idx = {s["guid"]: s for s in ranked}
-    markdown = render_markdown(digest, idx, now=now)
-    stem = date
-    if (digests / f"digest-{date}.md").exists():
-        # a second same-day beat must never clobber the morning digest
-        suffix = datetime.fromtimestamp(now, timezone.utc).strftime("%H%M%S")
-        stem = f"{date}-{suffix}"
-        log(f"WARN second beat today — writing supplemental digest-{stem}.md")
-    md_path = digests / f"digest-{stem}.md"
-    jsonl_path = digests / f"items-{stem}.jsonl"
-    md_path.write_text(markdown, encoding="utf-8")
-    write_jsonl_atomic(jsonl_path, ranked)
-    log(f"digest written: {md_path}")
-    prune_old_digests(digests, now)
-
-    if dry_run:
-        log("dry run — state untouched, skipping Discord post")
-        return 0
-
-    # persist state atomically BEFORE delivery: a Discord outage must not
-    # cause tomorrow's beat to double-post today's stories
-    for guid in compute_seen_updates(merged, fresh, now, hours):
-        state.setdefault(guid, now)
-    tmp_path = state_path.with_suffix(".json.tmp")
-    tmp_path.write_text(json.dumps(prune_state(state, now)))
-    os.replace(tmp_path, state_path)
-
-    if token and channel_id:
-        try:
-            post_discord(discord_messages(digest, idx), token, channel_id)
-        except (urllib.error.URLError, OSError) as exc:
-            log(f"ERROR Discord delivery failed after retries: {exc}")
-            return 1
-    else:
-        log("WARN live mode but DISCORD_BOT_TOKEN/DISCORD_CHANNEL_ID missing")
-    log("heartbeat done")
-    return 0
 
 
 if __name__ == "__main__":

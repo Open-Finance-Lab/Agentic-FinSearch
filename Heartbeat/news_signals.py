@@ -24,7 +24,7 @@ import urllib.request
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-VERSION = "2026-07-11.1"
+VERSION = "2026-07-11.2"
 SCHEMA_VERSION = 1
 PROMPT_VERSION = 1
 
@@ -761,16 +761,18 @@ def main(argv=None):
         # call in flight) read as a canary failure. CONSTRAINT: if
         # run_canary ever reads file CONTENTS, it must take the lock first.
         return run_canary(cfg)
-    lock_handle = (cfg["signals_dir"] / ".lock").open("w")
-    try:
-        fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        log("ERROR another news_signals run is already in progress — exiting")
-        return 3
-    if not cfg["api_key"]:
-        log("ERROR OPENAI_API_KEY is not set — cannot score; exiting")
-        return 2
-    return run_sweep(cfg)
+    # Closing the handle releases the flock, so the with-block must span the
+    # whole sweep; the lock is held until main() returns.
+    with (cfg["signals_dir"] / ".lock").open("w") as lock_handle:
+        try:
+            fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            log("ERROR another news_signals run is already in progress — exiting")
+            return 3
+        if not cfg["api_key"]:
+            log("ERROR OPENAI_API_KEY is not set — cannot score; exiting")
+            return 2
+        return run_sweep(cfg)
 
 
 if __name__ == "__main__":

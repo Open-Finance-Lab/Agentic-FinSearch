@@ -4,18 +4,21 @@ Fixtures under tests/fixtures/ are real captures from the 2026-06-10 droplet
 probes of live Yahoo Finance endpoints (single-line XML, both date schemas).
 """
 
+import fcntl
 import json
+import os
 import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 import urllib.error
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import news_heartbeat as nh
-from fake_http import FakeResponse, http_429
+from fake_http import FakeResponse, assert_no_resource_warnings, http_429
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 NOW = 1781100000.0  # 2026-06-10 ~04:40 UTC, shortly after fixtures were captured
@@ -645,6 +648,23 @@ class TestAtomicItemsWrite(unittest.TestCase):
             self.assertEqual([json.loads(l)["guid"] for l in lines], ["a", "b"])
             leftovers = [p.name for p in Path(td).iterdir() if p.name != path.name]
             self.assertEqual(leftovers, [], "temp file must not survive the write")
+
+
+class TestMain(unittest.TestCase):
+    def test_main_does_not_leak_lock_handle(self):
+        # main() must close its .lock handle on every exit path — flock
+        # release rides on the close, and an unclosed handle surfaces as a
+        # ResourceWarning at finalization, breaking pristine suite output.
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        home = Path(td.name)
+        holder = (home / ".lock").open("w")
+        self.addCleanup(holder.close)
+        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with unittest.mock.patch.dict(
+                os.environ, {"HEARTBEAT_HOME": str(home)}, clear=True):
+            with assert_no_resource_warnings(self):
+                self.assertEqual(nh.main([]), 3)
 
 
 if __name__ == "__main__":
