@@ -28,6 +28,18 @@ def _runtime_python_files():
                 yield Path(dirpath) / name
 
 
+def _binds_get_event_loop(node):
+    # Both spellings: `<anything>.get_event_loop` (module attribute, however
+    # aliased) and `from asyncio[.events] import get_event_loop` (a bare-Name
+    # call site the Attribute match can't see, so flag the import itself).
+    if isinstance(node, ast.Attribute):
+        return node.attr == "get_event_loop"
+    if isinstance(node, ast.ImportFrom):
+        return (node.module or "").split(".")[0] == "asyncio" and any(
+            alias.name == "get_event_loop" for alias in node.names)
+    return False
+
+
 def test_no_get_event_loop_in_runtime_code():
     """Structural sentinel (§PR-A.4): asyncio.get_event_loop() must not
     return to runtime code. Its get-or-create semantics become a hard error
@@ -38,13 +50,25 @@ def test_no_get_event_loop_in_runtime_code():
     for path in _runtime_python_files():
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute) and node.attr == "get_event_loop":
+            if _binds_get_event_loop(node):
                 offenders.append(
                     f"{path.relative_to(BACKEND_DIR)}:{node.lineno}")
     assert offenders == [], (
         "get_event_loop() call sites found (implicit loop creation breaks "
         "on Python 3.14): " + ", ".join(offenders)
     )
+
+
+@pytest.mark.parametrize("snippet", [
+    "import asyncio\nloop = asyncio.get_event_loop()\n",
+    "import asyncio as aio\nloop = aio.get_event_loop()\n",
+    "from asyncio import get_event_loop\nloop = get_event_loop()\n",
+    "from asyncio.events import get_event_loop\n",
+])
+def test_sentinel_catches_every_spelling(snippet):
+    # Guards the guard: each way of reaching get_event_loop must trip the
+    # predicate, or the sentinel silently stops covering that spelling.
+    assert any(_binds_get_event_loop(n) for n in ast.walk(ast.parse(snippet)))
 
 
 async def test_connect_to_servers_captures_running_loop(tmp_path):
