@@ -560,9 +560,16 @@ def chat_response_stream(request: HttpRequest) -> StreamingHttpResponse:
                     session_id=session_id,
                 )
 
-                previous_loop = None
+                # Save the thread's loop binding to restore in the finally.
+                # get_running_loop(), not deprecated get_event_loop(): no
+                # loop is ever *running* in this sync streaming path, and
+                # get_event_loop()'s only extra behavior was auto-creating a
+                # throwaway loop (with a DeprecationWarning) merely to be
+                # saved and restored. Nothing in this backend sets a
+                # not-running loop on worker threads, so restoring None
+                # (= unset) is the correct, Python-3.14-forward binding.
                 try:
-                    previous_loop = asyncio.get_event_loop()
+                    previous_loop = asyncio.get_running_loop()
                 except RuntimeError:
                     previous_loop = None
 
@@ -743,9 +750,16 @@ def adv_response_stream(request: HttpRequest) -> StreamingHttpResponse:
                     user_time=params.get('user_time')
                 )
 
-                previous_loop = None
+                # Save the thread's loop binding to restore in the finally.
+                # get_running_loop(), not deprecated get_event_loop(): no
+                # loop is ever *running* in this sync streaming path, and
+                # get_event_loop()'s only extra behavior was auto-creating a
+                # throwaway loop (with a DeprecationWarning) merely to be
+                # saved and restored. Nothing in this backend sets a
+                # not-running loop on worker threads, so restoring None
+                # (= unset) is the correct, Python-3.14-forward binding.
                 try:
-                    previous_loop = asyncio.get_event_loop()
+                    previous_loop = asyncio.get_running_loop()
                 except RuntimeError:
                     previous_loop = None
 
