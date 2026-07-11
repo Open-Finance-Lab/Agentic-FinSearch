@@ -60,9 +60,14 @@ class ResourceSnapshot:
     def _get_asyncio_task_count(self) -> int:
         """Get count of running asyncio tasks."""
         try:
-            loop = asyncio.get_event_loop()
-            tasks = asyncio.all_tasks(loop)
-            return len(tasks)
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop in this thread (sync context) -> no tasks.
+            # asyncio.get_event_loop() here would emit DeprecationWarning
+            # ("There is no current event loop") and create a stray loop.
+            return 0
+        try:
+            return len(asyncio.all_tasks(loop))
         except Exception:
             return 0
 

@@ -22,13 +22,21 @@ Deferred-items log for the 2026-07-10 plan pair (`2026-07-10-signals-asof-endpoi
 
 ### §PR-A.2 — Flaky pre-existing DeprecationWarning in test output
 
-**Status: deferred 2026-07-11 in PR #340 (defer rule D1 — unrelated module untouched by the PR)**
+**Status: RESOLVED 2026-07-11 — `get_running_loop()` with quiet-zero fallback, branch `fix/resource-monitor-event-loop`. Extension: twin `views.py:565/748` save/restore captures fixed in the same PR; remaining call sites logged as §PR-A.4.**
 
 **What:** `Main/backend/api/utils/resource_monitor.py:63` — `asyncio.get_event_loop()` raises `DeprecationWarning: There is no current event loop` during `test_artifact_loaded_from_disk_once_per_request` in some runs (nondeterministic; also the lone warning in the 675-test full-suite run). Breaks pristine-output discipline.
 
 **Why deferred:** D1 — `resource_monitor.py` is untouched by PR #340; the triggering test predates the branch.
 
 **Next-session entry point:** `Main/backend/api/utils/resource_monitor.py:63` — replace with `asyncio.get_running_loop()` inside try/except or `asyncio.new_event_loop()` per intent. Effort: ~15 min.
+
+### §PR-A.4 — Two remaining get_event_loop call sites with get-or-create semantics
+
+**Status: deferred 2026-07-11 (found during §PR-A.2 execution; neither warns in the current suite)**
+
+**What:** `Main/backend/datascraper/openai_search.py:794` and `Main/backend/mcp_client/mcp_manager.py:73` still call `asyncio.get_event_loop()`. Unlike the fixed sites, these *rely* on get-or-create semantics (`mcp_manager` stores `self._loop` for later use), so a mechanical `get_running_loop()` swap could change behavior; each needs its own intent analysis. Python 3.14 makes the implicit creation an error, so these must be revisited before any 3.14 upgrade.
+
+**Next-session entry point:** trace how `openai_search.py:794`'s `loop` and `mcp_manager.py:73`'s `self._loop` are consumed; replace with explicit `new_event_loop()`/`asyncio.run()` ownership or a running-loop requirement per intent. Effort: ~1h.
 
 ### Triage log — reviewed and intentionally not changed (not deferrals)
 
