@@ -914,6 +914,8 @@ class TestPrune(unittest.TestCase):
 
 
 import fcntl
+import gc
+import warnings
 
 
 class TestPostDiscord(unittest.TestCase):
@@ -1031,6 +1033,23 @@ class TestMain(unittest.TestCase):
         fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
         with self._env():
             self.assertEqual(ns.main([]), 3)
+
+    def test_main_does_not_leak_lock_handle(self):
+        # main() must close its .lock handle on every exit path — flock
+        # release rides on the close, and an unclosed handle surfaces as a
+        # ResourceWarning at finalization, breaking pristine suite output.
+        (self.home / "signals").mkdir(parents=True)
+        holder = (self.home / "signals" / ".lock").open("w")
+        self.addCleanup(holder.close)
+        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with self._env():
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                self.assertEqual(ns.main([]), 3)
+                gc.collect()
+        leaks = [w for w in caught
+                 if issubclass(w.category, ResourceWarning)]
+        self.assertEqual(leaks, [])
 
     def test_canary_flag_dispatches(self):
         (self.home / "signals").mkdir(parents=True)
