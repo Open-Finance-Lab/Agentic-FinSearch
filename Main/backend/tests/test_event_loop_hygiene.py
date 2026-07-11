@@ -8,6 +8,7 @@ replacements and structurally guard against the deprecated idiom returning.
 """
 import ast
 import asyncio
+import os
 from pathlib import Path
 
 import pytest
@@ -17,10 +18,14 @@ _EXCLUDED_PARTS = {"tests", ".venv", "__pycache__", "node_modules"}
 
 
 def _runtime_python_files():
-    for path in BACKEND_DIR.rglob("*.py"):
-        if _EXCLUDED_PARTS & set(path.relative_to(BACKEND_DIR).parts):
-            continue
-        yield path
+    # os.walk so excluded trees are pruned before descent: rglob("*.py")
+    # would enumerate all ~10k files under .venv only to discard them,
+    # which costs ~a minute per run on drvfs/9p-mounted checkouts (WSL).
+    for dirpath, dirnames, filenames in os.walk(BACKEND_DIR):
+        dirnames[:] = [d for d in dirnames if d not in _EXCLUDED_PARTS]
+        for name in filenames:
+            if name.endswith(".py"):
+                yield Path(dirpath) / name
 
 
 def test_no_get_event_loop_in_runtime_code():
