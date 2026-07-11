@@ -5,7 +5,6 @@ probes of live Yahoo Finance endpoints (single-line XML, both date schemas).
 """
 
 import fcntl
-import gc
 import json
 import os
 import sys
@@ -14,13 +13,12 @@ import time
 import unittest
 import unittest.mock
 import urllib.error
-import warnings
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import news_heartbeat as nh
-from fake_http import FakeResponse, http_429
+from fake_http import FakeResponse, assert_no_resource_warnings, http_429
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 NOW = 1781100000.0  # 2026-06-10 ~04:40 UTC, shortly after fixtures were captured
@@ -665,13 +663,8 @@ class TestMain(unittest.TestCase):
         fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
         with unittest.mock.patch.dict(
                 os.environ, {"HEARTBEAT_HOME": str(home)}, clear=True):
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always")
+            with assert_no_resource_warnings(self):
                 self.assertEqual(nh.main([]), 3)
-                gc.collect()
-        leaks = [w for w in caught
-                 if issubclass(w.category, ResourceWarning)]
-        self.assertEqual(leaks, [])
 
 
 if __name__ == "__main__":

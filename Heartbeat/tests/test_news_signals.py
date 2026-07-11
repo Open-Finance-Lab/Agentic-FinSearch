@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import news_signals as ns
-from fake_http import FakeResponse, http_429
+from fake_http import FakeResponse, assert_no_resource_warnings, http_429
 
 SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "signals-v1.schema.json"
 
@@ -914,8 +914,6 @@ class TestPrune(unittest.TestCase):
 
 
 import fcntl
-import gc
-import warnings
 
 
 class TestPostDiscord(unittest.TestCase):
@@ -1045,13 +1043,8 @@ class TestMain(unittest.TestCase):
         # ResourceWarning at finalization, breaking pristine suite output.
         self._hold_lock()
         with self._env():
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always")
+            with assert_no_resource_warnings(self):
                 self.assertEqual(ns.main([]), 3)
-                gc.collect()
-        leaks = [w for w in caught
-                 if issubclass(w.category, ResourceWarning)]
-        self.assertEqual(leaks, [])
 
     def test_canary_flag_dispatches(self):
         (self.home / "signals").mkdir(parents=True)
