@@ -4,7 +4,7 @@ Deferred-items log for the 2026-07-10 plan pair (`2026-07-10-signals-asof-endpoi
 
 ### §PR-A.1 — Producer retention (`prune_artifacts`) is mtime-ordered, not calendar-aware
 
-**Status: deferred 2026-07-11 in PR #340 (defer rule D1 — unrelated module untouched by the PR)**
+**Status: RESOLVED 2026-07-11 — prune sort aligned with `(stem_date, mtime, name)` (option a), branch `fix/prune-calendar-aware`.**
 
 **What:** `Heartbeat/news_signals.py:598-613` prunes to `SIGNALS_KEEP_N` newest artifacts by raw `(mtime, name)`. After an old day's artifact is rewritten in place with a fresh mtime (state-file surgery, or crash-recovery reprocessing after extended downtime), the next prune (needs ≥15 artifacts on disk) can evict a calendar-newer artifact while keeping the backfilled older day — a `?as_of=<evicted day>` then 404s for a date inside the nominal retention window. Verified CONFIRMED but narrow: no automated path reprocesses a state-recorded items file; PR A's read path is already hardened (`(stem_date, mtime, name)` selection).
 
