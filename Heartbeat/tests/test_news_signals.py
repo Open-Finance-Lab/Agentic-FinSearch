@@ -1026,11 +1026,16 @@ class TestMain(unittest.TestCase):
         with self._env(OPENAI_API_KEY=""):
             self.assertEqual(ns.main([]), 2)
 
-    def test_held_lock_exits_three(self):
+    def _hold_lock(self):
+        # Grab the sweep lock from "another process" so main() takes the
+        # held-lock exit path.
         (self.home / "signals").mkdir(parents=True)
         holder = (self.home / "signals" / ".lock").open("w")
         self.addCleanup(holder.close)
         fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def test_held_lock_exits_three(self):
+        self._hold_lock()
         with self._env():
             self.assertEqual(ns.main([]), 3)
 
@@ -1038,10 +1043,7 @@ class TestMain(unittest.TestCase):
         # main() must close its .lock handle on every exit path — flock
         # release rides on the close, and an unclosed handle surfaces as a
         # ResourceWarning at finalization, breaking pristine suite output.
-        (self.home / "signals").mkdir(parents=True)
-        holder = (self.home / "signals" / ".lock").open("w")
-        self.addCleanup(holder.close)
-        fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self._hold_lock()
         with self._env():
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
