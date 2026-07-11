@@ -14,7 +14,7 @@ Deferred-items log for the 2026-07-10 plan pair (`2026-07-10-signals-asof-endpoi
 
 ### §PR-A.3 — Pre-existing ResourceWarning: unclosed `.lock` file in heartbeat suite
 
-**Status: deferred 2026-07-11 (found during §PR-A.1 execution; pre-existing on main, verified via `git stash` A/B run)**
+**Status: RESOLVED 2026-07-11 — `main()` context-manages the `.lock` handle, branch `fix/heartbeat-lock-resourcewarning`. The leak was in the production path, not the test: `main()` opened the handle and closed it on no exit path (all three of held-lock/missing-key/sweep leaked; finalizer batching made the warnings surface 3× inside `test_held_lock_exits_three`). The with-block spans the whole sweep so flock semantics are unchanged — the lock still guards the full run, releasing on close instead of process-exit teardown. Regression test captures warnings around the held-lock path and asserts no ResourceWarning; suite 151, warning-free. VERSION `2026-07-11.2` + fixture regen (deployed-file change; artifacts identify their generator).**
 
 **What:** `TestMain.test_held_lock_exits_three` emits 3× `ResourceWarning: unclosed file ...signals/.lock` in the full heartbeat suite run. Unrelated to the §PR-A.1 change; breaks pristine-output discipline the same way §PR-A.2 did for the backend suite.
 
