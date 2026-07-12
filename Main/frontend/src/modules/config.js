@@ -1,6 +1,6 @@
 // config.js
 
-import { buildBackendUrl, getAuthHeaders } from './backendConfig.js';
+import { buildBackendUrl, authFetch } from './backendConfig.js';
 
 // Available models - will be populated from backend
 let availableModels = [];
@@ -11,7 +11,7 @@ let selectedModel = "FinGPT";
 
 // Fetch available models from backend
 async function fetchAvailableModels() {
-    const response = await fetch(buildBackendUrl('/api/get_available_models/'), { credentials: 'include', headers: { ...getAuthHeaders() } });
+    const response = await authFetch(buildBackendUrl('/api/get_available_models/'), { method: 'GET' });
     if (!response.ok) {
         throw new Error(`Failed to fetch models from backend. HTTP error! status: ${response.status}`);
     }

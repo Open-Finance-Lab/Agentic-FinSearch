@@ -19,6 +19,19 @@ function getAuthHeaders() {
     return COARSE_GATE_KEY ? { Authorization: `Bearer ${COARSE_GATE_KEY}` } : {};
 }
 
+// Single enforced path for backend calls: every request to our own backend must
+// carry the credentialed session AND the coarse-gate bearer header, so both are
+// attached here rather than hand-spliced at each call site (where a future one
+// could silently drop either). Caller-supplied method/body/signal/headers pass
+// through untouched; the Authorization header is merged in last.
+function authFetch(url, options = {}) {
+    return fetch(url, {
+        ...options,
+        credentials: 'include',
+        headers: { ...options.headers, ...getAuthHeaders() },
+    });
+}
+
 // Hosts the extension is permitted to talk to. Overrides come from
 // window.AGENTIC_BACKEND_URL or localStorage['agenticBackendUrl']; because
 // requests are sent with credentials:'include', an unconstrained override
@@ -111,4 +124,4 @@ function buildBackendUrl(path = '/') {
     return `${baseUrl}${sanitizedPath}`;
 }
 
-export { getBackendBaseUrl, buildBackendUrl, normalizeBaseUrl, getAuthHeaders };
+export { getBackendBaseUrl, buildBackendUrl, normalizeBaseUrl, getAuthHeaders, authFetch };
