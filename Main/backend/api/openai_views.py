@@ -8,9 +8,7 @@ Provides /v1/models and /v1/chat/completions endpoints with:
 - Thinking mode with MCP tool source tracking
 """
 
-import hmac
 import json
-import os
 import time
 import uuid
 import logging

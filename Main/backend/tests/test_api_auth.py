@@ -6,7 +6,7 @@ from django.test import Client, SimpleTestCase, RequestFactory, override_setting
 from django.http import JsonResponse
 
 from api.openai_views import _authenticate_request
-from api.auth import authenticate_request, require_bearer_auth
+from api.auth import require_bearer_auth
 from tests.shared_settings import HERMETIC_REQUEST_SETTINGS
 
 
@@ -89,3 +89,13 @@ def test_signals_open_when_no_key(monkeypatch):
     monkeypatch.delenv("FINGPT_API_KEY", raising=False)
     # 404 no_signals (empty SIGNALS_DIR) proves it reached the view, not 401
     assert Client().get("/api/signals/news/").status_code in (200, 404)
+
+
+@override_settings(SIGNALS_DIR="", **HERMETIC_REQUEST_SETTINGS)
+def test_signals_accepts_valid_bearer(monkeypatch):
+    # Prod path: key set + valid Bearer header -> auth passes, request reaches
+    # the view (404 no_signals with empty SIGNALS_DIR) through real URL dispatch.
+    monkeypatch.setenv("FINGPT_API_KEY", "sekret")
+    resp = Client().get("/api/signals/news/",
+                        HTTP_AUTHORIZATION="Bearer sekret")
+    assert resp.status_code != 401
