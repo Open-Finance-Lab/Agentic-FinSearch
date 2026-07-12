@@ -71,7 +71,10 @@ override-dependencies = [
     "idna>=3.15",              # GHSA: CVE-2024-3651 fix bypass via crafted inputs
     "authlib>=1.6.12",         # GHSA: OIDC open redirect in implicit/hybrid flow
     "cryptography>=48.0.1",    # GHSA: vulnerable OpenSSL bundled in wheels (via authlib)
-    "bleach>=6.4.0",           # GHSA: formaction URI bypass + Unicode scheme sanitization gap
+    # [css] is load-bearing: overrides REPLACE nbconvert's `bleach[css]` requirement,
+    # and dropping the extra loses tinycss2 -> nbconvert crashes at import (NameError:
+    # ALLOWED_STYLES in its no-css-sanitizer fallback path), breaking the docs build.
+    "bleach[css]>=6.4.0",      # GHSA: formaction URI bypass + Unicode scheme sanitization gap
     "starlette>=1.3.1",        # GHSA: form-limit DoS, UNC SSRF, host poisoning, getattr dispatch (via mcp)
 ]
 
