@@ -9,9 +9,11 @@ Top-Level Layout
    Agentic-FinSearch/
    ├── .github/                      # CI/CD workflows
    ├── Benchmarks/                   # Benchmark documents and test results
+   ├── Concierge/                    # Discord chat adapter for the agent
    ├── Deploy/                       # Deployment configurations (Podman, Caddy)
-   ├── InternalDocs/                 # Internal documentation (strategy, architecture, QA)
    ├── Docs/                         # Sphinx documentation (this site)
+   ├── Heartbeat/                    # News→signals pipeline (heartbeat + signal builder)
+   ├── InternalDocs/                 # Internal documentation (strategy, architecture, QA)
    ├── Main/
    │   ├── backend/                  # Django backend (uv-managed)
    │   └── frontend/                 # Browser extension (bun-managed)
@@ -36,10 +38,13 @@ Backend Structure
    ├── api/                          # REST API layer
    │   ├── views.py                  # Main API endpoints
    │   ├── openai_views.py           # OpenAI-compatible API endpoints
+   │   ├── signals_views.py          # News-signals endpoint (GET /api/signals/news/)
    │   ├── middleware/               # CORS and custom middleware
    │   ├── utils/                    # API utility functions
    │   ├── apps.py                   # Django app configuration
    │   └── models.py                 # Database models
+   ├── axioms/                       # XBRL claim-validation engine (registry, engine, resolver)
+   ├── truthlayer/                   # XBRL truth layer: vendored companyfacts → DuckDB, as-of reads
    ├── datascraper/                  # Data pipeline, RAG & research
    │   ├── datascraper.py            # Web scraping orchestration
    │   ├── research_engine.py        # Multi-step research engine
@@ -57,16 +62,20 @@ Backend Structure
    │   ├── agent.py                  # Agent orchestration
    │   ├── mcp_manager.py            # MCP connection management
    │   ├── tool_wrapper.py           # Tool abstraction layer
+   │   ├── tool_policy.py            # Deny-by-default MCP tool allow-list
    │   ├── prompt_builder.py         # Prompt generation
    │   └── apps.py                   # Django app configuration
    ├── mcp_server/                   # MCP server implementations
    │   ├── yahoo_finance_server.py   # Yahoo Finance MCP server
    │   ├── handlers/                 # MCP request handler modules
    │   ├── tradingview/              # TradingView MCP server
+   │   ├── xbrl/                     # XBRL taxonomy MCP server + bundled filings
    │   ├── cache.py                  # Caching utilities
    │   ├── errors.py                 # Error definitions
    │   ├── executor.py               # Tool execution logic
    │   └── validation.py             # Input validation
+   ├── ops/                          # Operational hardening (egress firewall)
+   ├── planner/                      # Agent planning layer and skills
    ├── prompts/                      # LLM prompt templates
    │   ├── core.md                   # Core system prompt
    │   ├── default_site.md           # Default site instructions
@@ -103,6 +112,7 @@ Backend Highlights
 * ``mcp_client/`` handles Model Context Protocol client connections and agent orchestration.
 * ``mcp_server/`` contains standalone MCP server implementations (Yahoo Finance, TradingView).
 * ``prompts/`` contains Markdown prompt templates, including site-specific context prompts.
+* ``axioms/`` + ``truthlayer/`` implement the XBRL validation pipeline documented in :doc:`xbrl_validation`.
 
 
 Frontend Structure
@@ -117,12 +127,15 @@ Frontend Structure
    │   ├── modules/
    │   │   ├── api.js                # Backend API client
    │   │   ├── handlers.js           # Event handlers
+   │   │   ├── intent.js             # Prompt intent detection
    │   │   ├── helpers.js            # Utility functions
    │   │   ├── ui.js                 # UI state management
    │   │   ├── config.js             # Frontend configuration
    │   │   ├── backendConfig.js      # Backend URL settings
+   │   │   ├── claimMarks.js         # Inline XBRL verdict highlights
    │   │   ├── markdownRenderer.js   # Markdown parsing
    │   │   ├── sourcesCache.js       # Source caching logic
+   │   │   ├── sse.js                # Server-Sent-Events streaming client
    │   │   ├── layoutState.js        # Layout persistence
    │   │   ├── components/
    │   │   │   ├── chat.js           # Chat interface
@@ -138,6 +151,8 @@ Frontend Structure
    │   │       └── windows.css       # Window/modal styles
    │   ├── assets/                   # Static assets (icons, images)
    │   └── vendor/
+   │       ├── katex.min.js          # Math rendering (KaTeX)
+   │       ├── katex-auto-render.min.js
    │       └── marked.min.js         # Markdown library
    ├── dist/                         # Build output (load as extension)
    ├── node_modules/                 # bun dependencies
