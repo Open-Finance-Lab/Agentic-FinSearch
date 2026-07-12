@@ -33,6 +33,7 @@ Production system experiencing:
 
 4. **Context Manager State**
    - UnifiedContextManager + Mem0 accumulate session data
+     *(2026-07 note: Mem0 has since been removed entirely — PR #347; only UnifiedContextManager remains.)*
    - No database (signed cookies) = all state in worker memory
    - Metadata persists despite compression
 

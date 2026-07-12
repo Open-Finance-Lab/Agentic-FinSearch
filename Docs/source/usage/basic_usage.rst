@@ -31,7 +31,7 @@ The top bar of the pop up contains the following elements:
   shows the currently active mode.
 
 - **Setting Button**: Opens the settings page, and may be closed by clicking anywhere outside the settings page but
-  inside the pop up. It allows users to choose foundation models and set preferred links for Advanced search.
+  inside the pop up. It allows users to choose foundation models and set preferred links for Research mode.
 
 Main Body
 ~~~~~~~~~

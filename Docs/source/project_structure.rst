@@ -110,7 +110,7 @@ Backend Highlights
 * ``datascraper/research_engine.py`` implements the multi-step research pipeline (query decomposition, parallel execution, gap detection, synthesis).
 * ``datascraper/unified_context_manager.py`` provides session-based context tracking with JSON structure.
 * ``mcp_client/`` handles Model Context Protocol client connections and agent orchestration.
-* ``mcp_server/`` contains standalone MCP server implementations (Yahoo Finance, TradingView).
+* ``mcp_server/`` contains standalone MCP server implementations (Yahoo Finance, TradingView, XBRL Taxonomy).
 * ``prompts/`` contains Markdown prompt templates, including site-specific context prompts.
 * ``axioms/`` + ``truthlayer/`` implement the XBRL validation pipeline documented in :doc:`xbrl_validation`.
 
