@@ -35,6 +35,8 @@ Session Isolation
   gets its own conversation, and it still cannot cross to another browser.
 - **API Isolation**: OpenAI-compatible API requests with a ``user`` parameter
   get a per-user session; requests without one get a unique ephemeral
-  session.
+  session. Either way the session context is cleared at the start of every
+  request — the /v1 API is fully stateless (see :ref:`v1-statelessness`),
+  so none of the conversation memory described here carries across /v1 calls.
 - **Manual Clearing**: Use the **Clear** button to reset the current session's
   conversation history while optionally preserving scraped web content.

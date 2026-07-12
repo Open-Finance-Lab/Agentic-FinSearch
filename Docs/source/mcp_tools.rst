@@ -74,21 +74,23 @@ Ensure your ``.env`` file in ``Main/backend/`` is properly configured:
 Configuration
 -------------
 
-MCP servers are configured in ``Main/backend/mcp_server_config.json``. Each entry specifies:
+MCP servers are configured in ``Main/backend/mcp_server_config.json``. Each
+entry under the top-level ``mcpServers`` key specifies:
 
-- **transport**: ``stdio`` or ``sse``
-- **command** / **args**: The command to launch the server
-- **env**: Environment variables passed to the server process
+- **command** / **args**: The command that launches the server process
+  (all servers communicate over stdio)
+- **env**: Environment variables passed to the server process (optional)
+- **disabled**: Set to ``true`` to skip launching the server
+  (optional, defaults to ``false``)
 
 .. code-block:: json
 
    {
-     "servers": {
+     "mcpServers": {
        "yahoo-finance": {
-         "transport": "stdio",
          "command": "python",
          "args": ["-m", "mcp_server.yahoo_finance_server"],
-         "enabled": true
+         "disabled": false
        }
      }
    }
