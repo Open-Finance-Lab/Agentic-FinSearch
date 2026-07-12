@@ -1145,14 +1145,17 @@ Per FlyM1ss's decision: the 17 non-`/v1` endpoints (no auth today; rate-limit + 
 
 ## Discovered follow-ups (logged, OUT of scope)
 
-- **F-1**: backend `[dependency-groups] docs` is broken — `bleach>=6.4.0` (security override, `pyproject.toml:75`) crashes old `nbconvert` at Sphinx startup (`NameError: ALLOWED_STYLES`). Either bump `nbsphinx`/`nbconvert` in the docs group or delete the group and standardize on `requirements_sphinx.txt`.
-- **F-2**: "does NOT work on **Brave**" notes (`basic_usage.rst:8-9`, `advanced_usage.rst:8-9`) — unverifiable from code; needs a manual retest before removal.
-- **F-3**: `api_reference.rst` "Base URL … port 8000 / `https://agenticfinsearch.org:8000`" — worth confirming against the live Caddy reverse-proxy config next time we're on the droplet (deploy docs suggest Caddy fronts the backend; if it serves on 443, the examples' `:8000` is stale).
-- **F-4**: `api/views.py` has a legacy `params.get('models', 'gpt-4o-mini')` default at 4 call sites (lines 277, 377, 506, 694) — `gpt-4o-mini` is not in `MODELS_CONFIG`, so a client omitting `models` gets an unknown-model path. Harmless today (the extension always sends an explicit model), but the default should become `FinGPT`.
-- **F-5**: `mcp_tools.rst` Configuration example block (~lines 83-94, pre-existing, untouched by this plan) is wrong on three counts: top-level key `"servers"` (real: `"mcpServers"`), a `"transport"` field that doesn't exist in the real config, and `"enabled": true` (real key: `"disabled"`). Needs a FlyM1ss-coordinated docs edit.
-- **F-6**: stale/incoherent phrases outside plan-named regions (final-review Minors): `usage/basic_usage.rst:34` Setting Button "for Advanced search" → Research mode; `project_structure.rst:113` Backend Highlights `mcp_server/` bullet omits XBRL. (The `introduction.rst:10` TradingView/XBRL-taxonomy item originally logged here was fixed in-PR by the post-review pass below.)
-- **F-7**: `usage/memory_system.rst` API-Isolation bullet could cross-ref the /v1 statelessness note (per-request clear at `openai_views.py:273`). (The `api_reference.rst` ETag/Last-Modified nit originally logged here was fixed in-PR by the post-review pass below.)
-- **F-8**: `Docs/plans/2026-02-02-deployment-readiness-audit.md:35` still says "UnifiedContextManager + Mem0 accumulate session data" — dated internal audit snapshot, not user-facing; fix or annotate at leisure.
+Resolution pass 2026-07-12 (PRs #350 F-1, #351 F-4, #352 F-3/F-5/F-6/F-7/F-8). Only F-2 remains open.
+
+- **F-1** ~~backend `[dependency-groups] docs` is broken~~ — **RESOLVED, PR #350.** Root cause differed from the log's "old nbconvert" hypothesis: nbconvert was already 7.17.1, but the `[tool.uv]` override `bleach>=6.4.0` REPLACED nbconvert's `bleach[css]` requirement graph-wide, dropping the extra → no `tinycss2` → nbconvert's no-css-sanitizer fallback crashes at import (`NameError: ALLOWED_STYLES`). Fix: override becomes `bleach[css]>=6.4.0`; lock diff is tinycss2 alone. RTD was never affected (`readthedocs.yml` installs `requirements_sphinx.txt` fresh).
+- **F-2** (STILL OPEN): "does NOT work on **Brave**" notes (`basic_usage.rst:8-9`, `advanced_usage.rst:8-9`) — unverifiable from code; needs a manual retest before removal.
+- **F-3** ~~`:8000` base URL~~ — **RESOLVED, PR #352.** Verified on the droplet: Caddy terminates TLS on 443, gunicorn's 8000 is loopback-bound and firewalled (`ss -tlnp` + firewalld), so every `https://…:8000` example was unreachable. All production URLs in `api_reference.rst` dropped the port; base-URL section explains the proxy split.
+- **F-4** ~~legacy `gpt-4o-mini` default~~ — **RESOLVED, PR #351.** Fallback centralized as `models_config.DEFAULT_MODEL = "FinGPT"`; all 4 `views.py` call sites use it; `tests/test_models_config.py` drift-guards both the "default is a configured model" invariant and the call-site pattern.
+- **F-5** ~~`mcp_tools.rst` Configuration example~~ — **RESOLVED, PR #352.** `mcpServers`/`disabled` now documented; `transport` bullet removed (loader is stdio-only).
+- **F-6** ~~basic_usage Settings wording + project_structure XBRL~~ — **RESOLVED, PR #352.**
+- **F-7** ~~memory_system /v1 statelessness cross-ref~~ — **RESOLVED, PR #352.** New `v1-statelessness` label on api_reference's Behavioral Notes; API-Isolation bullet links it.
+- **F-8** ~~stale Mem0 line in 2026-02-02 audit~~ — **RESOLVED, PR #352.** Dated-snapshot annotation added (Mem0 removed in #347).
+- **F-9** (NEW, logged 2026-07-12): `datascraper/datascraper_refactored.py` is imported nowhere in the backend (checked all non-venv `*.py`) yet carries ~10 `gpt-4o-mini` signature defaults — dead-code candidate; confirm and delete at leisure.
 
 ### Post-review fix pass (2026-07-12, PR #348 review)
 
