@@ -47,7 +47,6 @@ Backend Structure
    │   ├── models_config.py          # Model provider settings
    │   ├── playwright_tools.py       # Browser automation via Playwright
    │   ├── unified_context_manager.py # Session-based context tracking
-   │   ├── mem0_context_manager.py   # Memory-based context (Mem0)
    │   ├── context_integration.py    # Context system integration
    │   ├── preferred_links_manager.py # User link preferences
    │   ├── url_tools.py              # URL utilities
