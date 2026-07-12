@@ -1,6 +1,6 @@
 // api.js
 
-import { buildBackendUrl } from './backendConfig.js';
+import { buildBackendUrl, getAuthHeaders } from './backendConfig.js';
 import { createSSEParser } from './sse.js';
 
 // Session ID management
@@ -21,6 +21,7 @@ function postWebTextToServer(textContent, currentUrl) {
         credentials: "include",
         headers: {
             "Content-Type": "application/json",
+            ...getAuthHeaders(),
         },
         body: JSON.stringify({
             textContent: textContent,
@@ -104,7 +105,7 @@ function getChatResponse(question, selectedModel, promptMode, useRAG, useMCP) {
     return fetch(buildBackendUrl(`/${endpoint}/`), {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify(buildChatRequestBody(question, selectedModel, promptMode)),
     })
         .then(response => response.json())
@@ -301,6 +302,7 @@ function getChatResponseStream(question, selectedModel, promptMode, useRAG, useM
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'text/event-stream',
+                ...getAuthHeaders(),
             },
             body: requestBody,
             signal: abortController.signal,
@@ -372,7 +374,7 @@ function getChatResponseStream(question, selectedModel, promptMode, useRAG, useM
 
 // Function to clear messages
 function clearMessages() {
-    return fetch(`${buildBackendUrl('/clear_messages/')}?use_memory=true&session_id=${currentSessionId}`, { method: "POST", credentials: "include" })
+    return fetch(`${buildBackendUrl('/clear_messages/')}?use_memory=true&session_id=${currentSessionId}`, { method: "POST", credentials: "include", headers: { ...getAuthHeaders() } })
         .then(response => {
             if (!response.ok) {
                 throw new Error('Network response was not ok');
@@ -402,7 +404,7 @@ function getSourceUrls(searchQuery, currentUrl) {
     const baseEndpoint = buildBackendUrl('/get_source_urls/');
     const requestUrl = queryString ? `${baseEndpoint}?${queryString}` : baseEndpoint;
 
-    return fetch(requestUrl, { method: "GET", credentials: "include" })
+    return fetch(requestUrl, { method: "GET", credentials: "include", headers: { ...getAuthHeaders() } })
         .then(response => response.json())
         .then(data => {
             if (data.session_id) setSessionId(data.session_id);
@@ -422,7 +424,7 @@ function logQuestion(question, button) {
     return fetch(buildBackendUrl('/log_question/'), {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
             question: String(question),
             button: String(button),
@@ -452,6 +454,7 @@ function syncPreferredLinks() {
                 credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
+                    ...getAuthHeaders(),
                 },
                 body: JSON.stringify({ urls: preferredLinks })
             })
@@ -502,6 +505,7 @@ function triggerAutoScrape(currentUrl) {
         credentials: "include",
         headers: {
             "Content-Type": "application/json",
+            ...getAuthHeaders(),
         },
         body: JSON.stringify({
             current_url: currentUrl,
@@ -530,7 +534,7 @@ function triggerAutoScrape(currentUrl) {
 function validateClaims() {
     return fetch(buildBackendUrl('/api/axioms/validate/'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         credentials: 'include',
         body: JSON.stringify({ session_id: currentSessionId }),
     })
@@ -549,6 +553,7 @@ function hasAxiomClaims() {
     return fetch(buildBackendUrl(`/api/axioms/has_claims/${params}`), {
         method: 'GET',
         credentials: 'include',
+        headers: { ...getAuthHeaders() },
     })
         .then((response) => (response.ok ? response.json() : { has_claims: false }))
         .catch(() => ({ has_claims: false }));

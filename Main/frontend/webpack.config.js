@@ -115,6 +115,11 @@ module.exports = {
         hints: "warning"
     },
     plugins: [
+        // Bake the coarse-gate API key from the build env into the bundle. Empty when
+        // FINGPT_API_KEY is unset (local/dev builds) -> getAuthHeaders() returns {}.
+        new webpack.DefinePlugin({
+            'process.env.FINGPT_API_KEY': JSON.stringify(process.env.FINGPT_API_KEY || ''),
+        }),
         new webpack.BannerPlugin({
             banner: '// @charset "UTF-8";',
             raw: true

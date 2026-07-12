@@ -1,4 +1,4 @@
-import { buildBackendUrl } from '../backendConfig.js';
+import { buildBackendUrl, getAuthHeaders } from '../backendConfig.js';
 
 export function createLinkManager() {
     // Container for the whole link manager
@@ -52,6 +52,7 @@ export function createLinkManager() {
                 credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
+                    ...getAuthHeaders(),
                 },
                 body: JSON.stringify({ urls: links })
             })
@@ -178,7 +179,8 @@ export function createLinkManager() {
 
         fetch(buildBackendUrl('/api/get_preferred_urls/'), {
             method: 'GET',
-            credentials: 'include'
+            credentials: 'include',
+            headers: { ...getAuthHeaders() }
         })
         .then(response => {
             if (!response.ok) {

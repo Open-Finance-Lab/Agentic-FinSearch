@@ -4,6 +4,21 @@
 const DEFAULT_BACKEND_BASE_URL = 'https://agenticfinsearch.org';
 let cachedBaseUrl = null;
 
+// Coarse-gate bearer key, baked at build time by the webpack DefinePlugin from
+// the build environment (process.env.FINGPT_API_KEY). Empty in local/dev builds,
+// so no Authorization header is sent and the extension works against an open dev
+// backend. A public extension bundle is EXTRACTABLE — this is a COARSE gate
+// against drive-by API abuse, NOT per-user auth (deferred to the backend login
+// system, api/identity.py). Tests/dev may override via window.FINGPT_API_KEY.
+const COARSE_GATE_KEY =
+    (typeof window !== 'undefined' && window.FINGPT_API_KEY) ||
+    process.env.FINGPT_API_KEY ||
+    '';
+
+function getAuthHeaders() {
+    return COARSE_GATE_KEY ? { Authorization: `Bearer ${COARSE_GATE_KEY}` } : {};
+}
+
 // Hosts the extension is permitted to talk to. Overrides come from
 // window.AGENTIC_BACKEND_URL or localStorage['agenticBackendUrl']; because
 // requests are sent with credentials:'include', an unconstrained override
@@ -96,4 +111,4 @@ function buildBackendUrl(path = '/') {
     return `${baseUrl}${sanitizedPath}`;
 }
 
-export { getBackendBaseUrl, buildBackendUrl, normalizeBaseUrl };
+export { getBackendBaseUrl, buildBackendUrl, normalizeBaseUrl, getAuthHeaders };
