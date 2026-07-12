@@ -157,21 +157,18 @@ For troubleshooting:
 Performance Optimization
 ------------------------
 
-Smart Context Management
-~~~~~~~~~~~~~~~~~~~~~~~~
+Context Management
+~~~~~~~~~~~~~~~~~~
 
-Agentic FinSearch includes a two-tier context management system:
-
-- **Unified Context Manager** (default): Session-based context tracking with JSON structure for fast, in-memory conversation management.
-- **Mem0 Context Manager** (optional): Production-grade long-term memory powered by **Mem0** for sessions exceeding 100,000 tokens.
-
-The active mode is configured via the ``CONTEXT_MANAGER_MODE`` environment variable (``unified`` or ``mem0``).
+Agentic FinSearch tracks each session with the **Unified Context Manager** —
+session-scoped conversation history, scraped page content, and research
+findings held in a structured JSON form. See :doc:`memory_system` for
+details.
 
 **How it works:**
 
 - **Session-Based**: The agent maintains the full conversation history for the current session.
-- **Smart Compression**: When the context exceeds **100,000 tokens**, the agent automatically extracts key facts, entities, and research findings into long-term memory.
-- **Fact Preservation**: Critical financial data, URLs, and research objectives are preserved while redundant boilerplate is discarded.
+- **Storage & Expiry**: Session state lives in the Django cache (file-based in development, Redis in production) and expires after **1 hour** of inactivity.
 - **Session Isolation**: Each browser tab/session maintains its own isolated context.
 
 .. note::
