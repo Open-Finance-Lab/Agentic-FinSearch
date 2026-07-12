@@ -37,7 +37,7 @@ def core_prompt() -> str:
 
 
 @pytest.fixture(autouse=True)
-def _hermetic_fingpt_api_key():
+def _hermetic_fingpt_api_key(monkeypatch):
     """Keep every test hermetic with respect to FINGPT_API_KEY.
 
     django.setup() above runs settings' load_dotenv(Main/backend/.env), so a key
@@ -45,12 +45,8 @@ def _hermetic_fingpt_api_key():
     now gates the extension/axiom/agent views on that key, so an ambient value
     would 401 the many pre-existing tests that invoke those views without an
     Authorization header. Clear it by default so those tests hit the dev-open
-    path; the bearer-auth tests set it explicitly via monkeypatch (which runs
-    after this fixture and therefore wins).
+    path. The bearer-auth tests set it explicitly via monkeypatch.setenv; because
+    that lands on the same MonkeyPatch instance as this delenv and the two unwind
+    together (LIFO) at teardown, the per-test setenv wins within the test.
     """
-    saved = os.environ.pop("FINGPT_API_KEY", None)
-    try:
-        yield
-    finally:
-        if saved is not None:
-            os.environ["FINGPT_API_KEY"] = saved
+    monkeypatch.delenv("FINGPT_API_KEY", raising=False)
