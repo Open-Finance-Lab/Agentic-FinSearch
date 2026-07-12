@@ -34,3 +34,23 @@ import mcp_server.xbrl.parser  # noqa: F401,E402 — populate sys.modules
 @pytest.fixture(scope="session")
 def core_prompt() -> str:
     return CORE_PROMPT_PATH.read_text(encoding="utf-8")
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_fingpt_api_key():
+    """Keep every test hermetic with respect to FINGPT_API_KEY.
+
+    django.setup() above runs settings' load_dotenv(Main/backend/.env), so a key
+    set in a developer's .env becomes a process-wide os.environ value. api.auth
+    now gates the extension/axiom/agent views on that key, so an ambient value
+    would 401 the many pre-existing tests that invoke those views without an
+    Authorization header. Clear it by default so those tests hit the dev-open
+    path; the bearer-auth tests set it explicitly via monkeypatch (which runs
+    after this fixture and therefore wins).
+    """
+    saved = os.environ.pop("FINGPT_API_KEY", None)
+    try:
+        yield
+    finally:
+        if saved is not None:
+            os.environ["FINGPT_API_KEY"] = saved
