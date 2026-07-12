@@ -11,7 +11,7 @@ Prerequisites
 
 * Python 3.12 (``uv`` downloads it automatically if missing)
 * ``uv`` (https://github.com/astral-sh/uv)
-* Node.js 18 (for rebuilding the browser extension)
+* Bun (https://bun.sh) — installs dependencies and runs the browser-extension build
 
 Install Dependencies with uv
 ----------------------------

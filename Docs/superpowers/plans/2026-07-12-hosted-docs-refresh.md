@@ -1149,3 +1149,18 @@ Per FlyM1ss's decision: the 17 non-`/v1` endpoints (no auth today; rate-limit + 
 - **F-2**: "does NOT work on **Brave**" notes (`basic_usage.rst:8-9`, `advanced_usage.rst:8-9`) — unverifiable from code; needs a manual retest before removal.
 - **F-3**: `api_reference.rst` "Base URL … port 8000 / `https://agenticfinsearch.org:8000`" — worth confirming against the live Caddy reverse-proxy config next time we're on the droplet (deploy docs suggest Caddy fronts the backend; if it serves on 443, the examples' `:8000` is stale).
 - **F-4**: `api/views.py` has a legacy `params.get('models', 'gpt-4o-mini')` default at 4 call sites (lines 277, 377, 506, 694) — `gpt-4o-mini` is not in `MODELS_CONFIG`, so a client omitting `models` gets an unknown-model path. Harmless today (the extension always sends an explicit model), but the default should become `FinGPT`.
+- **F-5**: `mcp_tools.rst` Configuration example block (~lines 83-94, pre-existing, untouched by this plan) is wrong on three counts: top-level key `"servers"` (real: `"mcpServers"`), a `"transport"` field that doesn't exist in the real config, and `"enabled": true` (real key: `"disabled"`). Needs a FlyM1ss-coordinated docs edit.
+- **F-6**: stale/incoherent phrases outside plan-named regions (final-review Minors): `usage/basic_usage.rst:34` Setting Button "for Advanced search" → Research mode; `project_structure.rst:113` Backend Highlights `mcp_server/` bullet omits XBRL. (The `introduction.rst:10` TradingView/XBRL-taxonomy item originally logged here was fixed in-PR by the post-review pass below.)
+- **F-7**: `usage/memory_system.rst` API-Isolation bullet could cross-ref the /v1 statelessness note (per-request clear at `openai_views.py:273`). (The `api_reference.rst` ETag/Last-Modified nit originally logged here was fixed in-PR by the post-review pass below.)
+- **F-8**: `Docs/plans/2026-02-02-deployment-readiness-audit.md:35` still says "UnifiedContextManager + Mem0 accumulate session data" — dated internal audit snapshot, not user-facing; fix or annotate at leisure.
+
+### Post-review fix pass (2026-07-12, PR #348 review)
+
+An 8-angle verified review of the PR diff surfaced six findings; all were fixed in-PR:
+
+1. `index.rst:28` + `updates.rst:11` — stale "three pre-loaded SEC filings (FY2023)" framing replaced with the truth-layer reality (vendored `companyfacts`, three registrants, full reported filing history, as-of-aware).
+2. `usage/advanced_usage.rst:59` — TradingView MCP bullet scoped to cryptocurrencies (crypto exchanges only), matching `mcp_tools.rst` and the 6/7 crypto-hardcoded handlers.
+3. `api_reference.rst` News Signals caching — corrected to ETag-always / `Last-Modified` unfiltered-only (closes the F-7 ETag item).
+4. `introduction.rst:10` — TradingView bullet scoped to crypto TA; XBRL Taxonomy server added (closes the F-6 introduction item).
+5. `usage/advanced_usage.rst` troubleshooting — model→env-var mapping now cross-refs the Available Models table; only the stable provider→env-var pairs are stated inline.
+6. `mcp_tools.rst` — drift-prone numeric tool counts (21/9/7/3/14) dropped; name lists kept. All five counts were verified correct at time of removal (incl. `sec-edgar-mcp` 1.0.8 via `uv.lock`).

@@ -56,8 +56,8 @@ MCP Features
 
 - **Yahoo Finance MCP**: Directly fetches real-time market data, stock prices, and company profiles via the ``yfinance`` API.
 - **SEC-EDGAR MCP**: Enables the agent to directly access SEC filings like 10-K, 10-Q, 8-K and extract financial data from them.
-- **TradingView MCP**: Fetches technical analysis indicators, oscillators, moving averages, and market screener data.
-- **Filesystem MCP**: Provides read access to local data files within the application directory.
+- **TradingView MCP**: Fetches technical analysis indicators, oscillators, moving averages, and market screener data for **cryptocurrencies** (crypto exchanges only).
+- **XBRL Taxonomy MCP**: Retrieval-then-select over the FASB US-GAAP taxonomy (``lookup_xbrl_tags``, ``validate_xbrl_tag``, ``query_xbrl_filing``) — backs Stage 1 of the :doc:`XBRL validation pipeline <../xbrl_validation>`.
 
 Deep Research Mode
 ------------------
@@ -72,7 +72,7 @@ How It Works
 3. **Gap Detection**: The ``GapDetector`` identifies any missing information and triggers follow-up searches.
 4. **Synthesis**: The ``Synthesizer`` combines all findings into a coherent, well-sourced response.
 
-To use deep research mode, click the **Advanced Ask** button or select "research" mode via the API.
+To use deep research mode, select **Research** in the mode dropdown next to the prompt box, or pass ``"mode": "research"`` via the API.
 
 .. note::
    Research mode typically takes 15-90 seconds depending on query complexity. The agent performs multiple parallel searches and synthesizes the results.
@@ -90,7 +90,7 @@ Setting Preferred URLs
 3. Add URLs of trusted financial sources
 4. Save your preferences
 
-The agent will prioritize these sources when using **Advanced Ask**.
+The agent will prioritize these sources when answering in **Research** mode.
 
 Example preferred URLs:
 
@@ -104,16 +104,15 @@ Advanced Query Techniques
 Query Modes
 ~~~~~~~~~~~
 
-**Basic Ask:**
-- Searches only the current webpage
+**Thinking mode (default):**
+- Works from the current page's scraped context and calls MCP tools for live financial data
 - Faster responses
-- Best for page-specific questions
+- Best for page-specific and targeted financial questions
 
-**Advanced Ask:**
-- Searches the open domain and uses MCP tools
-- Activates the deep research pipeline for complex queries
-- More comprehensive responses
-- Best for research and analysis
+**Research mode:**
+- Runs the deep-research pipeline across the open domain plus your Preferred links
+- More comprehensive, multi-source responses
+- Best for broad research and analysis
 
 Effective Prompting
 ~~~~~~~~~~~~~~~~~~~
@@ -139,7 +138,7 @@ If you are running the agent locally, monitor the agent's search and scraping ac
    - URLs being scraped
    - Search queries executed
    - Model API calls
-   - Citations if using advanced ask
+   - Citations if using Research mode
    - Error messages
 
 Debug Mode
@@ -176,11 +175,13 @@ Common Issues
 
 **MCP features not working:**
 
-- Confirm OpenAI API key is valid
-- Check you're using an MCP-compatible model
+- Confirm the API key for your selected model's provider is valid (see
+  `Available Models`_ above for each model's provider): Google →
+  ``GOOGLE_API_KEY``, OpenAI → ``OPENAI_API_KEY``, the custom Buffet endpoint
+  → ``BUFFET_AGENT_API_KEY``.
 - Monitor terminal for MCP-related errors. If errors directly from the MCPs exist, contact Felix via Discord or WeChat.
 
-**Slow responses with Advanced Ask:**
+**Slow responses with Research mode:**
 
 - Reduce number of preferred URLs
 - Check internet connection
