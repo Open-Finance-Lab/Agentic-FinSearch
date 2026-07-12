@@ -36,7 +36,7 @@ from axioms.wrapper import wrap_claim_values
 
 from datascraper import datascraper as ds
 from datascraper.preferred_links_manager import get_manager
-from datascraper.models_config import MODELS_CONFIG
+from datascraper.models_config import MODELS_CONFIG, DEFAULT_MODEL
 
 from datascraper.unified_context_manager import (
     UnifiedContextManager,
@@ -274,7 +274,7 @@ def chat_response(request: HttpRequest) -> JsonResponse:
         return JsonResponse({'error': 'invalid JSON body'}, status=400)
     try:
         question = params.get('question', '')
-        selected_models = params.get('models', 'gpt-4o-mini')
+        selected_models = params.get('models', DEFAULT_MODEL)
         current_url = params.get('current_url', '')
         use_unified = params.get('use_unified', 'true').lower() == 'true'
 
@@ -374,7 +374,7 @@ def adv_response(request: HttpRequest) -> JsonResponse:
         return JsonResponse({'error': 'invalid JSON body'}, status=400)
     try:
         question = params.get('question', '')
-        selected_models = params.get('models', 'gpt-4o-mini')
+        selected_models = params.get('models', DEFAULT_MODEL)
         preferred_links_json = params.get('preferred_links', '')
         current_url = params.get('current_url', '')
 
@@ -503,7 +503,7 @@ def chat_response_stream(request: HttpRequest) -> StreamingHttpResponse:
     try:
         slot_cm = None
         question = params.get('question', '')
-        selected_models = params.get('models', 'gpt-4o-mini')
+        selected_models = params.get('models', DEFAULT_MODEL)
         current_url = params.get('current_url', '')
 
         if not question:
@@ -691,7 +691,7 @@ def adv_response_stream(request: HttpRequest) -> StreamingHttpResponse:
     try:
         slot_cm = None
         question = params.get('question', '')
-        selected_models = params.get('models', 'gpt-4o-mini')
+        selected_models = params.get('models', DEFAULT_MODEL)
         current_url = params.get('current_url', '')
         preferred_links_json = params.get('preferred_links', '')
 

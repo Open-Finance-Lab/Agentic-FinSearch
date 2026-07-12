@@ -39,6 +39,9 @@ MODELS_CONFIG = {
 
 }
 
+# Fallback when a client omits `models`; must be a MODELS_CONFIG key.
+DEFAULT_MODEL = "FinGPT"
+
 PROVIDER_CONFIGS = {
     "openai": {
         "base_url": None,
