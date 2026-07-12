@@ -1145,17 +1145,17 @@ Per FlyM1ss's decision: the 17 non-`/v1` endpoints (no auth today; rate-limit + 
 
 ## Discovered follow-ups (logged, OUT of scope)
 
-Resolution pass 2026-07-12 (PRs #350 F-1, #351 F-4, #352 F-3/F-5/F-6/F-7/F-8). Only F-2 remains open.
+Resolution pass 2026-07-12 (PRs #350 F-1, #351 F-4+F-9, #352 F-3/F-5/F-6/F-7/F-8). ALL items closed.
 
 - **F-1** ~~backend `[dependency-groups] docs` is broken~~ — **RESOLVED, PR #350.** Root cause differed from the log's "old nbconvert" hypothesis: nbconvert was already 7.17.1, but the `[tool.uv]` override `bleach>=6.4.0` REPLACED nbconvert's `bleach[css]` requirement graph-wide, dropping the extra → no `tinycss2` → nbconvert's no-css-sanitizer fallback crashes at import (`NameError: ALLOWED_STYLES`). Fix: override becomes `bleach[css]>=6.4.0`; lock diff is tinycss2 alone. RTD was never affected (`readthedocs.yml` installs `requirements_sphinx.txt` fresh).
-- **F-2** (STILL OPEN): "does NOT work on **Brave**" notes (`basic_usage.rst:8-9`, `advanced_usage.rst:8-9`) — unverifiable from code; needs a manual retest before removal.
+- **F-2** ~~Brave notes need manual retest~~ — **CLOSED (keep), 2026-07-12.** FlyM1ss retested: the extension still does not work on Brave, so the notes in `basic_usage.rst:8-9` / `advanced_usage.rst:8-9` are accurate and stay.
 - **F-3** ~~`:8000` base URL~~ — **RESOLVED, PR #352.** Verified on the droplet: Caddy terminates TLS on 443, gunicorn's 8000 is loopback-bound and firewalled (`ss -tlnp` + firewalld), so every `https://…:8000` example was unreachable. All production URLs in `api_reference.rst` dropped the port; base-URL section explains the proxy split.
 - **F-4** ~~legacy `gpt-4o-mini` default~~ — **RESOLVED, PR #351.** Fallback centralized as `models_config.DEFAULT_MODEL = "FinGPT"`; all 4 `views.py` call sites use it; `tests/test_models_config.py` drift-guards both the "default is a configured model" invariant and the call-site pattern.
 - **F-5** ~~`mcp_tools.rst` Configuration example~~ — **RESOLVED, PR #352.** `mcpServers`/`disabled` now documented; `transport` bullet removed (loader is stdio-only).
 - **F-6** ~~basic_usage Settings wording + project_structure XBRL~~ — **RESOLVED, PR #352.**
 - **F-7** ~~memory_system /v1 statelessness cross-ref~~ — **RESOLVED, PR #352.** New `v1-statelessness` label on api_reference's Behavioral Notes; API-Isolation bullet links it.
 - **F-8** ~~stale Mem0 line in 2026-02-02 audit~~ — **RESOLVED, PR #352.** Dated-snapshot annotation added (Mem0 removed in #347).
-- **F-9** (NEW, logged 2026-07-12): `datascraper/datascraper_refactored.py` is imported nowhere in the backend (checked all non-venv `*.py`) yet carries ~10 `gpt-4o-mini` signature defaults — dead-code candidate; confirm and delete at leisure.
+- **F-9** ~~`datascraper_refactored.py` dead-code candidate~~ — **RESOLVED, PR #351.** Confirmed zero references repo-wide outside the signed `a2as.yaml` (whose stale-entry prune is already tracked in issue #349) and deleted; full backend suite green (703 passed, 1 skipped).
 
 ### Post-review fix pass (2026-07-12, PR #348 review)
 
