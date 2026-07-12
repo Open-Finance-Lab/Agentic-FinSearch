@@ -1,4 +1,4 @@
-import { buildBackendUrl } from '../backendConfig.js';
+import { buildBackendUrl, authFetch } from '../backendConfig.js';
 
 export function createLinkManager() {
     // Container for the whole link manager
@@ -47,9 +47,8 @@ export function createLinkManager() {
     function syncWithBackend(links) {
         // Optional: Sync with backend if available
         if (typeof fetch !== 'undefined') {
-            fetch(buildBackendUrl('/api/sync_preferred_urls/'), {
+            authFetch(buildBackendUrl('/api/sync_preferred_urls/'), {
                 method: 'POST',
-                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
                 },
@@ -176,9 +175,8 @@ export function createLinkManager() {
             return;
         }
 
-        fetch(buildBackendUrl('/api/get_preferred_urls/'), {
+        authFetch(buildBackendUrl('/api/get_preferred_urls/'), {
             method: 'GET',
-            credentials: 'include'
         })
         .then(response => {
             if (!response.ok) {

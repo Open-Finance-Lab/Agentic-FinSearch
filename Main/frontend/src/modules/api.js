@@ -1,6 +1,6 @@
 // api.js
 
-import { buildBackendUrl } from './backendConfig.js';
+import { buildBackendUrl, authFetch } from './backendConfig.js';
 import { createSSEParser } from './sse.js';
 
 // Session ID management
@@ -16,9 +16,8 @@ function setSessionId(sessionId) {
 
 // Function to POST JSON to the server endpoint
 function postWebTextToServer(textContent, currentUrl) {
-    return fetch(buildBackendUrl('/input_webtext/'), {
+    return authFetch(buildBackendUrl('/input_webtext/'), {
         method: "POST",
-        credentials: "include",
         headers: {
             "Content-Type": "application/json",
         },
@@ -101,9 +100,8 @@ function getChatResponse(question, selectedModel, promptMode, useRAG, useMCP) {
     // all modes share the two real endpoints now.
     const endpoint = promptMode ? 'get_adv_response' : 'get_chat_response';
 
-    return fetch(buildBackendUrl(`/${endpoint}/`), {
+    return authFetch(buildBackendUrl(`/${endpoint}/`), {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildChatRequestBody(question, selectedModel, promptMode)),
     })
@@ -295,9 +293,8 @@ function getChatResponseStream(question, selectedModel, promptMode, useRAG, useM
         const parser = createSSEParser(handleServerEvent);
         const decoder = new TextDecoder('utf-8');
 
-        fetch(url, {
+        authFetch(url, {
             method: 'POST',
-            credentials: 'include',
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'text/event-stream',
@@ -372,7 +369,7 @@ function getChatResponseStream(question, selectedModel, promptMode, useRAG, useM
 
 // Function to clear messages
 function clearMessages() {
-    return fetch(`${buildBackendUrl('/clear_messages/')}?use_memory=true&session_id=${currentSessionId}`, { method: "POST", credentials: "include" })
+    return authFetch(`${buildBackendUrl('/clear_messages/')}?use_memory=true&session_id=${currentSessionId}`, { method: "POST" })
         .then(response => {
             if (!response.ok) {
                 throw new Error('Network response was not ok');
@@ -402,7 +399,7 @@ function getSourceUrls(searchQuery, currentUrl) {
     const baseEndpoint = buildBackendUrl('/get_source_urls/');
     const requestUrl = queryString ? `${baseEndpoint}?${queryString}` : baseEndpoint;
 
-    return fetch(requestUrl, { method: "GET", credentials: "include" })
+    return authFetch(requestUrl, { method: "GET" })
         .then(response => response.json())
         .then(data => {
             if (data.session_id) setSessionId(data.session_id);
@@ -419,9 +416,8 @@ function getSourceUrls(searchQuery, currentUrl) {
 function logQuestion(question, button) {
     const currentUrl = window.location.href;
 
-    return fetch(buildBackendUrl('/log_question/'), {
+    return authFetch(buildBackendUrl('/log_question/'), {
         method: 'POST',
-        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             question: String(question),
@@ -447,9 +443,8 @@ function syncPreferredLinks() {
     try {
         const preferredLinks = JSON.parse(localStorage.getItem('preferredLinks') || '[]');
         if (preferredLinks.length > 0) {
-            return fetch(buildBackendUrl('/api/sync_preferred_urls/'), {
+            return authFetch(buildBackendUrl('/api/sync_preferred_urls/'), {
                 method: 'POST',
-                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
                 },
@@ -497,9 +492,8 @@ function triggerAutoScrape(currentUrl) {
         return Promise.resolve({ status: 'skipped', reason: 'no_session_id' });
     }
 
-    return fetch(buildBackendUrl('/api/auto_scrape/'), {
+    return authFetch(buildBackendUrl('/api/auto_scrape/'), {
         method: "POST",
-        credentials: "include",
         headers: {
             "Content-Type": "application/json",
         },
@@ -528,10 +522,9 @@ function triggerAutoScrape(currentUrl) {
 // Layer 1 Validate: POST the current session to /api/axioms/validate/ and
 // return the per-claim verdicts for inline rendering.
 function validateClaims() {
-    return fetch(buildBackendUrl('/api/axioms/validate/'), {
+    return authFetch(buildBackendUrl('/api/axioms/validate/'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ session_id: currentSessionId }),
     })
         .then((response) => {
@@ -546,9 +539,8 @@ function validateClaims() {
 // Used to decide whether to show the Validate button on a response bubble.
 function hasAxiomClaims() {
     const params = currentSessionId ? `?session_id=${encodeURIComponent(currentSessionId)}` : '';
-    return fetch(buildBackendUrl(`/api/axioms/has_claims/${params}`), {
+    return authFetch(buildBackendUrl(`/api/axioms/has_claims/${params}`), {
         method: 'GET',
-        credentials: 'include',
     })
         .then((response) => (response.ok ? response.json() : { has_claims: false }))
         .catch(() => ({ has_claims: false }));
