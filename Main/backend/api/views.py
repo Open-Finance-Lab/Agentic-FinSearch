@@ -51,6 +51,7 @@ from datascraper.url_tools import _scrape_url_impl as scrape_url
 from datascraper.session_key import derive_conversation_key
 from datascraper import ssrf_guard
 
+from api.auth import require_bearer_auth
 from api.agent_budget import agent_run_slot, BudgetExceeded, ConcurrencyExceeded
 from api.identity import get_request_identity
 from api.request_params import MalformedJSONBody, merged_params
@@ -174,6 +175,7 @@ def _wrap_for_client(prose: str, session_id: str) -> str:
 
 
 @csrf_exempt
+@require_bearer_auth
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def has_axiom_claims(request: HttpRequest) -> JsonResponse:
     """Lightweight check: does the current session have any ratio claims
@@ -222,6 +224,7 @@ def xbrl_filing_download(request: HttpRequest, filename: str) -> FileResponse:
 
 
 @csrf_exempt
+@require_bearer_auth
 @require_http_methods(['POST'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def validate_claims(request: HttpRequest) -> JsonResponse:
@@ -260,6 +263,7 @@ def validate_claims(request: HttpRequest) -> JsonResponse:
 # so a wrong-method probe is bounced with 405 without consuming the caller's
 # rate budget.
 @csrf_exempt
+@require_bearer_auth
 @require_http_methods(['GET', 'POST'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def chat_response(request: HttpRequest) -> JsonResponse:
@@ -360,6 +364,7 @@ def chat_response(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@require_bearer_auth
 @require_http_methods(['GET', 'POST'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def adv_response(request: HttpRequest) -> JsonResponse:
@@ -489,6 +494,7 @@ def adv_response(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@require_bearer_auth
 @require_http_methods(['GET', 'POST'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def chat_response_stream(request: HttpRequest) -> StreamingHttpResponse:
@@ -680,6 +686,7 @@ def chat_response_stream(request: HttpRequest) -> StreamingHttpResponse:
 
 
 @csrf_exempt
+@require_bearer_auth
 @require_http_methods(['GET', 'POST'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def adv_response_stream(request: HttpRequest) -> StreamingHttpResponse:
@@ -884,6 +891,7 @@ def adv_response_stream(request: HttpRequest) -> StreamingHttpResponse:
 # None count), which would take the LB probe down together with Redis. Pinned
 # by tests/test_endpoint_protection.py.
 @csrf_exempt
+@require_bearer_auth
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def auto_scrape(request: HttpRequest) -> JsonResponse:
     """
@@ -948,6 +956,7 @@ def auto_scrape(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@require_bearer_auth
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def add_webtext(request: HttpRequest) -> JsonResponse:
     """
@@ -1006,6 +1015,7 @@ def add_webtext(request: HttpRequest) -> JsonResponse:
 # already sends POST (dist/main.js fetch {method:"POST"}), so only the
 # accidental-GET surface changes.
 @csrf_exempt
+@require_bearer_auth
 @require_http_methods(['POST'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def clear(request: HttpRequest) -> JsonResponse:
@@ -1057,6 +1067,7 @@ def health(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@require_bearer_auth
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def get_sources(request: HttpRequest) -> JsonResponse:
     """Get sources for a query"""
@@ -1076,6 +1087,7 @@ def get_sources(request: HttpRequest) -> JsonResponse:
 # the extension has no CSRF token; the endpoint stays side-effect-free
 # (log line only) so the exemption is bounded-damage by construction.
 @csrf_exempt
+@require_bearer_auth
 @require_http_methods(['GET', 'POST'])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def log_question(request: HttpRequest) -> JsonResponse:
@@ -1097,6 +1109,7 @@ def log_question(request: HttpRequest) -> JsonResponse:
     return JsonResponse({'status': 'success'})
 
 
+@require_bearer_auth
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def get_preferred_urls(request: HttpRequest) -> JsonResponse:
     """Retrieve preferred URLs from storage"""
@@ -1106,6 +1119,7 @@ def get_preferred_urls(request: HttpRequest) -> JsonResponse:
 
 
 @csrf_exempt
+@require_bearer_auth
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def sync_preferred_urls(request: HttpRequest) -> JsonResponse:
     """Sync preferred URLs from frontend to backend storage"""
@@ -1125,6 +1139,7 @@ def sync_preferred_urls(request: HttpRequest) -> JsonResponse:
     return JsonResponse({'status': 'failed'}, status=400)
 
 
+@require_bearer_auth
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT, method=ALL, block=True)
 def get_available_models(request: HttpRequest) -> JsonResponse:
     """Get list of available models with their configurations"""

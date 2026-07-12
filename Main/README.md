@@ -96,8 +96,8 @@ backend/
 
 ### 2.2 Key Components
 
-**`api/views.py`** – Browser extension API endpoints:
-- `/health/` - Service health check (returns version)
+**`api/views.py`** – Browser extension API endpoints (all require `Authorization: Bearer <FINGPT_API_KEY>` when the server is key-configured — dev-open / prod-fail-closed — except `/health/`):
+- `/health/` - Service health check (returns version); **no auth**
 - `/get_chat_response/` - Thinking mode chat
 - `/get_chat_response_stream/` - Thinking mode with SSE streaming
 - `/get_adv_response/` - Research mode with web search
@@ -348,6 +348,8 @@ bun run build:full
 See `InternalDocs/api/API_DOCUMENTATION.md` for the complete API reference with examples.
 
 ### Browser Extension Endpoints (in `api/views.py`)
+
+All endpoints below require `Authorization: Bearer <FINGPT_API_KEY>` when the server has a key configured (dev-open / prod-fail-closed), **except `/health/`**. The extension bakes this coarse-gate key in at build time (webpack `DefinePlugin`); the Concierge Discord bot sends it from its `FINGPT_API_KEY` env var.
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|

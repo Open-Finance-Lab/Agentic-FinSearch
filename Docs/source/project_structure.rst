@@ -171,6 +171,13 @@ Frontend Highlights
 
 * ``bun run build:full`` runs ``build-css.js`` then Webpack bundling.
 * ``webpack.config.js`` handles JS bundling with Babel transpilation.
+* ``webpack.config.js`` also bakes the coarse-gate ``FINGPT_API_KEY`` from the
+  build environment into the bundle via a ``DefinePlugin`` stage. A release
+  build run as ``FINGPT_API_KEY=… bun run build:full`` makes the extension send
+  ``Authorization: Bearer`` on backend calls (``getAuthHeaders()`` in
+  ``backendConfig.js``); a keyless dev build sends no header and works against
+  an open dev backend. The bundled key is extractable — a **coarse gate**
+  against drive-by abuse, not per-user auth.
 * ``dist/`` is the final output—load as unpacked extension in Chrome.
 * ``src/modules/`` contains modular JavaScript organized by function.
 * ``src/modules/styles/`` contains component-specific CSS files.

@@ -2,6 +2,7 @@
 import os
 from unittest.mock import patch
 
+import pytest
 from django.test import Client, SimpleTestCase, RequestFactory, override_settings
 from django.http import JsonResponse
 
@@ -99,3 +100,61 @@ def test_signals_accepts_valid_bearer(monkeypatch):
     resp = Client().get("/api/signals/news/",
                         HTTP_AUTHORIZATION="Bearer sekret")
     assert resp.status_code != 401
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: the 14 extension-facing views must enforce bearer auth. health/ and
+# the xbrl download stay exempt. Client-driven so the decorator is proven
+# through real URL dispatch; HERMETIC_REQUEST_SETTINGS avoids the DisallowedHost
+# 400 + SSL-redirect 301 traps (same helper the signals tests above use).
+# ---------------------------------------------------------------------------
+# The 14 extension routes that MUST enforce bearer auth (health + xbrl excluded).
+GATED_EXTENSION_PATHS = [
+    "/input_webtext/", "/api/auto_scrape/", "/get_chat_response/",
+    "/get_chat_response_stream/", "/get_adv_response/", "/get_adv_response_stream/",
+    "/get_source_urls/", "/clear_messages/", "/api/get_preferred_urls/",
+    "/api/sync_preferred_urls/", "/log_question/", "/api/get_available_models/",
+    "/api/axioms/validate/", "/api/axioms/has_claims/",
+]
+
+
+@pytest.mark.parametrize("path", GATED_EXTENSION_PATHS)
+@override_settings(**HERMETIC_REQUEST_SETTINGS)
+def test_extension_route_401_without_header(monkeypatch, path):
+    # Auth is the outermost functional decorator: no header -> 401 before the
+    # method-check / ratelimit / view body. A GET short-circuits at auth, so
+    # this never runs the heavy chat/scrape view bodies.
+    monkeypatch.setenv("FINGPT_API_KEY", "sekret")
+    assert Client().get(path).status_code == 401
+
+
+# Allow-testable at unit level without running a heavy body:
+#   - POST-only routes: GET+header passes auth, then 405 (body never runs) -> spans axioms + context.
+#   - get_available_models: a static read.
+SAFE_ALLOW_PATHS = [
+    "/api/axioms/validate/",       # axioms group  (POST-only -> 405)
+    "/clear_messages/",            # context group (POST-only -> 405)
+    "/api/get_available_models/",  # static read   (-> 200-ish)
+]
+
+
+@pytest.mark.parametrize("path", SAFE_ALLOW_PATHS)
+@override_settings(**HERMETIC_REQUEST_SETTINGS)
+def test_gated_route_accepts_valid_header(monkeypatch, path):
+    # A correct key clears the auth gate: the response is anything BUT 401.
+    monkeypatch.setenv("FINGPT_API_KEY", "sekret")
+    assert Client().get(path, HTTP_AUTHORIZATION="Bearer sekret").status_code != 401
+
+
+@override_settings(REQUIRE_FINGPT_API_KEY=False, **HERMETIC_REQUEST_SETTINGS)
+def test_gated_route_open_in_dev(monkeypatch):
+    monkeypatch.delenv("FINGPT_API_KEY", raising=False)
+    assert Client().get("/api/get_available_models/").status_code != 401
+
+
+@override_settings(**HERMETIC_REQUEST_SETTINGS)
+def test_exempt_routes_never_401(monkeypatch):
+    # health + xbrl download must stay reachable without a header.
+    monkeypatch.setenv("FINGPT_API_KEY", "sekret")
+    assert Client().get("/health/").status_code != 401
+    assert Client().get("/api/axioms/xbrl/nope.json/").status_code != 401  # 400/404 from view, not 401

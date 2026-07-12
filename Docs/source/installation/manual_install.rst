@@ -43,6 +43,22 @@ Only needed when you change the extension source.
    bun install
    bun run build:full
 
+.. note::
+   The commands above produce a **keyless** dev build: it sends no
+   ``Authorization`` header and is meant for a dev backend running with auth
+   open. To build a release bundle that talks to a **key-gated** backend, bake
+   the coarse-gate key in at build time:
+
+   .. code-block:: bash
+
+      cd Main/frontend
+      FINGPT_API_KEY=YOUR_BACKEND_KEY bun run build:full
+
+   A webpack ``DefinePlugin`` bakes this *frontend* build-time key into the
+   (extractable) bundle as a coarse gate against drive-by abuse. It is distinct
+   from — though normally equal to — the backend ``FINGPT_API_KEY`` env var
+   described below.
+
 Environment Variables
 ---------------------
 
