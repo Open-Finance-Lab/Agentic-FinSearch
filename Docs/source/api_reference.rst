@@ -1,7 +1,7 @@
 API Reference
 =============
 
-This document specifies the Agentic FinSearch OpenAI-compatible REST API. The API is **synchronous** (no streaming). All request and response bodies are JSON.
+This document specifies the Agentic FinSearch REST API: the OpenAI-compatible ``/v1`` endpoints plus the extension, XBRL-validation, and news-signals endpoints. The ``/v1`` API is **synchronous** (no streaming); the extension chat endpoints also offer Server-Sent-Events streaming variants. Unless noted otherwise, request and response bodies are JSON.
 
 .. contents:: Table of Contents
    :depth: 3
@@ -34,15 +34,21 @@ All endpoint paths below are relative to this base URL.
 Authentication
 ~~~~~~~~~~~~~~
 
-The API uses **Bearer token** authentication.
+The **OpenAI-compatible endpoints** (``/v1/models``, ``/v1/chat/completions``) use **Bearer token** authentication.
 
 .. code-block:: text
 
    Authorization: Bearer <FINGPT_API_KEY>
 
 - The API key is set via the ``FINGPT_API_KEY`` environment variable on the server.
-- If ``FINGPT_API_KEY`` is **not set**, authentication is disabled (development mode) and all requests are accepted.
-- When authentication is enabled, every request to every endpoint must include the ``Authorization`` header.
+- If ``FINGPT_API_KEY`` is **not set**, ``/v1/*`` authentication is disabled (development mode). In production the server sets ``REQUIRE_FINGPT_API_KEY=True``, which **fails closed**: a missing key makes ``/v1/*`` return ``503`` instead of silently accepting unauthenticated requests.
+- When authentication is enabled, every ``/v1/*`` request must include the ``Authorization`` header.
+
+.. note::
+   The extension and utility endpoints documented below do **not** currently
+   require an API key. They are protected by per-client rate limiting and
+   cookie-rooted session isolation. Extending bearer authentication to these
+   endpoints is tracked on the security roadmap.
 
 **Error responses (401):**
 
