@@ -47,10 +47,18 @@ The **OpenAI-compatible endpoints** (``/v1/models``, ``/v1/chat/completions``) u
 - When authentication is enabled, every ``/v1/*`` request must include the ``Authorization`` header.
 
 .. note::
-   The extension and utility endpoints documented below do **not** currently
-   require an API key. They are protected by per-client rate limiting and
-   cookie-rooted session isolation. Extending bearer authentication to these
-   endpoints is tracked on the security roadmap.
+   The extension and utility endpoints documented below now require the same
+   ``Authorization: Bearer <FINGPT_API_KEY>`` header as ``/v1/*`` whenever the
+   server is key-configured (dev-open / prod-fail-closed, exactly as described
+   above). Two endpoints stay exempt: ``/health/`` (the unauthenticated
+   liveness probe) and ``/api/axioms/xbrl/<filename>/`` (fetched by a plain
+   browser download that cannot attach a header — protected instead by rate
+   limiting and an opaque, server-chosen filename). Per-client rate limiting
+   and cookie-rooted session isolation remain in force on top of the bearer
+   gate. Because a publicly distributed extension bundle is extractable, the
+   shared key is a **coarse gate** against drive-by API abuse, not per-user
+   authentication; per-user attribution is deferred to the identity/login
+   system.
 
 **Error responses (401):**
 
@@ -496,11 +504,13 @@ Extension & Utility Endpoints
 -----------------------------
 
 These endpoints back the Chrome extension and other first-party surfaces.
-They are **unauthenticated** (see the note under `Authentication`_): each
-client is rate-limited, and conversations are isolated via the signed
-``fingpt_sessionid`` cookie. Callers may pass an optional ``session_id``
-(query string or JSON body) to select a sub-conversation *under their own*
-cookie root — it can never address another browser's history.
+They require the ``Authorization: Bearer <FINGPT_API_KEY>`` header when the
+server is key-configured (see the note under `Authentication`_) — except
+``/health/`` and ``/api/axioms/xbrl/<filename>/``, which stay unauthenticated.
+Each client is additionally rate-limited, and conversations are isolated via
+the signed ``fingpt_sessionid`` cookie. Callers may pass an optional
+``session_id`` (query string or JSON body) to select a sub-conversation
+*under their own* cookie root — it can never address another browser's history.
 
 .. list-table::
    :widths: 12 34 54
@@ -553,7 +563,7 @@ cookie root — it can never address another browser's history.
      - Does this session have validatable claims?
    * - GET
      - ``/api/axioms/xbrl/<filename>/``
-     - Serve a bundled XBRL filing (Sources popup)
+     - Serve a bundled XBRL filing (Sources popup) — *unauthenticated* browser download (see the note under `Authentication`_)
    * - GET
      - ``/api/signals/news/``
      - Latest news→sentiment signals artifact
