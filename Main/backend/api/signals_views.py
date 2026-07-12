@@ -26,6 +26,8 @@ from django.views.decorators.http import condition, require_http_methods
 from django_ratelimit import ALL
 from django_ratelimit.decorators import ratelimit
 
+from api.auth import require_bearer_auth
+
 logger = logging.getLogger(__name__)
 
 _PUBLIC_STRIP = ("generator", "model", "prompt_version")
@@ -151,6 +153,7 @@ def _last_modified(request: HttpRequest):
 
 
 @csrf_exempt
+@require_bearer_auth
 @require_http_methods(["GET"])
 @ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT,
            method=ALL, block=True)
