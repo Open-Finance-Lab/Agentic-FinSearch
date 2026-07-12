@@ -7,7 +7,7 @@ Key Features
 ------------
 
 - It is a powerful **information search-and-retrieval engine**: A search agent for websites (Yahoo Finance, Bloomberg, TradingView, CNBC, and more) and local files (SEC 10K, XBRL files (eXtensible Business Reporting Language)).
-- **Integrated MCP Tools**: Built-in support for Model Context Protocol (MCP) servers, including **SEC-EDGAR** for company filings, **Yahoo Finance** for real-time market data, and **TradingView** for technical analysis.
+- **Integrated MCP Tools**: Built-in support for Model Context Protocol (MCP) servers, including **SEC-EDGAR** for company filings, **Yahoo Finance** for real-time market data, **TradingView** for crypto technical analysis, and an **XBRL Taxonomy** server that grounds tagging in the official US-GAAP taxonomy.
 - **XBRL Claim Validation**: A deterministic, user-triggered pipeline that checks the numerical claims in agent responses against SEC XBRL filings, with per-claim verdicts and filing provenance (see :doc:`xbrl_validation`).
 - **News→Signals Pipeline**: A standalone heartbeat service (``Heartbeat/``) that ingests financial news feeds and publishes dated, deterministic news-sentiment signals for a Dow-30 watchlist, served over ``GET /api/signals/news/``.
 - **Discord Concierge**: A Discord chat adapter (``Concierge/``) that brings the same agent into Discord servers.

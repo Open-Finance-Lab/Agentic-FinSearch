@@ -706,8 +706,10 @@ fields, plus a computed ``staleness_hours``. Key fields: ``schema_version``,
 n_articles}`` with ``score`` in ``[-1, 1]``.
 
 ``404 {"error": "no_signals"}`` when no artifact exists yet. Responses carry
-``ETag`` / ``Last-Modified`` validators and
-``Cache-Control: public, max-age=300``.
+an ``ETag`` validator and ``Cache-Control: public, max-age=300``.
+``Last-Modified`` is sent only on unfiltered responses — ``tickers=``-filtered
+variants are ETag-only, so conditional requests for them must use
+``If-None-Match``.
 
 ---
 

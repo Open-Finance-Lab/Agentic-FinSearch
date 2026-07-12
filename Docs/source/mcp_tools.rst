@@ -8,31 +8,31 @@ Available MCP Servers
 
 1. **SEC-EDGAR Server**
    - **Purpose**: Access official SEC filings (10-K, 10-Q, 8-K) and XBRL company facts.
-   - **Tools** (21, from the external ``sec-edgar-mcp`` package): company lookup (``get_cik_by_ticker``, ``get_company_info``, ``search_companies``, ``get_company_facts``), filings (``get_recent_filings``, ``get_filing_content``, ``get_filing_sections``, ``analyze_8k``), financials (``get_financials``, ``get_segment_data``, ``get_key_metrics``, ``compare_periods``, ``discover_company_metrics``, ``get_xbrl_concepts``, ``discover_xbrl_concepts``), insider activity (``get_insider_transactions``, ``get_insider_summary``, ``get_form4_details``, ``analyze_form4_transactions``, ``analyze_insider_sentiment``), and ``get_recommended_tools``.
+   - **Tools** (from the external ``sec-edgar-mcp`` package): company lookup (``get_cik_by_ticker``, ``get_company_info``, ``search_companies``, ``get_company_facts``), filings (``get_recent_filings``, ``get_filing_content``, ``get_filing_sections``, ``analyze_8k``), financials (``get_financials``, ``get_segment_data``, ``get_key_metrics``, ``compare_periods``, ``discover_company_metrics``, ``get_xbrl_concepts``, ``discover_xbrl_concepts``), insider activity (``get_insider_transactions``, ``get_insider_summary``, ``get_form4_details``, ``analyze_form4_transactions``, ``analyze_insider_sentiment``), and ``get_recommended_tools``.
    - **Automatic Activation**: Triggered when you ask questions about company filings or historical data.
    - **Transport**: Stdio (``python -m sec_edgar_mcp.server``)
 
 2. **Yahoo Finance Server**
    - **Purpose**: Real-time market data and historical price analysis.
-   - **Tools** (9): ``get_stock_info``, ``get_stock_financials``, ``get_stock_news``, ``get_stock_history``, ``get_stock_analysis``, ``get_earnings_info``, ``get_options_chain``, ``get_options_summary``, ``get_holders``.
+   - **Tools**: ``get_stock_info``, ``get_stock_financials``, ``get_stock_news``, ``get_stock_history``, ``get_stock_analysis``, ``get_earnings_info``, ``get_options_chain``, ``get_options_summary``, ``get_holders``.
    - **Automatic Activation**: Used for stock price queries and basic market research.
    - **Transport**: Stdio (custom server in ``mcp_server/yahoo_finance_server.py``)
 
 3. **TradingView Server**
    - **Purpose**: Technical analysis and screeners for **cryptocurrencies** (crypto exchanges only).
-   - **Tools** (7): ``get_coin_analysis``, ``get_top_gainers``, ``get_top_losers``, ``get_bollinger_scan``, ``get_rating_filter``, ``get_consecutive_candles``, ``get_advanced_candle_pattern``.
+   - **Tools**: ``get_coin_analysis``, ``get_top_gainers``, ``get_top_losers``, ``get_bollinger_scan``, ``get_rating_filter``, ``get_consecutive_candles``, ``get_advanced_candle_pattern``.
    - **Automatic Activation**: Used for crypto technical-analysis questions and market screening.
    - **Transport**: Stdio (custom server in ``mcp_server/tradingview/``)
 
 4. **XBRL Taxonomy Server**
    - **Purpose**: Ground XBRL tagging in the official US-GAAP 2026 taxonomy.
-   - **Tools** (3): ``lookup_xbrl_tags`` (natural-language taxonomy search), ``validate_xbrl_tag`` (does this tag exist?), ``query_xbrl_filing`` (reported values for a tag in a bundled filing).
+   - **Tools**: ``lookup_xbrl_tags`` (natural-language taxonomy search), ``validate_xbrl_tag`` (does this tag exist?), ``query_xbrl_filing`` (reported values for a tag in a bundled filing).
    - **Automatic Activation**: Backs Stage 1 of the :doc:`XBRL validation pipeline <xbrl_validation>` and taxonomy questions.
    - **Transport**: Stdio (custom server in ``mcp_server/xbrl/``)
 
 .. note::
    A generic **Filesystem server** (``@modelcontextprotocol/server-filesystem``)
-   exists in the configuration but is **disabled**, and all 14 of its tools sit
+   exists in the configuration but is **disabled**, and all of its tools sit
    on a permanent deny-list in ``mcp_client/tool_policy.py`` — they are never
    reachable regardless of configuration.
 

@@ -56,7 +56,7 @@ MCP Features
 
 - **Yahoo Finance MCP**: Directly fetches real-time market data, stock prices, and company profiles via the ``yfinance`` API.
 - **SEC-EDGAR MCP**: Enables the agent to directly access SEC filings like 10-K, 10-Q, 8-K and extract financial data from them.
-- **TradingView MCP**: Fetches technical analysis indicators, oscillators, moving averages, and market screener data.
+- **TradingView MCP**: Fetches technical analysis indicators, oscillators, moving averages, and market screener data for **cryptocurrencies** (crypto exchanges only).
 - **XBRL Taxonomy MCP**: Retrieval-then-select over the FASB US-GAAP taxonomy (``lookup_xbrl_tags``, ``validate_xbrl_tag``, ``query_xbrl_filing``) — backs Stage 1 of the :doc:`XBRL validation pipeline <../xbrl_validation>`.
 
 Deep Research Mode
@@ -175,9 +175,10 @@ Common Issues
 
 **MCP features not working:**
 
-- Confirm the API key for your selected model's provider is valid: ``FinGPT``
-  → ``GOOGLE_API_KEY``, ``FinGPT-Light`` → ``OPENAI_API_KEY``,
-  ``Buffet-Agent`` → ``BUFFET_AGENT_API_KEY``.
+- Confirm the API key for your selected model's provider is valid (see
+  `Available Models`_ above for each model's provider): Google →
+  ``GOOGLE_API_KEY``, OpenAI → ``OPENAI_API_KEY``, the custom Buffet endpoint
+  → ``BUFFET_AGENT_API_KEY``.
 - Monitor terminal for MCP-related errors. If errors directly from the MCPs exist, contact Felix via Discord or WeChat.
 
 **Slow responses with Research mode:**
