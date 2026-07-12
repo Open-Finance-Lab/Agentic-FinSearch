@@ -456,7 +456,9 @@ header build has propagated to installs. Dev-open / prod-fail-closed unchanged.
 
 ### Task 7: Concierge env + docs
 
-- [ ] `Concierge/.env.concierge.example:11-12` — replace "Usually unset — the extension endpoints aren't Bearer-gated." with a note that `FINGPT_API_KEY` is now REQUIRED to reach the (Bearer-gated) `get_chat_response_stream/`; keep the var line uncommented-with-placeholder.
+> **DONE 2026-07-13 (loop-dev).** Prod Concierge env keyed = backend `FINGPT_API_KEY` (hash `53f0fb07`, backup `.env.concierge.bak-20260712-174051`) + `concierge.service` restarted clean; `.env.concierge.example` already shipped in the P3 commit; all 4 user-facing docs updated with `sphinx-build -W` clean (commit `c746188`), merged with #356 (squash `cb5dfdf`). All boxes below satisfied.
+
+- [x] `Concierge/.env.concierge.example:11-12` — replace "Usually unset — the extension endpoints aren't Bearer-gated." with a note that `FINGPT_API_KEY` is now REQUIRED to reach the (Bearer-gated) `get_chat_response_stream/`; keep the var line uncommented-with-placeholder.
 - [ ] `Docs/source/api_reference.rst:49-53` + `:495-503` — rewrite the "do not currently require an API key"/"unauthenticated" notes to state bearer auth is now required (except `health/` + the `xbrl` download); add an Auth row to the extension endpoint table (`:505-559`) and `-H "Authorization: Bearer $API_KEY"` to the extension cURL examples. Sphinx builds with zero warnings (`cd Main/backend && uv run --group docs sphinx-build -W ...`).
 - [ ] `Main/README.md:99-109` + `:350-365` — add auth info to the extension endpoint lists/tables.
 - [ ] `Docs/source/project_structure.rst` "Frontend Highlights" (~`:118-174`) — currently describes the build as pure Babel+webpack bundling; note the new `DefinePlugin` build-time key-injection stage so the description isn't stale.
@@ -464,6 +466,8 @@ header build has propagated to installs. Dev-open / prod-fail-closed unchanged.
 - [ ] **These four `Docs/source/*` + README pages are user-facing hosted docs — coordinate the wording with FlyM1ss before committing; they are listed here so the executor doesn't miss them, not as a mandate to edit unilaterally.**
 
 ### Task 8: E2E verification (spec acceptance)
+
+> **REMAINING — user-owned.** FlyM1ss verifies manually. Also (next day): rebuild the published Chrome Web Store extension WITH the coarse-gate key and upload to the CWS listing (`aehnlpneoncdfioafiigiljmbghccami`) before announcing the extension as usable. No live CWS users yet (FlyM1ss confirmed), so the P3 enforcement merge is safe ahead of that republish.
 
 - [ ] With a key-enabled local backend + the Phase-2 extension build: verify chat (thinking + research, both streams), auto-scrape, preferred links, validate — all succeed with the header; a request with a wrong/no key returns 401. Record the manual result in the PR (headless CI cannot load the extension).
 
