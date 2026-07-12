@@ -87,21 +87,26 @@ Stage 2: Retrieve the Reference Value
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Given a tagged record, Stage 2 looks up the reference value from an
-authoritative SEC source. Today's implementation reads from a small local
-index of XBRL filings shipped inside the repository at
-``Main/backend/mcp_server/xbrl/filings/``.
+authoritative SEC source. The resolver (``Main/backend/axioms/resolver.py``)
+is a thin adapter over the **truth layer** (``Main/backend/truthlayer/``):
+SEC ``companyfacts`` data vendored into the repository, ingested into an
+embedded DuckDB store, and queried through an ``as-of``-parameterized,
+restatement-aware retrieval API — asking for a value *as of* an earlier date
+returns what filings reported at that time, not the latest restated figure.
 
 .. admonition:: Coverage today
    :class: important
 
-   Validation currently resolves against **three pre-loaded SEC filings**:
-   Apple (FY2023, ``aapl-20230930.xml``), Microsoft (FY2023,
-   ``msft-20230630.xml``), and Tesla (FY2023, ``tsla-20231231.xml``). Claims
-   about any other ticker or period return ``Skipped`` with a "filing not
-   found" reason. Expanding this set is the focus of the upcoming
+   Validation currently resolves against vendored SEC ``companyfacts`` for
+   **three registrants** — Apple, Microsoft, and Tesla — across their
+   reported filing history. Claims about any other ticker return ``Skipped``
+   with a "no data" reason. Expanding this set is the focus of the upcoming
    :ref:`SEC XBRL Filing Tree <xbrl-filing-tree>` work.
 
-The return value is a tuple of *(value, filing accession, filing date)*.
+The resolver returns a mapping of the ratio's inputs to their resolved
+values; an input resolves to nothing when a required tag is missing, which
+downstream stages surface as ``Skipped``. Filing accession and date travel
+alongside as provenance.
 
 Stage 3: Match and Annotate
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -131,9 +136,10 @@ Using Validate
    hidden.
 3. **Click Validate.** The pipeline runs deterministically on the claims the
    agent emitted — no second LLM pass — and returns one verdict per claim.
-4. **Read the verdict chips** rendered just below the response. Mismatches are
-   underlined in red inline so you can locate the offending number in the
-   prose without scanning.
+4. **Read the validation report.** The verdicts render as a new conversation
+   turn summarizing each claim (claimed value vs. filing value), and any
+   claimed number that failed verification is highlighted inline in the
+   preceding response so you can locate it in the prose without scanning.
 5. **Open the Sources popup** to see the XBRL filings used as ground truth,
    grouped under a new ``Ground Truth`` subsection alongside any other sources
    the agent cited.
@@ -169,6 +175,11 @@ Verdict Statuses
        unclassified balance sheet (banks, insurance, REITs typically lack
        ``AssetsCurrent``). The pipeline detects this deterministically rather
        than emitting a spurious failure.
+
+.. note::
+   A claim that errors during evaluation is isolated — one claim's internal
+   failure never aborts the rest of the report — and is presented as
+   ``Skipped`` in the UI.
 
 Current Implementation (Layer 1 MVP)
 ------------------------------------
@@ -212,15 +223,15 @@ The module boundary is stable; the surface widens on a defined schedule.
 
 .. _xbrl-filing-tree:
 
-* **SEC XBRL Filing Tree (cloud).** The most visible limitation today is that
-  only three filings are bundled with the backend. The next major workstream
-  is a **cloud-hosted SEC XBRL Filing Tree** — a structured, query-friendly
-  index of XBRL filings keyed by ``(ticker, period, statement)`` — that any
-  agent can hit over the network without bundling raw filings into the
-  repository. Once it ships, the resolver swaps its filesystem lookup for a
-  tree query, and validation extends from three tickers to the full universe
-  of SEC registrants. The local-filings path remains as the offline
-  fallback for development and air-gapped demos.
+* **SEC XBRL Filing Tree (cloud).** The local half of this shipped in
+  mid-2026: the **truth layer** (``truthlayer/``) ingests vendored SEC
+  ``companyfacts`` into DuckDB and serves as-of-parameterized,
+  restatement-aware reads. The remaining workstream is hosting that store as
+  a **cloud SEC XBRL Filing Tree** covering the full universe of SEC
+  registrants, so any agent can query it over the network without bundling
+  data into the repository. Once it ships, the resolver swaps its embedded
+  store for a tree query; the local store remains the offline fallback for
+  development and air-gapped demos.
 * **Additional ratios.** Income statement identity, cash flow reconciliation,
   debt-to-equity, return on equity. Each ratio is one tag map and one pure
   function — the engine and resolver do not change.
@@ -234,8 +245,10 @@ The module boundary is stable; the surface widens on a defined schedule.
 Further Reading
 ---------------
 
-* :doc:`mcp_tools` — the MCP tool surface, including ``query_xbrl_filing``
-  and ``report_claim`` that this pipeline uses internally.
+* :doc:`mcp_tools` — the MCP tool surface, including the ``xbrl-taxonomy``
+  server (``lookup_xbrl_tags``, ``validate_xbrl_tag``, ``query_xbrl_filing``)
+  that backs Stage 1. (``report_claim`` is a native agent tool, not an MCP
+  tool.)
 * :doc:`api_reference` — the ``/api/axioms/validate/`` and
   ``/api/axioms/has_claims/`` REST endpoints that back the Validate button.
 * :doc:`project_structure` — where the ``Main/backend/axioms/`` modules sit
