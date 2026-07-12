@@ -490,6 +490,227 @@ All models support both ``thinking`` (MCP) and ``research`` (deep search) modes.
 
 ---
 
+Extension & Utility Endpoints
+-----------------------------
+
+These endpoints back the Chrome extension and other first-party surfaces.
+They are **unauthenticated** (see the note under `Authentication`_): each
+client is rate-limited, and conversations are isolated via the signed
+``fingpt_sessionid`` cookie. Callers may pass an optional ``session_id``
+(query string or JSON body) to select a sub-conversation *under their own*
+cookie root — it can never address another browser's history.
+
+.. list-table::
+   :widths: 12 34 54
+   :header-rows: 1
+
+   * - Method
+     - Path
+     - Purpose
+   * - GET/POST
+     - ``/get_chat_response/``
+     - Thinking-mode answer (synchronous)
+   * - GET/POST
+     - ``/get_chat_response_stream/``
+     - Thinking-mode answer (SSE stream)
+   * - GET/POST
+     - ``/get_adv_response/``
+     - Research-mode answer (synchronous)
+   * - GET/POST
+     - ``/get_adv_response_stream/``
+     - Research-mode answer (SSE stream)
+   * - POST
+     - ``/input_webtext/``
+     - Add scraped page text to the session context
+   * - POST
+     - ``/api/auto_scrape/``
+     - Server-side scrape of the active page (SSRF-guarded)
+   * - GET
+     - ``/get_source_urls/``
+     - Sources for a query
+   * - POST
+     - ``/clear_messages/``
+     - Clear the session conversation
+   * - GET
+     - ``/api/get_preferred_urls/``
+     - Read stored Preferred links
+   * - POST
+     - ``/api/sync_preferred_urls/``
+     - Store Preferred links
+   * - GET
+     - ``/api/get_available_models/``
+     - Model metadata for the Settings dropdown
+   * - GET/POST
+     - ``/log_question/``
+     - Telemetry logging
+   * - POST
+     - ``/api/axioms/validate/``
+     - Run XBRL validation over a session's recorded claims
+   * - GET
+     - ``/api/axioms/has_claims/``
+     - Does this session have validatable claims?
+   * - GET
+     - ``/api/axioms/xbrl/<filename>/``
+     - Serve a bundled XBRL filing (Sources popup)
+   * - GET
+     - ``/api/signals/news/``
+     - Latest news→sentiment signals artifact
+
+All share the ``API_RATE_LIMIT`` budget (``429 {"error": "rate_limited"}``
+when exceeded). The chat endpoints can also return ``503 {"error": "busy"}``
+when the agent concurrency or daily budget cap is hit.
+
+Chat (Thinking / Research)
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``/get_chat_response/`` (Thinking mode) and ``/get_adv_response/`` (Research
+mode) accept the same core parameters — query string on GET, JSON body on
+POST (the body wins when both are present):
+
+.. list-table::
+   :widths: 25 10 65
+   :header-rows: 1
+
+   * - Field
+     - Required
+     - Description
+   * - ``question``
+     - Yes
+     - The user's prompt.
+   * - ``models``
+     - No
+     - Comma-separated model IDs (the extension always sends the model
+       chosen in Settings).
+   * - ``current_url``
+     - No
+     - Active page URL, used for context and site-specific prompts.
+   * - ``preferred_links``
+     - No
+     - Research mode only: JSON-encoded array of URLs to prioritize.
+   * - ``session_id``
+     - No
+     - Sub-conversation selector (namespaced under the session cookie).
+   * - ``user_timezone`` / ``user_time``
+     - No
+     - IANA timezone / ISO 8601 timestamp for time-aware answers.
+
+**Response (200):** ``resp`` maps each requested model ID to its response
+text. Thinking mode adds ``has_axiom_claims`` (drives the Validate button);
+Research mode adds ``used_sources`` (objects with ``url``/``title``/
+``snippet``) and ``used_urls``. Both include ``context_stats`` (session id,
+mode, message and token counts).
+
+**Streaming variants** (``…_stream/``) return ``text/event-stream``: a
+``connected`` event, ``{"status": {…}}`` progress frames,
+``{"content": "…", "done": false}`` chunks, and a final ``{"done": true, …}``
+frame carrying ``wrapped_content``, ``used_sources``, ``used_urls``, and
+``context_stats``. Errors mid-stream arrive as
+``{"error": "…", "done": true}``.
+
+Context & Preferences
+~~~~~~~~~~~~~~~~~~~~~
+
+``POST /input_webtext/`` — body ``{"textContent": "…", "currentUrl": "…"}``
+(``textContent`` required). Appends scraped page text to the session
+context. Returns ``{"status": "success", "session_id": …,
+"context_stats": {…}}``; ``400`` when ``textContent`` is missing.
+
+``POST /api/auto_scrape/`` — body ``{"current_url": "…"}``. Server-side
+scrape of the active page, skipped when already scraped
+(``{"status": "skipped", "reason": "already_scraped"}``). Target URLs are
+checked against the SSRF egress policy first: blocked targets return
+``400 {"error": "URL refused by security policy"}``.
+
+``POST /clear_messages/`` — query parameter ``preserve_web``
+(``"true"``/``"false"``, default ``"false"``). Clears the session
+conversation, optionally keeping scraped web content.
+
+``GET /get_source_urls/`` — query parameters ``query``, ``current_url``.
+Returns ``{"resp": [{"url", "title", "snippet"}, …]}``.
+
+``GET /api/get_preferred_urls/`` → ``{"urls": […]}``.
+``POST /api/sync_preferred_urls/`` with ``{"urls": […]}`` →
+``{"status": "success", "synced": <count>}``.
+
+``GET /api/get_available_models/`` → ``{"models": [{"id", "provider",
+"description", "supports_mcp", "supports_advanced", "display_name"}, …]}``.
+
+``GET|POST /log_question/`` — fire-and-forget telemetry (``question``,
+``button``, ``current_url``); always returns ``{"status": "success"}``.
+
+XBRL Validation Endpoints
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+These back the per-response **Validate** button (see :doc:`xbrl_validation`).
+
+``GET /api/axioms/has_claims/`` — keyed off the session cookie. Returns
+``{"session_id": …, "has_claims": bool, "count": n}``.
+
+``POST /api/axioms/validate/`` — body ``{"session_id": "…"}`` (falls back to
+the cookie-derived session). Runs the deterministic Layer-1 proof over every
+claim recorded for the session:
+
+.. code-block:: json
+
+   {
+     "session_id": "…",
+     "claims": [
+       {
+         "ratio": "gross_margin",
+         "ticker": "AAPL",
+         "period": "2023-09-30",
+         "claimed_value": 0.441,
+         "status": "VERIFIED",
+         "expected": 0.4413,
+         "actual": 0.441,
+         "variance_pct": 0.07,
+         "formula": "(Revenue - COGS) / Revenue",
+         "xbrl_source": "…",
+         "message": "…"
+       }
+     ],
+     "summary": {"total": 1, "VERIFIED": 1, "FAILED": 0, "SKIPPED": 0,
+                 "NOT_APPLICABLE": 0, "ERROR": 0}
+   }
+
+Per-claim ``status`` is one of ``VERIFIED``, ``FAILED``, ``SKIPPED``,
+``NOT_APPLICABLE``, ``ERROR``.
+
+``GET /api/axioms/xbrl/<filename>/`` — serves a bundled SEC XBRL filing as
+``application/xml`` for the Sources popup. ``filename`` must match
+``<ticker>-<yyyymmdd>.xml`` exactly; anything else (including path-traversal
+attempts) returns ``404``.
+
+News Signals
+~~~~~~~~~~~~
+
+``GET /api/signals/news/`` serves the latest **news→sentiment signals
+artifact** produced by the Heartbeat pipeline (``Heartbeat/``). This is an
+integration surface for external consumers (e.g., trading-research stacks);
+the browser extension does not call it.
+
+**Query parameters:**
+
+- ``as_of=YYYY-MM-DD`` — point-in-time read: returns the newest artifact
+  dated on or before that day. Malformed values return
+  ``400 {"error": "bad_as_of"}``.
+- ``tickers=AAPL,MSFT`` — filter the ``signals`` map to those symbols.
+
+**Response (200):** the artifact JSON (schema:
+``Heartbeat/schemas/signals-v1.schema.json``) minus internal provenance
+fields, plus a computed ``staleness_hours``. Key fields: ``schema_version``,
+``profile``, ``generated_at``, ``window_hours``, ``watchlist``, ``status``
+(``ok`` | ``degraded``), ``status_reason``, ``news_overview``,
+``diagnostics``, and ``signals`` — a map of ticker →
+``{sentiment, score, rationale, headline, source, url, published, guid,
+n_articles}`` with ``score`` in ``[-1, 1]``.
+
+``404 {"error": "no_signals"}`` when no artifact exists yet. Responses carry
+``ETag`` / ``Last-Modified`` validators and
+``Cache-Control: public, max-age=300``.
+
+---
+
 Usage Examples
 --------------
 
@@ -800,7 +1021,7 @@ Behavioral Notes
 Statelessness
 ~~~~~~~~~~~~~
 
-The API is **fully stateless**. Each request creates a fresh session context. To maintain conversation history, the client must send the full ``messages`` array with every request.
+The **/v1 API is fully stateless**: each request creates a fresh session context, so the client must send the full ``messages`` array every time. The extension endpoints are the opposite — they are session-scoped via the signed ``fingpt_sessionid`` cookie and keep conversation history server-side until the session expires (1 hour idle) or is cleared.
 
 Response Times
 ~~~~~~~~~~~~~~
