@@ -22,6 +22,7 @@ from django.conf import settings
 from django_ratelimit import ALL
 from django_ratelimit.decorators import ratelimit
 
+from api.auth import authenticate_request as _authenticate_request
 from api.agent_budget import agent_run_slot, BudgetExceeded, ConcurrencyExceeded
 from api.identity import get_request_identity
 from datascraper import datascraper as ds
@@ -80,51 +81,6 @@ def _get_api_session_id(request: HttpRequest, user_id: Optional[str] = None) -> 
     if user_id:
         return f"api_user_{user_id}"
     return f"api_req_{uuid.uuid4().hex}"
-
-
-def _authenticate_request(request: HttpRequest) -> Optional[JsonResponse]:
-    """
-    Validate Bearer token authentication for API requests.
-    Returns None if authenticated, or a JsonResponse error if not.
-
-    The API key is configured via the FINGPT_API_KEY environment variable.
-    If FINGPT_API_KEY is not set, authentication is disabled (development mode).
-    """
-    api_key = os.getenv('FINGPT_API_KEY')
-    if not api_key:
-        if getattr(settings, 'REQUIRE_FINGPT_API_KEY', False):
-            logger.error(
-                "FINGPT_API_KEY is not set but REQUIRE_FINGPT_API_KEY is True; "
-                "refusing /v1/* requests (fail closed)."
-            )
-            return JsonResponse(
-                {'error': {'message': 'Server authentication is misconfigured.', 'type': 'server_error'}},
-                status=503
-            )
-        # No API key configured — authentication disabled (dev mode)
-        return None
-
-    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
-    if not auth_header:
-        return JsonResponse(
-            {'error': {'message': 'Missing Authorization header. Use: Authorization: Bearer <api_key>', 'type': 'authentication_error'}},
-            status=401
-        )
-
-    if not auth_header.startswith('Bearer '):
-        return JsonResponse(
-            {'error': {'message': 'Invalid Authorization format. Use: Authorization: Bearer <api_key>', 'type': 'authentication_error'}},
-            status=401
-        )
-
-    provided_key = auth_header[7:]  # Strip 'Bearer '
-    if not hmac.compare_digest(provided_key, api_key):
-        return JsonResponse(
-            {'error': {'message': 'Invalid API key', 'type': 'authentication_error'}},
-            status=401
-        )
-
-    return None
 
 
 def _merge_domains_into_preferred_links(
