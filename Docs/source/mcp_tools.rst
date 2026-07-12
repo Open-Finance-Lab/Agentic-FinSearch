@@ -59,7 +59,7 @@ The MCP system consists of two layers:
 How to Enable
 -------------
 
-MCP tools are enabled by default. On startup the agent connects to every server marked ``"enabled": true`` in ``mcp_server_config.json``; a tool must additionally be on the active allow-list (``mcp_client/tool_policy.py``) to reach the agent.
+MCP tools are enabled by default. On startup the agent connects to every server not marked ``"disabled": true`` in ``mcp_server_config.json``; a tool must additionally be on the active allow-list (``mcp_client/tool_policy.py``) to reach the agent.
 
 Ensure your ``.env`` file in ``Main/backend/`` is properly configured:
 
