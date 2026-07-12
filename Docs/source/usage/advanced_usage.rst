@@ -162,13 +162,7 @@ Context Management
 Agentic FinSearch tracks each session with the **Unified Context Manager** —
 session-scoped conversation history, scraped page content, and research
 findings held in a structured JSON form. See :doc:`memory_system` for
-details.
-
-**How it works:**
-
-- **Session-Based**: The agent maintains the full conversation history for the current session.
-- **Storage & Expiry**: Session state lives in the Django cache (file-based in development, Redis in production) and expires after **1 hour** of inactivity.
-- **Session Isolation**: Each browser tab/session maintains its own isolated context.
+how storage, expiry, and session isolation work.
 
 .. note::
    Each browser tab maintains its own conversation context. Refreshing the page starts a new session unless a custom session ID is used.
