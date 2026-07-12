@@ -7,7 +7,8 @@ Prerequisites
 -------------
 
 * Docker Desktop (Windows/macOS) or Docker Engine (Linux)
-* At least one API key (OpenAI, Anthropic, or DeepSeek)
+* An **OpenAI API key** — required by default: the container exits at startup without one (override with ``REQUIRE_OPENAI_API_KEY=0``, not recommended)
+* A **Google API key** (``GOOGLE_API_KEY``) for the default ``FinGPT`` (Gemini) model; Anthropic/DeepSeek keys only if you use their models
 
 Steps
 -----
@@ -25,7 +26,7 @@ Steps
 
       cp Main/backend/.env.example Main/backend/.env
 
-   Edit ``.env`` and set at least one of ``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``, or ``DEEPSEEK_API_KEY``.
+   Edit ``.env`` and set ``OPENAI_API_KEY`` (required by default — the container refuses to start without it) and ``GOOGLE_API_KEY`` (used by the default ``FinGPT`` model). To run without an OpenAI key, set ``REQUIRE_OPENAI_API_KEY=0`` (not recommended).
 
 3. Build and run the backend.
 
