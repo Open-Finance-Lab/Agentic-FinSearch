@@ -104,7 +104,7 @@ Check if the backend is running. Does **not** require authentication.
      "status": "healthy",
      "service": "fingpt-backend",
      "timestamp": "2026-02-22T12:00:00.000000",
-     "version": "0.13.3",
+     "version": "0.16.0",
      "using_unified_context": true
    }
 
