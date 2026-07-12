@@ -76,6 +76,7 @@ override-dependencies = [
     # ALLOWED_STYLES in its no-css-sanitizer fallback path), breaking the docs build.
     "bleach[css]>=6.4.0",      # GHSA: formaction URI bypass + Unicode scheme sanitization gap
     "starlette>=1.3.1",        # GHSA: form-limit DoS, UNC SSRF, host poisoning, getattr dispatch (via mcp)
+    "mistune>=3.3.0",          # GHSA: quadratic-time parse_link_text DoS (Dependabot #183; via nbconvert)
 ]
 
 [tool.pytest.ini_options]
