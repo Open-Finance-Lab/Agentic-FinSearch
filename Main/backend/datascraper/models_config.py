@@ -28,12 +28,26 @@ MODELS_CONFIG = {
         "provider": "buffet",
         "model_name": "Buffet-Agent",
         "endpoint_url": "https://l7d6yqg7nzbkumx8.us-east-1.aws.endpoints.huggingface.cloud",
+        "direct": True,
+        "persona": "buffett",
         "supports_mcp": True,
         "supports_advanced": True,
         "max_tokens": 400000,
         "streaming": True,
         "tracing": True,
         "description": "The power of the Warren, in the palm of my hands"
+    },
+    "FinSearch-Trader": {
+        "provider": "google",
+        "model_name": "gemini-3-flash-preview",
+        "direct": True,
+        "persona": "trader",
+        "supports_mcp": False,
+        "supports_advanced": False,
+        "max_tokens": 1048576,
+        "streaming": False,
+        "tracing": False,
+        "description": "Professional trader persona - direct path, no tools (backtest-safe)"
     },
 
 

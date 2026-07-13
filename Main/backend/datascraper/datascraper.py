@@ -110,6 +110,35 @@ BUFFETT_INSTRUCTION = (
     + _SECURITY_GUARDRAILS
 )
 
+_CONTEXT_CLAUSE = (
+    "When provided context, use the provided context as fact and not your own knowledge; "
+    "the context provided is the most up-to-date information."
+)
+
+# In-code fallbacks if a persona's prompts/personas/<name>.md is missing.
+_PERSONA_FALLBACKS = {"buffett": BUFFETT_INSTRUCTION}
+
+
+def load_persona_instruction(name: str) -> str:
+    """Compose a persona system instruction from prompts/personas/<name>.md.
+
+    The markdown file carries only the persona prose (single source of truth,
+    same convention as prompts/_security.md); the shared context clause and
+    security guardrails are appended here so every persona keeps them. An
+    unknown/missing persona falls back to the in-code constant when one
+    exists, else the default INSTRUCTION.
+    """
+    path = backend_dir / "prompts" / "personas" / f"{name}.md"
+    try:
+        prose = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        logging.warning(
+            "[datascraper] prompts/personas/%s.md missing; using fallback", name
+        )
+        return _PERSONA_FALLBACKS.get(name, INSTRUCTION)
+    return f"{prose}\n{_CONTEXT_CLAUSE}\n\n{_SECURITY_GUARDRAILS}"
+
+
 SYSTEM_PREFIX = "[SYSTEM MESSAGE]: "
 USER_PREFIXES = ("[USER MESSAGE]: ", "[USER QUESTION]: ")
 ASSISTANT_PREFIXES = ("[ASSISTANT MESSAGE]: ", "[ASSISTANT RESPONSE]: ")
@@ -281,9 +310,10 @@ def _prepare_messages(message_list: list[dict], user_input: str, model: str = No
     instruction = INSTRUCTION
     if model:
         model_config = get_model_config(model)
-        if model_config and model_config.get("provider") == "buffet":
-            instruction = BUFFETT_INSTRUCTION
-            logging.info("[BUFFET] Using Warren Buffett system prompt")
+        persona = (model_config or {}).get("persona")
+        if persona:
+            instruction = load_persona_instruction(persona)
+            logging.info("[PERSONA] Using %s system prompt", persona)
 
     if system_message:
         instruction_payload = f"{system_message} {instruction}".strip()
@@ -716,6 +746,25 @@ def create_advanced_response(
     from datascraper.quality_logger import QualityTracker
     qt = QualityTracker(mode="research", query=user_input, model=model)
 
+    # Direct (no-tools) models must never enter the research/tool pipeline —
+    # for backtest-style consumers this is a look-ahead safety invariant.
+    model_config = get_model_config(model)
+    if model_config and model_config.get("direct"):
+        logging.info(f"[RESEARCH] {model} is a direct (no-tools) model; using direct response")
+        qt.set_data_source("direct_llm")
+        qt.flag("direct_model")
+        if stream:
+            regular_stream = create_response(user_input, message_list, model, stream=True)
+
+            async def _direct_stream():
+                for chunk in regular_stream:
+                    yield chunk, []
+
+            return _direct_stream()
+        response = create_response(user_input, message_list, model)
+        qt.complete(response)
+        return response, []
+
     # --- MCP-first routing for numerical financial queries ---
     # For non-streaming requests, try MCP tools first if the query is numerical.
     # This dramatically improves accuracy for price/volume/ratio queries by using
@@ -869,6 +918,29 @@ def create_advanced_response_streaming(
     """
     logging.info(f"Starting advanced streaming response with model ID: {model}")
 
+    # Direct (no-tools) models bypass research/tool machinery (see
+    # create_advanced_response for the rationale).
+    direct_config = get_model_config(model)
+    if direct_config and direct_config.get("direct"):
+        logging.info(f"[RESEARCH STREAM] {model} is a direct (no-tools) model; using direct response stream")
+        regular_stream = create_response(user_input, message_list, model, stream=True)
+        direct_state: Dict[str, Any] = {
+            "final_output": "",
+            "used_urls": [],
+            "used_sources": []
+        }
+
+        async def _direct_research_stream() -> AsyncIterator[tuple[str, list[str]]]:
+            aggregated = ""
+            try:
+                for chunk in regular_stream:
+                    aggregated += chunk or ""
+                    yield chunk, []
+            finally:
+                direct_state["final_output"] = aggregated
+
+        return _direct_research_stream(), direct_state
+
     # --- MCP-first routing for numerical financial queries (streaming path) ---
     if _is_numerical_financial_query(user_input):
         logging.info(f"[MCP-FIRST STREAM] Query classified as numerical financial: {user_input[:80]}...")
@@ -1012,10 +1084,12 @@ def create_agent_response(
     actual_model_name = model_config.get("model_name") if model_config else model
     provider = model_config.get("provider") if model_config else None
 
-    if provider == "buffet":
-        logging.info(f"[AGENT] Buffet agent does not support tool mode; using direct response for {model}")
+    if model_config and model_config.get("direct"):
+        # Config-driven no-tools dispatch (buffet was the first user; the
+        # trader persona relies on it as a look-ahead safety invariant).
+        logging.info(f"[AGENT] {model} is a direct (no-tools) model; using direct response")
         qt.set_data_source("direct_llm")
-        qt.flag("buffet_fallback")
+        qt.flag("direct_model")
         response = create_response(user_input, message_list, model)
         qt.complete(response)
         return response, []
@@ -1255,9 +1329,8 @@ def create_agent_response_stream(
     state: Dict[str, str] = {"final_output": ""}
 
     model_config = get_model_config(model)
-    provider = model_config.get("provider") if model_config else None
-    if provider == "buffet":
-        logging.info(f"[AGENT STREAM] Buffet agent does not support tool mode; using direct response stream for {model}")
+    if model_config and model_config.get("direct"):
+        logging.info(f"[AGENT STREAM] {model} is a direct (no-tools) model; using direct response stream")
         regular_stream = create_response(user_input, message_list, model, stream=True)
 
         async def _fallback_stream() -> AsyncIterator[str]:
