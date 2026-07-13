@@ -28,6 +28,21 @@ for (const file of requiredFiles) {
   }
 }
 
+// Report whether the built bundle carries the coarse-gate key, so a silent
+// KEYLESS build (which 401s against a key-gated backend) is impossible to miss.
+// Informational only — a keyless dev bundle is a legitimate build, not an error.
+const mainJsPath = path.join(distDir, 'main.js');
+if (fs.existsSync(mainJsPath)) {
+  const bundle = fs.readFileSync(mainJsPath, 'utf8');
+  const baked = bundle.match(/FINGPT_API_KEY\)?\s*\|\|\s*"((?:[^"\\]|\\.)*)"/);
+  const keyed = Boolean(baked && baked[1]);
+  console.log(
+    keyed
+      ? 'Bundle auth: KEYED — sends Authorization: Bearer (ready to publish).'
+      : 'Bundle auth: KEYLESS — no Authorization header (dev build; will 401 against a key-gated backend).'
+  );
+}
+
 if (allGood) {
   console.log(`\nAll required files are present in dist/. Update the plugin in your browser to verify the updates!\n`);
   process.exit(0);

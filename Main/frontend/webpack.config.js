@@ -1,10 +1,48 @@
 const path = require('path');
+const fs = require('fs');
 const CopyPlugin = require('copy-webpack-plugin');
 const webpack = require('webpack');
 const TerserPlugin = require('terser-webpack-plugin');
 
 const { RawSource } = webpack.sources;
 const isBun = Boolean(process.versions && process.versions.bun);
+
+// Resolve the coarse-gate FINGPT_API_KEY that gets baked into the bundle.
+// Precedence, highest first:
+//   1. process.env.FINGPT_API_KEY — an inline `FINGPT_API_KEY=… bun run build:full`,
+//      a CI-injected secret, or a value bun auto-loaded from a .env file.
+//   2. A `FINGPT_API_KEY=…` line in a gitignored `.env.local` (then `.env`) beside
+//      this config — so a release build picks the key up automatically and you never
+//      have to paste it on the command line again.
+// A machine with none of these still builds a valid KEYLESS dev bundle (no
+// Authorization header), which is correct for an auth-open local backend.
+function resolveApiKey() {
+    if (process.env.FINGPT_API_KEY) {
+        return process.env.FINGPT_API_KEY;
+    }
+    for (const name of ['.env.local', '.env']) {
+        let contents;
+        try {
+            contents = fs.readFileSync(path.join(__dirname, name), 'utf8');
+        } catch {
+            continue; // file absent — try the next candidate
+        }
+        const match = contents.match(/^\s*(?:export\s+)?FINGPT_API_KEY\s*=\s*(.*)$/m);
+        if (match) {
+            // strip trailing whitespace/CR and a single pair of surrounding quotes
+            return match[1].trim().replace(/^(['"])(.*)\1$/, '$2');
+        }
+    }
+    return '';
+}
+
+const COARSE_GATE_API_KEY = resolveApiKey();
+console.log(
+    COARSE_GATE_API_KEY
+        ? '[webpack] Baking coarse-gate FINGPT_API_KEY into the bundle (KEYED release build).'
+        : '[webpack] No FINGPT_API_KEY found (env or .env.local) — building a KEYLESS dev '
+          + 'bundle; backend calls will 401 against a key-gated backend.'
+);
 
 const escapeNonAscii = (input) => {
     let modified = false;
@@ -115,10 +153,10 @@ module.exports = {
         hints: "warning"
     },
     plugins: [
-        // Bake the coarse-gate API key from the build env into the bundle. Empty when
-        // FINGPT_API_KEY is unset (local/dev builds) -> getAuthHeaders() returns {}.
+        // Bake the resolved coarse-gate API key (see resolveApiKey above) into the
+        // bundle. Empty for keyless dev builds -> getAuthHeaders() returns {}.
         new webpack.DefinePlugin({
-            'process.env.FINGPT_API_KEY': JSON.stringify(process.env.FINGPT_API_KEY || ''),
+            'process.env.FINGPT_API_KEY': JSON.stringify(COARSE_GATE_API_KEY),
         }),
         new webpack.BannerPlugin({
             banner: '// @charset "UTF-8";',
