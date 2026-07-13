@@ -110,13 +110,32 @@ BUFFETT_INSTRUCTION = (
     + _SECURITY_GUARDRAILS
 )
 
+TRADER_INSTRUCTION = (
+    "You are FinSearch Trader, a disciplined professional equities trader. "
+    "You manage positions with a risk-first process: capital preservation precedes "
+    "return-seeking; you size positions to conviction and cut losers rather than "
+    "average down into a failing thesis. You reason strictly from the evidence you "
+    "are given - prices, technical indicators, portfolio state, and any provided "
+    "news - and you never invent data you were not shown. When evidence is mixed "
+    "you prefer holding over churning, and you can say why in one or two sentences. "
+    "When a request specifies an output format or schema, you follow it exactly: "
+    "no extra prose, no markdown fences, no disclaimers. "
+    "When provided context, use the provided context as fact and not your own knowledge; "
+    "the context provided is the most up-to-date information.\n\n"
+    + _SECURITY_GUARDRAILS
+)
+
 _CONTEXT_CLAUSE = (
     "When provided context, use the provided context as fact and not your own knowledge; "
     "the context provided is the most up-to-date information."
 )
 
-# In-code fallbacks if a persona's prompts/personas/<name>.md is missing.
-_PERSONA_FALLBACKS = {"buffett": BUFFETT_INSTRUCTION}
+# In-code fallbacks if a persona's prompts/personas/<name>.md is missing
+# (e.g. an image built without the .dockerignore prompts exception).
+_PERSONA_FALLBACKS = {
+    "buffett": BUFFETT_INSTRUCTION,
+    "trader": TRADER_INSTRUCTION,
+}
 
 
 def load_persona_instruction(name: str) -> str:
@@ -124,19 +143,38 @@ def load_persona_instruction(name: str) -> str:
 
     The markdown file carries only the persona prose (single source of truth,
     same convention as prompts/_security.md); the shared context clause and
-    security guardrails are appended here so every persona keeps them. An
-    unknown/missing persona falls back to the in-code constant when one
-    exists, else the default INSTRUCTION.
+    security guardrails are appended so every persona keeps them. A missing
+    file falls back to the in-code constant when one exists (logged at ERROR:
+    it means the deploy artifact is missing runtime assets), else the default
+    INSTRUCTION.
     """
     path = backend_dir / "prompts" / "personas" / f"{name}.md"
     try:
         prose = path.read_text(encoding="utf-8").strip()
     except OSError:
-        logging.warning(
-            "[datascraper] prompts/personas/%s.md missing; using fallback", name
+        logging.error(
+            "[datascraper] prompts/personas/%s.md missing; using in-code fallback", name
         )
         return _PERSONA_FALLBACKS.get(name, INSTRUCTION)
     return f"{prose}\n{_CONTEXT_CLAUSE}\n\n{_SECURITY_GUARDRAILS}"
+
+
+def _direct_regular_stream(model_config: dict, user_input: str,
+                           message_list: list[dict], model: str):
+    """Chunk iterator for a direct model's streaming fallback.
+
+    Models flagged `streaming: False` (e.g. gemini-3-flash-preview, which the
+    model table documents as non-streaming) get a single-chunk wrap of the
+    non-streaming call instead of a raw SSE request the provider may not
+    support reliably — the same shape _create_buffet_response_stream uses.
+    """
+    if model_config.get("streaming", True):
+        return create_response(user_input, message_list, model, stream=True)
+
+    def _single():
+        yield create_response(user_input, message_list, model)
+
+    return _single()
 
 
 SYSTEM_PREFIX = "[SYSTEM MESSAGE]: "
@@ -754,7 +792,7 @@ def create_advanced_response(
         qt.set_data_source("direct_llm")
         qt.flag("direct_model")
         if stream:
-            regular_stream = create_response(user_input, message_list, model, stream=True)
+            regular_stream = _direct_regular_stream(model_config, user_input, message_list, model)
 
             async def _direct_stream():
                 for chunk in regular_stream:
@@ -923,7 +961,7 @@ def create_advanced_response_streaming(
     direct_config = get_model_config(model)
     if direct_config and direct_config.get("direct"):
         logging.info(f"[RESEARCH STREAM] {model} is a direct (no-tools) model; using direct response stream")
-        regular_stream = create_response(user_input, message_list, model, stream=True)
+        regular_stream = _direct_regular_stream(direct_config, user_input, message_list, model)
         direct_state: Dict[str, Any] = {
             "final_output": "",
             "used_urls": [],
@@ -1331,7 +1369,7 @@ def create_agent_response_stream(
     model_config = get_model_config(model)
     if model_config and model_config.get("direct"):
         logging.info(f"[AGENT STREAM] {model} is a direct (no-tools) model; using direct response stream")
-        regular_stream = create_response(user_input, message_list, model, stream=True)
+        regular_stream = _direct_regular_stream(model_config, user_input, message_list, model)
 
         async def _fallback_stream() -> AsyncIterator[str]:
             aggregated_text = ""

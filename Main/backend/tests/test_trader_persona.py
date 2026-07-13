@@ -128,24 +128,50 @@ def test_research_mode_routes_direct_to_provider_client():
     buffet.assert_not_called()
 
 
-def test_agent_stream_routes_direct_models_to_non_agent_path():
-    """create_agent_response_stream must route direct models to
-    create_response(stream=True) — patching create_response is fine HERE
-    because the assertion is only about the dispatch, and the internal
-    provider routing is covered by the two tests above."""
-    with patch.object(ds, "create_response", return_value=iter(["ok"])) as cr:
-        _stream, _state = ds.create_agent_response_stream(
+async def test_agent_stream_routes_direct_models_to_non_agent_path():
+    """create_agent_response_stream must route direct models to the non-agent
+    path — and because FinSearch-Trader is streaming:False, the underlying
+    call is the NON-streaming create_response wrapped as a single chunk.
+    Patching create_response is fine HERE: the assertion is only about the
+    dispatch; internal provider routing is covered by the tests above."""
+    with patch.object(ds, "create_response", return_value="ok") as cr:
+        stream, state = ds.create_agent_response_stream(
             "hi", [], model="FinSearch-Trader")
+        chunks = [c async for c in stream]
+    assert chunks == ["ok"]
+    assert state["final_output"] == "ok"
     cr.assert_called_once()
-    assert cr.call_args.kwargs.get("stream") is True or cr.call_args.args[-1] is True
+    assert not cr.call_args.kwargs.get("stream")  # streaming:False -> sync call
 
 
-def test_research_stream_routes_direct_models_to_non_agent_path():
-    with patch.object(ds, "create_response", return_value=iter(["ok"])) as cr:
-        _stream, state = ds.create_advanced_response_streaming(
+async def test_research_stream_routes_direct_models_to_non_agent_path():
+    with patch.object(ds, "create_response", return_value="ok") as cr:
+        stream, state = ds.create_advanced_response_streaming(
             "hi", [], model="FinSearch-Trader")
+        chunks = [c async for c in stream]
+    assert chunks == [("ok", [])]
+    assert state["final_output"] == "ok"
     cr.assert_called_once()
-    assert "final_output" in state
+
+
+def test_direct_stream_wraps_nonstreaming_models_in_single_chunk():
+    """FinSearch-Trader is streaming:False — its direct 'stream' must be a
+    single-chunk wrap of the non-streaming call, never a raw SSE request
+    against a provider documented as non-streaming."""
+    calls = []
+    with patch.dict(ds.clients, {"google": _fake_google_client(calls)}):
+        cfg = MODELS_CONFIG["FinSearch-Trader"]
+        chunks = list(ds._direct_regular_stream(cfg, "hi", [], "FinSearch-Trader"))
+    assert chunks == ["DIRECT-PATH-RESPONSE"]
+    assert len(calls) == 1
+    assert not calls[0].get("stream")  # the non-streaming call path
+
+
+def test_trader_fallback_constant_carries_persona_and_guardrails():
+    """Deploy resilience: if prompts/personas/trader.md is missing from an
+    image, the in-code fallback must still carry the full persona."""
+    assert "FinSearch Trader" in ds._PERSONA_FALLBACKS["trader"]
+    assert ds._SECURITY_GUARDRAILS in ds._PERSONA_FALLBACKS["trader"]
 
 
 def test_buffet_agent_still_reaches_hf_endpoint():
