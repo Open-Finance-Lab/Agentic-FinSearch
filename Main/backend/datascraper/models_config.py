@@ -108,15 +108,22 @@ def validate_model_support(model_id: str, feature: str) -> bool:
     """Check if a model supports a specific feature (e.g., mcp, advanced).
 
     Accepts either a display name ('FinGPT') or a resolved model name
-    ('gpt-5.2-chat-latest', 'gemini-3-flash-preview').
+    ('gpt-5.2-chat-latest', 'gemini-3-flash-preview'). When a model_name is
+    shared by several entries, resolution fails SAFE onto a `direct` (no-tools)
+    entry — see the reverse-lookup note below.
     """
     config = get_model_config(model_id)
     if not config:
-        # Reverse lookup: model_id might be a resolved model_name
-        for _id, cfg in MODELS_CONFIG.items():
-            if cfg.get("model_name") == model_id:
-                config = cfg
-                break
+        # Reverse lookup: model_id may be a resolved model_name. When a name is
+        # shared by more than one entry (e.g. 'gemini-3-flash-preview', used by
+        # both FinGPT and the direct/no-tools FinSearch-Trader), prefer a
+        # `direct` entry so an ambiguous identifier reports the restrictive
+        # capability set instead of the first (possibly tool-enabled) match —
+        # the same fail-safe policy _direct_dispatch_target applies at routing.
+        matches = [cfg for cfg in MODELS_CONFIG.values()
+                   if cfg.get("model_name") == model_id]
+        config = next((cfg for cfg in matches if cfg.get("direct")),
+                      matches[0] if matches else None)
     if not config:
         return False
     return config.get(f"supports_{feature}", False)
