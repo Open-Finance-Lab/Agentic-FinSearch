@@ -245,6 +245,28 @@ class NewsItemsEndpointTests(SimpleTestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual([it["guid"] for it in resp.json()["items"]], ["g1"])
 
+    # 14b. corrupt tickers: fail-closed guard, never poisons the story/batch
+    def test_corrupt_ticker_elements_dropped_not_poisoned(self):
+        # a non-string element (e.g. 123) must never reach .upper() -> 500;
+        # non-string elements are dropped, valid ones still served uppercased
+        good = make_item("g1", published=self._recent_epoch(1.0), tickers=[123, "aapl"])
+        path = self.dir / "items-2026-07-06.jsonl"
+        path.write_text(json.dumps(good) + "\n", encoding="utf-8")
+        with override_settings(RAW_ITEMS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["items"][0]["tickers"], ["AAPL"])
+
+    def test_bare_string_tickers_becomes_empty_list(self):
+        # a bare string must never char-iterate into ['A','A','P','L']
+        good = make_item("g1", published=self._recent_epoch(1.0), tickers="AAPL")
+        path = self.dir / "items-2026-07-06.jsonl"
+        path.write_text(json.dumps(good) + "\n", encoding="utf-8")
+        with override_settings(RAW_ITEMS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["items"][0]["tickers"], [])
+
     # 15. oversized file
     def test_oversized_file_404s(self):
         huge_description = "x" * (11 * 1024 * 1024)  # > _MAX_ITEMS_FILE_MB
@@ -274,3 +296,26 @@ class NewsItemsEndpointTests(SimpleTestCase):
             resp = self.client.get(URL)
         self.assertEqual(resp.status_code, 404)
         self.assertEqual(resp.json(), {"error": "no_items"})
+
+    # 18. no re-stat after the load memoizes: @condition's etag/last-modified
+    # functions must read the mtime carried in the memo, not call path.stat()
+    # again — a re-stat there would reopen the TOCTOU window _load_items's
+    # own stat() already closed (a prune in that window would 500, not 404).
+    def test_condition_functions_never_restat_after_load(self):
+        self._write("2026-07-06", [make_item("g1")])
+        real_stat = Path.stat
+        calls = []
+
+        def counting_stat(self, **kwargs):
+            if self.name.endswith(".jsonl"):
+                calls.append(self.name)
+            return real_stat(self, **kwargs)
+
+        with override_settings(RAW_ITEMS_DIR=str(self.dir), **_HERMETIC), \
+             mock.patch.object(Path, "stat", autospec=True, side_effect=counting_stat):
+            resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 200)
+        # exactly the two stat()s inside _load_items (the max() selection key
+        # + _validate_items' size/window check) — none from etag/last-modified
+        # or the view body, which all read the memoized (path, mtime, stories).
+        self.assertEqual(calls, ["items-2026-07-06.jsonl"] * 2)

@@ -194,10 +194,10 @@ FIELD_CAPS = {"title": 500, "description": 5000, "link": 2000, "source": 200, "g
 
 # Control chars + bidi/direction overrides (recency/spoofing hygiene, spec 7.1).
 _CONTROL_RE = re.compile(
-    "[\x00-\x08\x0b\x0c\x0e-\x1f\x7f"
-    "\u200e\u200f\u202a-\u202e\u2066-\u2069]"
+    "[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f"
+    "\\u200e\\u200f\\u202a-\\u202e\\u2066-\\u2069]"
 )
-_LINEBREAK_RE = re.compile("[\t\n\v\f\r\x1c-\x1e\x85\u2028\u2029]+")
+_LINEBREAK_RE = re.compile("[\\t\\n\\v\\f\\r\\x1c-\\x1e\\x85\\u2028\\u2029]+")
 
 
 def _clean_text(s, cap):
@@ -239,7 +239,12 @@ def _validate_items(path, max_file_mb=_MAX_ITEMS_FILE_MB):
         story["source"] = _clean_text(story["source"], FIELD_CAPS["source"])
         story["guid"] = _clean_text(str(story["guid"]), FIELD_CAPS["guid"])
         story["link"] = _clean_text(str(story["link"]), FIELD_CAPS["link"])
-        story["tickers"] = [t.upper() for t in story.get("tickers", [])]
+        # non-list/non-string tickers dropped, not poison-pilled: a corrupt
+        # "tickers":[123] must never .upper() -> AttributeError -> 500, and
+        # a bare "tickers":"AAPL" must never char-iterate to ['A','A','P','L']
+        raw_tickers = story.get("tickers", [])
+        story["tickers"] = ([t.upper() for t in raw_tickers if isinstance(t, str)]
+                            if isinstance(raw_tickers, list) else [])
         stories.append(story)
     return stories
 
@@ -251,11 +256,15 @@ _ITEMS_CONTRACT_FIELDS = ("guid", "title", "link", "source", "published",
 
 
 def _load_items():
-    """-> (newest_path, stories_sorted_desc) or None. No ?as_of for items:
-    always the single newest batch. Mirrors _load_artifact's fail-closed
-    contract — any locate/read/validate failure (including a batch that
-    vanishes mid-race, or one that validates to zero stories) returns None,
-    never falling back to an older batch."""
+    """-> (newest_path, newest_mtime, stories_sorted_desc) or None. No ?as_of
+    for items: always the single newest batch. Mirrors _load_artifact's
+    fail-closed contract — any locate/read/validate failure (including a
+    batch that vanishes mid-race, or one that validates to zero stories)
+    returns None, never falling back to an older batch.
+    The mtime is captured here — the only stat() of the winning file — and
+    carried through the memo so @condition's etag/last-modified functions
+    never re-stat: a prune in the window between this load and @condition's
+    call would otherwise turn into a 500 (see _items_etag/_items_last_modified)."""
     configured = getattr(settings, "RAW_ITEMS_DIR", "")
     if not configured:
         return None
@@ -269,12 +278,15 @@ def _load_items():
     try:
         # stat() stays inside the try: a file pruned between glob() and
         # stat() fails closed, never 500s (same race as _load_artifact).
-        newest = max(candidates, key=lambda p: (p.stat().st_mtime, p.name))
+        # Each candidate is stat()'d exactly once here (for the max() key);
+        # the winner's mtime is captured off that same call, not re-stat'd.
+        stats = [(p, p.stat().st_mtime) for p in candidates]
+        newest, mtime = max(stats, key=lambda ps: (ps[1], ps[0].name))
         stories = _validate_items(newest)
         stories.sort(key=lambda s: s["published"], reverse=True)
         if not stories:
             return None
-        return newest, stories
+        return newest, mtime, stories
     except (OSError, ValueError, KeyError, TypeError) as exc:
         logger.error("news_items: unreadable batch %s: %s",
                      newest.name if newest else "<vanished>", exc)
@@ -308,8 +320,12 @@ def _items_etag(request: HttpRequest):
         limit = _parse_limit(request)
     except ValueError:
         return None  # bad limit: skip conditional handling, view re-parses -> 400
-    path, _ = loaded
-    return f'"{path.name}|{path.stat().st_mtime}|{limit or 50}"'
+    path, mtime, _ = loaded
+    # mtime comes from the _load_items memo, not a re-stat: @condition calls
+    # this before the view body runs, and re-statting here would reopen the
+    # TOCTOU window _load_items already closed (a batch pruned in between
+    # would 500 instead of 404).
+    return f'"{path.name}|{mtime}|{limit or 50}"'
 
 
 def _items_last_modified(request: HttpRequest):
@@ -322,8 +338,8 @@ def _items_last_modified(request: HttpRequest):
     loaded = _get_items(request)
     if loaded is None:
         return None
-    path, _ = loaded
-    return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    _, mtime, _ = loaded
+    return datetime.fromtimestamp(mtime, tz=timezone.utc)  # no stat() — see _items_etag
 
 
 @csrf_exempt
@@ -340,7 +356,7 @@ def news_items(request: HttpRequest) -> JsonResponse:
     loaded = _get_items(request)
     if loaded is None:
         return JsonResponse({'error': 'no_items'}, status=404)
-    path, stories = loaded
+    path, _mtime, stories = loaded
     effective_limit = limit or 50
     sliced = stories[:effective_limit]
     items = [{k: story[k] for k in _ITEMS_CONTRACT_FIELDS} for story in sliced]
