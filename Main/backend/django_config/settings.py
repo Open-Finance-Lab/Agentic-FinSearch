@@ -175,6 +175,14 @@ SIGNALS_DIR = os.getenv('SIGNALS_DIR', '')
 # missing path means the endpoint fail-closes to 404 {"error": "no_items"}.
 RAW_ITEMS_DIR = os.getenv('RAW_ITEMS_DIR', '')
 
+# Cap on a single items-*.jsonl batch. Deliberately the SAME env var the Heartbeat
+# generator reads (news_signals.load_config), so one operator knob moves both
+# readers — raising it for the pipeline without raising it here would 404 a batch
+# the pipeline happily accepted. Set it in .env.production alongside the
+# heartbeat's own env file. The two defaults are pinned together by
+# Heartbeat/tests/test_port_parity.py.
+RAW_ITEMS_MAX_FILE_MB = int(os.getenv('SIGNALS_MAX_FILE_MB', '10'))
+
 # FinGPT API authentication.
 # When FINGPT_API_KEY is set, all /v1/* endpoints require:
 #     Authorization: Bearer <FINGPT_API_KEY>

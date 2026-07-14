@@ -188,9 +188,22 @@ def news_signals(request: HttpRequest) -> JsonResponse:
 # below is PORTED byte-faithfully from Heartbeat/news_signals.py
 # (validation_gate/clean_text) — that script is deliberately isolated and not
 # importable from the Django app — because it is a security trust boundary
-# (spec §7.1): do not paraphrase it.
+# (spec §7.1): do not paraphrase it. Heartbeat/tests/test_port_parity.py is the
+# anti-drift guard: it pins the constants exactly, and compares the two copies'
+# BEHAVIOR over a corpus — so it catches one-sided edits only on inputs the
+# corpus reaches. It shipped missing the malformed-numeric case and went green
+# over exactly that drift once. Widen the corpus when you add a branch here;
+# edit both copies, in the same commit.
+# The ONE deliberate divergence: cap resolution. Heartbeat reads
+# SIGNALS_MAX_FILE_MB in load_config; here the same env var arrives via
+# settings.RAW_ITEMS_MAX_FILE_MB (one operator knob, two readers). The parity
+# test pins the two defaults together.
 REQUIRED_FIELDS = ("guid", "title", "link", "source", "published", "score")
 FIELD_CAPS = {"title": 500, "description": 5000, "link": 2000, "source": 200, "guid": 200}
+# Required fields that must be strings. A malformed type drops the story — same
+# stance as the numeric parse in _validate_items — so a corrupt field can never
+# reach _clean_text as a non-str and can never poison the whole batch.
+TEXT_REQUIRED_FIELDS = ("guid", "title", "link", "source")
 
 # Control chars + bidi/direction overrides (recency/spoofing hygiene, spec 7.1).
 _CONTROL_RE = re.compile(
@@ -201,20 +214,27 @@ _LINEBREAK_RE = re.compile("[\\t\\n\\v\\f\\r\\x1c-\\x1e\\x85\\u2028\\u2029]+")
 
 
 def _clean_text(s, cap):
+    # non-str (incl. None) collapses to "": the gate must never raise on a
+    # malformed field type. Required-field types are checked in _validate_items;
+    # this keeps optional and LLM-derived callers total on their own.
+    s = s if isinstance(s, str) else ""
     # line boundaries first — _CONTROL_RE would strip \v/\f/\x1c-\x1e to nothing and fuse words
-    s = _LINEBREAK_RE.sub(" ", unicodedata.normalize("NFC", s or ""))
+    s = _LINEBREAK_RE.sub(" ", unicodedata.normalize("NFC", s))
     s = _CONTROL_RE.sub("", s)
     s = s.replace("NEWS_DATA", "")   # datamarking token can never come from the feed
     return s[:cap]
 
 
-_MAX_ITEMS_FILE_MB = 10   # matches Heartbeat SIGNALS_MAX_FILE_MB default
+_MAX_ITEMS_FILE_MB = 10   # default only; settings.RAW_ITEMS_MAX_FILE_MB is the live value
 
 
-def _validate_items(path, max_file_mb=_MAX_ITEMS_FILE_MB):
+def _validate_items(path, max_file_mb=None):
     """Input trust boundary (ported from Heartbeat's validation_gate).
-    Batch-level defects raise ValueError (poison pill); a bad `published` or
-    numeric field drops only that story."""
+    Batch-level defects raise ValueError (poison pill); a bad `published`, a
+    malformed numeric, or a non-str TEXT_REQUIRED_FIELDS value drops only that
+    story."""
+    if max_file_mb is None:
+        max_file_mb = getattr(settings, "RAW_ITEMS_MAX_FILE_MB", _MAX_ITEMS_FILE_MB)
     st = path.stat()
     if st.st_size > max_file_mb * 1024 * 1024:
         raise ValueError(f"file exceeds {max_file_mb}MB")
@@ -228,20 +248,25 @@ def _validate_items(path, max_file_mb=_MAX_ITEMS_FILE_MB):
             if field not in story:
                 raise ValueError(f"line {i}: missing required field {field}")
         try:
-            published = float(story["published"]); story["score"] = float(story["score"])
+            published = float(story["published"])
+            story["score"] = float(story["score"])
         except (TypeError, ValueError):
             continue                                   # malformed numerics: drop story, keep batch
         if not (lo <= published <= hi):
             continue                                   # forged/insane epoch: drop story, keep batch
+        if not all(isinstance(story[f], str) for f in TEXT_REQUIRED_FIELDS):
+            continue  # malformed text types: drop the story, keep the batch
         story["published"] = published
         story["title"] = _clean_text(story["title"], FIELD_CAPS["title"])
         story["description"] = _clean_text(story.get("description", ""), FIELD_CAPS["description"])
         story["source"] = _clean_text(story["source"], FIELD_CAPS["source"])
-        story["guid"] = _clean_text(str(story["guid"]), FIELD_CAPS["guid"])
-        story["link"] = _clean_text(str(story["link"]), FIELD_CAPS["link"])
-        # non-list/non-string tickers dropped, not poison-pilled: a corrupt
-        # "tickers":[123] must never .upper() -> AttributeError -> 500, and
-        # a bare "tickers":"AAPL" must never char-iterate to ['A','A','P','L']
+        story["guid"] = _clean_text(story["guid"], FIELD_CAPS["guid"])
+        story["link"] = _clean_text(story["link"], FIELD_CAPS["link"])
+        # non-list/non-string tickers dropped, never crashed: a corrupt
+        # "tickers":[123] must not .upper() -> AttributeError, which the only
+        # caller (process_batch's ValueError-only except) would not catch and
+        # which would abort the whole sweep; a bare "tickers":"AAPL" must not
+        # char-iterate to ['A','A','P','L'].
         raw_tickers = story.get("tickers", [])
         story["tickers"] = ([t.upper() for t in raw_tickers if isinstance(t, str)]
                             if isinstance(raw_tickers, list) else [])

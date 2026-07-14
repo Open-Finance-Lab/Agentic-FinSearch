@@ -275,6 +275,13 @@ class NewsItemsEndpointTests(SimpleTestCase):
         self.assertEqual(resp.json()["items"][0]["tickers"], [])
 
     # 15. oversized file
+    # Kept at real 11MB rather than shrunk via override_settings the way
+    # test_max_file_mb_setting_drives_the_accepted_cap (#23) does: that test
+    # only proves the override wiring reacts at call time; this one is the
+    # only test that exercises the actual UNMODIFIED default (settings.py's
+    # RAW_ITEMS_MAX_FILE_MB = int(os.getenv('SIGNALS_MAX_FILE_MB', '10')))
+    # end-to-end against a real oversized payload. Shrinking it would drop
+    # that coverage, not just cost.
     def test_oversized_file_404s(self):
         huge_description = "x" * (11 * 1024 * 1024)  # > _MAX_ITEMS_FILE_MB
         self._write("2026-07-06", [make_item("g1", description=huge_description)])
@@ -326,3 +333,153 @@ class NewsItemsEndpointTests(SimpleTestCase):
         # + _validate_items' size/window check) — none from etag/last-modified
         # or the view body, which all read the memoized (path, mtime, stories).
         self.assertEqual(calls, ["items-2026-07-06.jsonl"] * 2)
+
+    # 19. Last-Modified suppression on ?limit (F4): mirrors
+    # test_last_modified_only_on_unfiltered_variant /
+    # test_if_modified_since_revalidates_unfiltered_but_never_filtered in
+    # test_signals_endpoint.py for the tickers-filter analog. Only the
+    # default-limit variant carries Last-Modified: an explicit ?limit slices
+    # the batch differently, so only the ETag (which encodes the limit) can
+    # identify that variant — a bare If-Modified-Since 304 on a ?limit=
+    # request would tell the client to reuse a differently-sliced body.
+    def test_last_modified_only_on_unlimited_variant(self):
+        self._write("2026-07-06", [make_item("g1")])
+        with override_settings(RAW_ITEMS_DIR=str(self.dir), **_HERMETIC):
+            unlimited = self.client.get(URL)
+            limited = self.client.get(URL, {"limit": "1"})
+        self.assertTrue(unlimited.has_header("Last-Modified"))
+        self.assertFalse(limited.has_header("Last-Modified"))
+
+    def test_if_modified_since_revalidates_unlimited_but_never_limited(self):
+        # RFC 9110: with no If-None-Match, the server answers from
+        # If-Modified-Since alone and never consults the ETag — so a 304
+        # here would tell the client to reuse a differently-limited body.
+        self._write("2026-07-06", [make_item("g1")])
+        with override_settings(RAW_ITEMS_DIR=str(self.dir), **_HERMETIC):
+            first = self.client.get(URL)
+            ims = first["Last-Modified"]
+            unlimited = self.client.get(URL, HTTP_IF_MODIFIED_SINCE=ims)
+            limited = self.client.get(URL, {"limit": "1"},
+                                      HTTP_IF_MODIFIED_SINCE=ims)
+        self.assertEqual(unlimited.status_code, 304)
+        self.assertEqual(limited.status_code, 200)
+
+    # 20. bad/out-of-window published, FUTURE side (F5): twin of
+    # test_out_of_window_published_drops_story_keeps_batch, which only
+    # covers the lo/past side of 'lo, hi = st.st_mtime - 30*86400,
+    # st.st_mtime + 3600'. A story published further in the future than the
+    # hi bound must drop too — the batch sorts published desc, so an
+    # unbounded future timestamp (forged, or clock-skewed) would sort
+    # newest-first FOREVER and permanently shadow real stories. The window
+    # is anchored on the batch file's st_mtime, not wall-clock time; _write
+    # below leaves st_mtime at ~now (the write time), so "now + 2h" is
+    # explicitly past mtime+1h rather than relying on that being true by
+    # luck.
+    def test_future_published_beyond_window_drops_story_keeps_batch(self):
+        good = make_item("g1", published=self._recent_epoch(1.0))
+        future = make_item("g2", published=time.time() + 2 * 3600)  # > mtime + 1h
+        path = self.dir / "items-2026-07-06.jsonl"
+        path.write_text(json.dumps(good) + "\n" + json.dumps(future) + "\n",
+                        encoding="utf-8")
+        with override_settings(RAW_ITEMS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual([it["guid"] for it in resp.json()["items"]], ["g1"])
+
+    # 21. blank-line skip (F5): 'if not line.strip(): continue' guards
+    # json.loads("") from poison-pilling the batch. Every _write helper here
+    # joins with exactly one trailing newline, so none of the tests above
+    # ever produce a blank line; in the wild the source is a writer that
+    # newline-terminates an already newline-terminated buffer (e.g.
+    # "\n".join(lines) + "\n" where lines already end in "\n", or a
+    # double-flush), landing a blank line mid-file and/or a trailing one.
+    def test_blank_lines_between_and_trailing_are_skipped(self):
+        g1 = make_item("g1", published=self._recent_epoch(1.0))
+        g2 = make_item("g2", published=self._recent_epoch(2.0))
+        path = self.dir / "items-2026-07-06.jsonl"
+        path.write_text(json.dumps(g1) + "\n\n" + json.dumps(g2) + "\n\n",
+                        encoding="utf-8")
+        with override_settings(RAW_ITEMS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(sorted(it["guid"] for it in resp.json()["items"]),
+                         ["g1", "g2"])
+
+    # 22. text-type rule (F2a): a required TEXT field reaching _clean_text as
+    # a non-str must drop just that story — not raise TypeError out of
+    # unicodedata.normalize() and poison the whole batch into a 404 (the
+    # pre-fix behavior). One boolean and one number are used across the
+    # fields below so both non-str JSON kinds are exercised.
+    def test_non_string_title_drops_story_keeps_batch(self):
+        good = make_item("g1", published=self._recent_epoch(1.0))
+        bad = make_item("g2", published=self._recent_epoch(1.0), title=True)
+        path = self.dir / "items-2026-07-06.jsonl"
+        path.write_text(json.dumps(good) + "\n" + json.dumps(bad) + "\n",
+                        encoding="utf-8")
+        with override_settings(RAW_ITEMS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual([it["guid"] for it in resp.json()["items"]], ["g1"])
+
+    def test_non_string_source_drops_story_keeps_batch(self):
+        good = make_item("g1", published=self._recent_epoch(1.0))
+        bad = make_item("g2", published=self._recent_epoch(1.0), source=123)
+        path = self.dir / "items-2026-07-06.jsonl"
+        path.write_text(json.dumps(good) + "\n" + json.dumps(bad) + "\n",
+                        encoding="utf-8")
+        with override_settings(RAW_ITEMS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual([it["guid"] for it in resp.json()["items"]], ["g1"])
+
+    def test_non_string_guid_drops_story_keeps_batch(self):
+        good = make_item("g1", published=self._recent_epoch(1.0))
+        bad = make_item("g2", published=self._recent_epoch(1.0))
+        bad["guid"] = 123  # guid is make_item's positional id param — set after construction
+        path = self.dir / "items-2026-07-06.jsonl"
+        path.write_text(json.dumps(good) + "\n" + json.dumps(bad) + "\n",
+                        encoding="utf-8")
+        with override_settings(RAW_ITEMS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual([it["guid"] for it in resp.json()["items"]], ["g1"])
+
+    def test_non_string_link_drops_story_keeps_batch(self):
+        good = make_item("g1", published=self._recent_epoch(1.0))
+        bad = make_item("g2", published=self._recent_epoch(1.0), link=True)
+        path = self.dir / "items-2026-07-06.jsonl"
+        path.write_text(json.dumps(good) + "\n" + json.dumps(bad) + "\n",
+                        encoding="utf-8")
+        with override_settings(RAW_ITEMS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual([it["guid"] for it in resp.json()["items"]], ["g1"])
+
+    def test_non_string_description_blanks_not_drops(self):
+        # description is optional (not in TEXT_REQUIRED_FIELDS): its own
+        # isinstance guard inside _clean_text blanks it rather than the
+        # story being dropped.
+        item = make_item("g1", published=self._recent_epoch(1.0), description=123)
+        path = self.dir / "items-2026-07-06.jsonl"
+        path.write_text(json.dumps(item) + "\n", encoding="utf-8")
+        with override_settings(RAW_ITEMS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual([it["guid"] for it in resp.json()["items"]], ["g1"])
+        self.assertEqual(resp.json()["items"][0]["description"], "")
+
+    # 23. _MAX_ITEMS_FILE_MB is settings-driven (F3): prove
+    # RAW_ITEMS_MAX_FILE_MB is read at call time (not frozen at import) by
+    # driving the wiring off a deliberately small cap against a small file,
+    # rather than writing another 11MB fixture.
+    def test_max_file_mb_setting_drives_the_accepted_cap(self):
+        path = self._write("2026-07-06", [make_item("g1", published=self._recent_epoch(1.0))])
+        size_mb = path.stat().st_size / (1024 * 1024)
+        with override_settings(RAW_ITEMS_DIR=str(self.dir),
+                               RAW_ITEMS_MAX_FILE_MB=size_mb / 2, **_HERMETIC):
+            too_small_cap = self.client.get(URL)
+        with override_settings(RAW_ITEMS_DIR=str(self.dir),
+                               RAW_ITEMS_MAX_FILE_MB=size_mb * 2, **_HERMETIC):
+            big_enough_cap = self.client.get(URL)
+        self.assertEqual(too_small_cap.status_code, 404)
+        self.assertEqual(big_enough_cap.status_code, 200)

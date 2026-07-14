@@ -14,10 +14,14 @@ fallback), writes a digest log, and posts it to a Discord channel.
 
 The production droplet is 1 vCPU / 2 GB RAM with no pip on the host, so
 `news_heartbeat.py` is a **single stdlib-only Python file** — deploying is
-copying one file; running costs ~30 MB RSS. It is fully decoupled from the
-`fingpt-api` container. Summaries are short, attributed, and always link out to
-the source article (Yahoo ToS posture: orchestration, not raw-data
-redistribution).
+copying one file; running costs ~30 MB RSS. It still runs as an independent
+systemd service and never imports or depends on the Django app — the coupling
+is one-directional: the `fingpt-api` container mounts its `digests/` output
+read-only (as `RAW_ITEMS_DIR`) to serve `GET /api/news/items/`, and
+`Heartbeat/tests/test_port_parity.py` pins the API's vendored copy of the
+validation gate to this script. Summaries are short, attributed, and always
+link out to the source article (Yahoo ToS posture: orchestration, not
+raw-data redistribution).
 
 ## Run
 

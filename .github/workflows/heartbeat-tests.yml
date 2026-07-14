@@ -7,10 +7,23 @@ on:
     paths:
       - "Heartbeat/**"
       - ".github/workflows/heartbeat-tests.yml"
+      # Main/backend/api/signals_views.py is deliberately NOT listed here,
+      # only on pull_request below: this trigger also gates the deploy job,
+      # whose sole condition is the main-ref check (paths scope the workflow
+      # RUN, not a job), so a Django-only merge would redeploy the droplet's
+      # heartbeat scripts — silently shipping any held-back rollout on a
+      # commit that touched no Heartbeat file.
   pull_request:
     paths:
       - "Heartbeat/**"
       - ".github/workflows/heartbeat-tests.yml"
+      # The backend vendors a port of news_signals.py's validation gate
+      # (clean_text/validation_gate -> _clean_text/_validate_items) and
+      # Heartbeat/tests/test_port_parity.py is what pins the two copies
+      # together, so a port-side edit must run this suite. PR-time is the
+      # right gate: the point is to make drift impossible to MERGE, and
+      # deploy skips on PR refs anyway.
+      - "Main/backend/api/signals_views.py"
   workflow_dispatch:
 
 env:
