@@ -1,9 +1,13 @@
 # News → Signals Pipeline — Design Spec
 
-> **Amended 2026-07-14:** §4.2/§4.4 field names superseded by
-> `2026-07-14-score-field-disambiguation-design.md` — the artifact/wire field
-> is now `sentiment_score` (schema v2) and the items input field is
-> `editorial_score`.
+> **Amended 2026-07-14:** field names superseded by
+> `2026-07-14-score-field-disambiguation-design.md`. The items input field
+> (§4.1) is now `editorial_score`; the artifact/wire sentiment field (§4.2,
+> §4.4) is now `sentiment_score` (schema v2). Other `score` mentions below
+> (§3 diagram, §5 config table, §8) predate the rename — read them as
+> `editorial_score` where they concern items and `sentiment_score` where they
+> concern the artifact. The internal LLM reply key (§4.3) is deliberately
+> unchanged and still `score`.
 
 **Date:** 2026-07-06
 **Status:** Formats pinned; producer-side prototype validated against real prod data. ATL-side adapter, Django endpoint, and droplet deployment are specified here but built in a future session. **Amended 2026-07-06** after the research benchmark (companion doc below): subject-relevance gate (D8) and near-dup collapse (D9) added, prompt datamarking pinned, label-deadband default widened to ±0.20. **Amended 2026-07-07** after an adversarial review of the implementation plan: `SIGNALS_STALENESS_ALERT_H` default corrected 30→20 (§5) — the 30 h default never actually caught a single missed day (see the corrected §5 note); the plan additionally hardens `TICKER_ALIASES` substring matching to word-bounded (Task 5) after confirming real collisions (`"intel"`⊂`"intelligence"`, `"cisco"`⊂`"francisco"`), and records novelty-preference/LDD/batch-mean-de-biasing as explicit (not silent) deferrals in the plan's new "Known seam debt" section.
