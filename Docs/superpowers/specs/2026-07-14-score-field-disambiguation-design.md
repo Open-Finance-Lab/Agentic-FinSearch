@@ -131,9 +131,11 @@ Identical to signals-v1 except: per-ticker entry `score` → `sentiment_score`;
 Context: ATL adapter #107 is live on main reading `sig["score"]`
 (`dashboard/backend/integrations/news_sentiment.py:235` on `origin/main` —
 local checkout stale; use `git grep origin/main`). It does **not** pin
-FinSearch's `schema_version`. Separately, ATL main's items feed is already
-broken by the headline/url wire mismatch, fix stranded on
-`feat/finsearch-items-feed` (no PR yet).
+FinSearch's `schema_version`. The headline/url items-feed fix is ATL PR #110
+(open, review under way, expected to merge as-is); verified against its head
+2026-07-14: `_feed_from_items()` never reads the items `score` and no
+production code checks `schema_version` — the items rename breaks zero merged
+ATL code even after #110 lands.
 
 - **ATL PR-1 (lands + deploys BEFORE FinSearch deploys):**
   `sig.get("sentiment_score", sig.get("score"))` in `_project_entry`;
@@ -142,10 +144,12 @@ broken by the headline/url wire mismatch, fix stranded on
   reference sketch).
 - **ATL PR-2 (after FinSearch v2 verified live):** delete the fallback —
   strict `sig["sentiment_score"]`; fixtures v2-only.
-- **`feat/finsearch-items-feed` branch:** before merge, adopt
-  `editorial_score` + `schema_version: 2` in `_feed_from_items()`/contract
-  doc (`docs/integrations/finsearch-news-items.md`) alongside its existing
-  headline/url fix. Coordination item — that branch is separately owned.
+- **Items contract docs (post-#110):** PR #110 merges with v1 vocabulary in
+  `docs/integrations/finsearch-news-items.md` and its news-story contract
+  spec (`2026-07-14-finsearch-news-story-contract-design.md`) — both state
+  `score` and `schema_version: 1`. ATL PR-1 (or PR-2 at latest) updates them
+  to `editorial_score` / `schema_version: 2`. Docs only; no ATL items code
+  change needed.
 - Out of scope: ATL-internal names (`NewsSentimentEntry.score`, panel JS
   `s.score`) — ATL's own v2 API contract, not FinSearch's wire.
 - Stale references to update opportunistically ATL-side:
