@@ -2,6 +2,7 @@ import json
 import os
 import logging
 import asyncio
+import functools
 from collections.abc import AsyncIterator
 from typing import Any, Dict, Optional, Tuple, List
 
@@ -110,6 +111,11 @@ BUFFETT_INSTRUCTION = (
     + _SECURITY_GUARDRAILS
 )
 
+_CONTEXT_CLAUSE = (
+    "When provided context, use the provided context as fact and not your own knowledge; "
+    "the context provided is the most up-to-date information."
+)
+
 TRADER_INSTRUCTION = (
     "You are FinSearch Trader, a disciplined professional equities trader. "
     "You manage positions with a risk-first process: capital preservation precedes "
@@ -120,14 +126,9 @@ TRADER_INSTRUCTION = (
     "you prefer holding over churning, and you can say why in one or two sentences. "
     "When a request specifies an output format or schema, you follow it exactly: "
     "no extra prose, no markdown fences, no disclaimers. "
-    "When provided context, use the provided context as fact and not your own knowledge; "
-    "the context provided is the most up-to-date information.\n\n"
+    + _CONTEXT_CLAUSE
+    + "\n\n"
     + _SECURITY_GUARDRAILS
-)
-
-_CONTEXT_CLAUSE = (
-    "When provided context, use the provided context as fact and not your own knowledge; "
-    "the context provided is the most up-to-date information."
 )
 
 # In-code fallbacks if a persona's prompts/personas/<name>.md is missing
@@ -138,6 +139,7 @@ _PERSONA_FALLBACKS = {
 }
 
 
+@functools.lru_cache(maxsize=None)
 def load_persona_instruction(name: str) -> str:
     """Compose a persona system instruction from prompts/personas/<name>.md.
 
@@ -147,6 +149,9 @@ def load_persona_instruction(name: str) -> str:
     file falls back to the in-code constant when one exists (logged at ERROR:
     it means the deploy artifact is missing runtime assets), else the default
     INSTRUCTION.
+
+    Memoized per name: the .md is read once per process (same load-once policy
+    as _SECURITY_GUARDRAILS), so prompt edits take effect on the next restart.
     """
     path = backend_dir / "prompts" / "personas" / f"{name}.md"
     try:
@@ -175,6 +180,25 @@ def _direct_regular_stream(model_config: dict, user_input: str,
         yield create_response(user_input, message_list, model)
 
     return _single()
+
+
+async def _consume_direct_stream(regular_stream, state: dict, as_tuple: bool = False):
+    """Re-yield a direct model's sync `regular_stream` as an async stream.
+
+    Shared by the three direct-model streaming dispatch sites, which differ only
+    in the chunk shape: `as_tuple=True` yields ``(chunk, [])`` (the research
+    ``(chunk, sources)`` contract), otherwise the bare chunk (the agent contract).
+    The concatenated output is recorded into ``state["final_output"]`` in a
+    ``finally`` so it survives client disconnects; callers with no state to
+    populate pass a throwaway dict.
+    """
+    aggregated = ""
+    try:
+        for chunk in regular_stream:
+            aggregated += chunk or ""
+            yield (chunk, []) if as_tuple else chunk
+    finally:
+        state["final_output"] = aggregated
 
 
 SYSTEM_PREFIX = "[SYSTEM MESSAGE]: "
@@ -793,12 +817,7 @@ def create_advanced_response(
         qt.flag("direct_model")
         if stream:
             regular_stream = _direct_regular_stream(model_config, user_input, message_list, model)
-
-            async def _direct_stream():
-                for chunk in regular_stream:
-                    yield chunk, []
-
-            return _direct_stream()
+            return _consume_direct_stream(regular_stream, {}, as_tuple=True)
         response = create_response(user_input, message_list, model)
         qt.complete(response)
         return response, []
@@ -958,26 +977,16 @@ def create_advanced_response_streaming(
 
     # Direct (no-tools) models bypass research/tool machinery (see
     # create_advanced_response for the rationale).
-    direct_config = get_model_config(model)
-    if direct_config and direct_config.get("direct"):
+    model_config = get_model_config(model)
+    if model_config and model_config.get("direct"):
         logging.info(f"[RESEARCH STREAM] {model} is a direct (no-tools) model; using direct response stream")
-        regular_stream = _direct_regular_stream(direct_config, user_input, message_list, model)
+        regular_stream = _direct_regular_stream(model_config, user_input, message_list, model)
         direct_state: Dict[str, Any] = {
             "final_output": "",
             "used_urls": [],
             "used_sources": []
         }
-
-        async def _direct_research_stream() -> AsyncIterator[tuple[str, list[str]]]:
-            aggregated = ""
-            try:
-                for chunk in regular_stream:
-                    aggregated += chunk or ""
-                    yield chunk, []
-            finally:
-                direct_state["final_output"] = aggregated
-
-        return _direct_research_stream(), direct_state
+        return _consume_direct_stream(regular_stream, direct_state, as_tuple=True), direct_state
 
     # --- MCP-first routing for numerical financial queries (streaming path) ---
     if _is_numerical_financial_query(user_input):
@@ -1120,7 +1129,6 @@ def create_agent_response(
 
     model_config = get_model_config(model)
     actual_model_name = model_config.get("model_name") if model_config else model
-    provider = model_config.get("provider") if model_config else None
 
     if model_config and model_config.get("direct"):
         # Config-driven no-tools dispatch (buffet was the first user; the
@@ -1370,17 +1378,7 @@ def create_agent_response_stream(
     if model_config and model_config.get("direct"):
         logging.info(f"[AGENT STREAM] {model} is a direct (no-tools) model; using direct response stream")
         regular_stream = _direct_regular_stream(model_config, user_input, message_list, model)
-
-        async def _fallback_stream() -> AsyncIterator[str]:
-            aggregated_text = ""
-            try:
-                for chunk in regular_stream:
-                    aggregated_text += chunk or ""
-                    yield chunk
-            finally:
-                state["final_output"] = aggregated_text
-
-        return _fallback_stream(), state
+        return _consume_direct_stream(regular_stream, state), state
 
     async def _stream() -> AsyncIterator[str]:
         from agents import Runner
