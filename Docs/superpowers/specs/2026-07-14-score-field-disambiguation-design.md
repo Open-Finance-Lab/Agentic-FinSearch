@@ -129,13 +129,30 @@ Identical to signals-v1 except: per-ticker entry `score` → `sentiment_score`;
 ## 5. ATL changes (coordinated, separate repo)
 
 Context: ATL adapter #107 is live on main reading `sig["score"]`
-(`dashboard/backend/integrations/news_sentiment.py:235` on `origin/main` —
-local checkout stale; use `git grep origin/main`). It does **not** pin
-FinSearch's `schema_version`. The headline/url items-feed fix is ATL PR #110
-(open, review under way, expected to merge as-is); verified against its head
-2026-07-14: `_feed_from_items()` never reads the items `score` and no
-production code checks `schema_version` — the items rename breaks zero merged
-ATL code even after #110 lands.
+(`dashboard/backend/integrations/news_sentiment.py:239` on post-#110
+`origin/main` — local checkout stale; use `git grep origin/main`). It does
+**not** pin FinSearch's `schema_version` in production code. The headline/url
+items-feed fix, ATL PR #110, **merged 2026-07-14 15:36Z** (merge commit
+`802c0852`) with post-review hardening beyond the head first verified:
+
+- a shared `_story_fields()` projection (headline/source/url) used by both
+  the backtest entry and the panel feed;
+- a **wire-shape drift alarm** (`_alarm_if_all_dropped`): a projection
+  yielding 0 usable entries from a non-empty batch logs ERROR and escalates
+  the panel payload to `degraded` (rendered as a badge);
+- a recorded items wire fixture (`tests/fixtures/items-wire-fixture.json`)
+  plus key-set pins — `ITEMS_STORY_KEYS` (includes `score`) and
+  `schema_version == 1` asserts in `test_news_sentiment_fixture.py` — built
+  precisely so a producer rename must edit that file in review.
+
+Re-verified against the merge commit: `_feed_from_items()` reads only
+`headline/url/source/published/tickers`, never the items `score`, so the
+items rename still breaks zero ATL *production* code, and neither rename
+trips the drift alarm. But "docs-only" no longer holds: PR-2 must also flip
+the items fixture and its pins (below). During the cutover's items-404
+window the panel silently falls back to the Phase-A representative feed
+(a 404 is "no items yet", not drift — no badge), bounded to minutes by the
+§6 kick.
 
 - **ATL PR-1 (lands + deploys BEFORE FinSearch deploys):**
   `sig.get("sentiment_score", sig.get("score"))` in `_project_entry`;
@@ -143,13 +160,18 @@ ATL code even after #110 lands.
   names `sentiment_score` canonical (contract table, example, projection row,
   reference sketch).
 - **ATL PR-2 (after FinSearch v2 verified live):** delete the fallback —
-  strict `sig["sentiment_score"]`; fixtures v2-only.
-- **Items contract docs (post-#110):** PR #110 merges with v1 vocabulary in
-  `docs/integrations/finsearch-news-items.md` and its news-story contract
-  spec (`2026-07-14-finsearch-news-story-contract-design.md`) — both state
-  `score` and `schema_version: 1`. ATL PR-1 (or PR-2 at latest) updates them
-  to `editorial_score` / `schema_version: 2`. Docs only; no ATL items code
-  change needed.
+  strict `sig["sentiment_score"]`; fixtures v2-only. Covers BOTH pipelines'
+  fixtures: `signals-fixture.json` **and** `signals-wire-fixture.json` (a
+  base↔wire parity test couples the pair), plus `items-wire-fixture.json`
+  (`editorial_score`, `schema_version: 2`) with its `ITEMS_STORY_KEYS` /
+  version pins flipped to v2.
+- **Items contract docs (in PR-2, now that #110 merged with v1 vocabulary):**
+  `docs/integrations/finsearch-news-items.md` and the news-story contract
+  spec (`2026-07-14-finsearch-news-story-contract-design.md`) state `score`
+  and `schema_version: 1` — update to `editorial_score` / `2`. The items doc
+  also narrates a *hypothetical* "v2 that renamed a field" fallback scenario;
+  rewrite it as actual history (the rename shipped as v2 and did NOT trip
+  the drift alarm, because the projection never read `score`).
 - Out of scope: ATL-internal names (`NewsSentimentEntry.score`, panel JS
   `s.score`) — ATL's own v2 API contract, not FinSearch's wire.
 - Stale references to update opportunistically ATL-side:
@@ -173,7 +195,9 @@ deployed new Django 404s items.
    with `sentiment_score`/v2 (normalizer, since the newest artifact is
    still v1); `?as_of` on an old date also v2-normalized.
 5. Within 20 min the next signals run writes the first native-v2 artifact;
-   re-verify.
+   re-verify. ATL Home panel: real items rendering, no `degraded` drift
+   badge. (During the pre-kick 404 window the panel shows the Phase-A
+   representative feed with no badge — expected, not a failure.)
 6. ATL PR-2 (drop fallback) whenever convenient after step 4 verification.
 
 **Rollback:** roll Heartbeat and Django back **together**, then kick a manual

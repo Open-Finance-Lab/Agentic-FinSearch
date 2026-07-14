@@ -24,8 +24,8 @@
 ### Task 1: ATL PR-1 — adapter fallback (consumer-first)
 
 **Files:**
-- Modify: `/mnt/d/Github/agent-trading-lab/dashboard/backend/integrations/news_sentiment.py` (`_project_entry`, lines ~232-239 on origin/main)
-- Modify: `/mnt/d/Github/agent-trading-lab/dashboard/backend/tests/test_news_sentiment_fixture.py:28-35`
+- Modify: `/mnt/d/Github/agent-trading-lab/dashboard/backend/integrations/news_sentiment.py` (`_project_entry`, lines 236-244 on post-#110 origin/main; the `"score": sig["score"],` read is line 239, directly above `**_story_fields(sig)`)
+- Modify: `/mnt/d/Github/agent-trading-lab/dashboard/backend/tests/test_news_sentiment_fixture.py` (the SIGNALS pin in `test_fixture_matches_contract_essentials`, line ~105)
 - Create: `/mnt/d/Github/agent-trading-lab/dashboard/backend/tests/test_sentiment_score_fallback.py`
 
 **Interfaces:**
@@ -40,11 +40,11 @@ git fetch origin
 git checkout -b feat/sentiment-score-fallback origin/main
 ```
 
-If PR #110 has merged, its changes are included automatically; if not, this branch doesn't touch `_feed_from_items` so no conflict either way.
+PR #110 MERGED 2026-07-14 15:36Z (merge commit `802c0852`) — branching off fresh origin/main picks up its items feed, the `_alarm_if_all_dropped` drift alarm, and the items fixture pins. This branch touches none of those.
 
 - [ ] **Step 2: Write the failing test**
 
-Create `dashboard/backend/tests/test_sentiment_score_fallback.py`. Copy the exact import prefix used for `news_sentiment` from the top of `test_news_sentiment_fixture.py` (the repo's established test import style) — shown here as `dashboard.backend.…`; adjust the prefix to match, nothing else:
+Create `dashboard/backend/tests/test_sentiment_score_fallback.py`. Copy the exact import prefix used for `news_sentiment` from the top of `test_news_sentiment_adapter.py` (`from dashboard.backend.integrations import news_sentiment as ns` — the fixture test file no longer imports the adapter); shown here as `dashboard.backend.…`, adjust only if the adapter test differs:
 
 ```python
 """PR-1 of the FinSearch score-field disambiguation (see FinSearch spec
@@ -97,9 +97,9 @@ to
         "score": sig.get("sentiment_score", sig.get("score")),
 ```
 
-- [ ] **Step 5: Relax the fixture schema_version pin**
+- [ ] **Step 5: Relax the SIGNALS fixture schema_version pin (not the items one)**
 
-In `test_news_sentiment_fixture.py` (line ~30), change
+`test_news_sentiment_fixture.py` now has TWO `schema_version == 1` asserts. In `test_fixture_matches_contract_essentials` (the signals fixture pin, line ~105), change
 
 ```python
     assert body["schema_version"] == 1
@@ -110,6 +110,8 @@ to
 ```python
     assert body["schema_version"] in (1, 2)  # transitional; PR-2 pins == 2
 ```
+
+Leave `test_items_wire_fixture_matches_contract_essentials` (items pin, line ~55) at `== 1` — the items fixture stays v1 until PR-2 flips it after the FinSearch deploy. (Both asserts test static fixture files, so this relax is documentation of intent, not a green/red requirement.)
 
 - [ ] **Step 6: Run the ATL suite**
 
@@ -130,18 +132,20 @@ git commit -m "feat(news): read sentiment_score with v1 fallback"
 ### Task 2: ATL PR-1 — sentiment contract doc, open PR
 
 **Files:**
-- Modify: `/mnt/d/Github/agent-trading-lab/docs/integrations/finsearch-news-sentiment.md` (lines 29, 83, 108, 193 on origin/main)
+- Modify: `/mnt/d/Github/agent-trading-lab/docs/integrations/finsearch-news-sentiment.md` (lines 32, 85, 107, 194 on post-#110 origin/main)
 
 **Interfaces:**
 - Produces: contract doc naming `sentiment_score` canonical; PR-1 ready for user merge + deploy.
 
 - [ ] **Step 1: Update the four `score` references**
 
-Exact edits (line numbers per origin/main):
-1. Line 29 contract-table row: `| \`score\` | float | −1.0 … 1.0 |` → `| \`sentiment_score\` | float | −1.0 … 1.0 |`
-2. Line 83 response example: `"score": 0.5,` → `"sentiment_score": 0.5,`
-3. Line 108 projection-mapping row: `| \`score\` | \`score\` | passthrough (already −1…1) |` → `| \`score\` | \`sentiment_score\` | passthrough (already −1…1) |` (left column is the ATL-internal `NewsSentimentEntry` field, which keeps its name)
-4. Line 193 reference sketch: `"score": s["score"],` → `"score": s["sentiment_score"],`
+Exact edits (line numbers per post-#110 origin/main):
+1. Line 32 contract-table row: `| \`score\` | float | −1.0 … 1.0 |` → `| \`sentiment_score\` | float | −1.0 … 1.0 |`
+2. Line 85 response example: `"score": 0.5,` → `"sentiment_score": 0.5,`
+3. Line 107 projection-mapping row: `| \`score\` | \`score\` | passthrough (already −1…1) |` → `| \`score\` | \`sentiment_score\` | passthrough (already −1…1) |` (left column is the ATL-internal `NewsSentimentEntry` field, which keeps its name)
+4. Line 194 reference sketch: `"score": s["score"],` → `"score": s["sentiment_score"],`
+
+Leave line 76's top-level field list saying `schema_version` (=1) — factually correct until the FinSearch deploy; PR-2 flips it to (=2).
 
 Then add, directly under the contract table, one transitional note:
 
@@ -644,7 +648,7 @@ ssh finsearch-deploy 'tail -1 "$(ls -t ~/fingpt/heartbeat/digests/items-*.jsonl 
 ```
 Expected: `1` then `0`.
 - [ ] **Step 4:** Verify the wire (same prod base URL + bearer used for the #359 live verification): `/api/news/items/?limit=1` → 200, `schema_version: 2`, item has `editorial_score`; `/api/signals/news/` → 200, `schema_version: 2`, entries have `sentiment_score` (normalizer, while the newest artifact is still v1); `/api/signals/news/?as_of=2026-07-10` → also v2-normalized.
-- [ ] **Step 5:** After the next 20-min signals run: newest `signals-*.json` on disk has `"schema_version": 2` and `sentiment_score` natively. Check ATL's Home panel still renders sentiment chips (fallback path now reading `sentiment_score`).
+- [ ] **Step 5:** After the next 20-min signals run: newest `signals-*.json` on disk has `"schema_version": 2` and `sentiment_score` natively. Check ATL's Home panel: sentiment chips render (fallback path now reading `sentiment_score`), real items in the "Latest news" column, and **no `degraded` drift badge** — PR #110's `_alarm_if_all_dropped` must not fire, since `_feed_from_items` never reads the items `score`. (During the pre-kick items-404 window the panel silently shows the Phase-A representative feed with no badge — expected, not drift.)
 - [ ] **Rollback note:** revert Heartbeat and Django **together** and kick another manual heartbeat run (strictness is symmetric — a v2 batch fails the old gate exactly as a v1 batch fails the new one). ATL's fallback keeps the panel alive in both directions until PR-2.
 
 ---
@@ -653,25 +657,28 @@ Expected: `1` then `0`.
 
 **Files:**
 - Modify: `/mnt/d/Github/agent-trading-lab/dashboard/backend/integrations/news_sentiment.py` (drop fallback)
-- Modify: `/mnt/d/Github/agent-trading-lab/dashboard/backend/tests/test_news_sentiment_fixture.py` (+ the fixture JSON it loads)
+- Modify: `/mnt/d/Github/agent-trading-lab/dashboard/backend/tests/test_news_sentiment_fixture.py` (both schema_version pins, signals field tuple, `ITEMS_STORY_KEYS`)
+- Modify: `/mnt/d/Github/agent-trading-lab/dashboard/backend/tests/fixtures/signals-fixture.json` AND `signals-wire-fixture.json` (the pair is coupled by `test_wire_fixture_is_base_minus_strip_plus_staleness` — flip both or it goes red)
+- Modify: `/mnt/d/Github/agent-trading-lab/dashboard/backend/tests/fixtures/items-wire-fixture.json` (added by #110; pins the live items key set)
 - Modify: `/mnt/d/Github/agent-trading-lab/dashboard/backend/tests/test_sentiment_score_fallback.py` (fallback cases die with the fallback)
-- Modify: `/mnt/d/Github/agent-trading-lab/docs/integrations/finsearch-news-sentiment.md` (drop transitional note)
-- Modify: `/mnt/d/Github/agent-trading-lab/docs/integrations/finsearch-news-items.md` (post-#110: line 26 extras list `score` → `editorial_score`; lines 28-30 `currently \`1\`` → `currently \`2\``; example lines 48/51 `"schema_version": 2` and `"editorial_score": 0.7`)
-- Modify: `/mnt/d/Github/agent-trading-lab/docs/superpowers/specs/2026-07-14-finsearch-news-story-contract-design.md` (lines 62, 64-78, 87-88 — same renames, add a superseded-by note pointing at FinSearch's 2026-07-14 disambiguation spec)
+- Modify: `/mnt/d/Github/agent-trading-lab/docs/integrations/finsearch-news-sentiment.md` (drop transitional note; line 76 `schema_version` `(=1)` → `(=2)`)
+- Modify: `/mnt/d/Github/agent-trading-lab/docs/integrations/finsearch-news-items.md` (line 26 extras list `score` → `editorial_score`; line 28 `currently \`1\`` → `currently \`2\``; example lines 59/62 → `"schema_version": 2` / `"editorial_score": 0.7`; rewrite the lines-33-41 blockquote — its *hypothetical* "a v2 that renamed a field" is now actual history: v2 shipped, and the drift alarm did NOT fire because the projection never read `score`)
+- Modify: `/mnt/d/Github/agent-trading-lab/docs/superpowers/specs/2026-07-14-finsearch-news-story-contract-design.md` (grep `score\|schema_version` — hits at lines 62, 88, 89-90 need the v2 renames; add a superseded-by note pointing at FinSearch's 2026-07-14 disambiguation spec)
 - Modify (opportunistic staleness): `docs/superpowers/specs/2026-07-13-finsearch-news-signals-panel-design.md:77,91` and `docs/superpowers/plans/2026-07-13-finsearch-news-signals-panel.md` score mentions (incl. ~857)
 
 Steps:
 - [ ] **Step 1:** Branch `feat/sentiment-score-strict` off origin/main. In `_project_entry`: `"score": sig["sentiment_score"],` (delete the fallback + its comment).
-- [ ] **Step 2:** Locate the fixture JSON via `test_news_sentiment_fixture.py`'s `load_signals_fixture` helper; edit it to v2: `"schema_version": 2`, each entry's `"score"` → `"sentiment_score"`. In the test: `assert body["schema_version"] == 2`; in the required-fields tuple `"score"` → `"sentiment_score"`.
-- [ ] **Step 3:** In `test_sentiment_score_fallback.py`: delete `test_project_entry_falls_back_to_v1_score` and `test_project_entry_prefers_sentiment_score_when_both_present`; keep the v2 test; module docstring now says the fallback is gone and this pins strict v2 reads.
-- [ ] **Step 4:** Apply the doc edits listed above. Run the ATL suite (`pytest dashboard/backend/tests/ --timeout=180 -p no:cacheprovider`) — PASS.
-- [ ] **Step 5:** Commit `feat(news): require sentiment_score (drop v1 fallback)`, push, `gh pr create` with a two-line body linking PR-1 and the FinSearch PR. User merges.
+- [ ] **Step 2:** Flip the signals fixture PAIR to v2 — in BOTH `signals-fixture.json` and `signals-wire-fixture.json`: `"schema_version": 2`, each signal entry's `"score"` → `"sentiment_score"`. In `test_news_sentiment_fixture.py`: `test_fixture_matches_contract_essentials` → `assert body["schema_version"] == 2` and `"score"` → `"sentiment_score"` in its required-fields tuple (line ~108).
+- [ ] **Step 3:** Flip the items fixture to v2 — in `items-wire-fixture.json`: `"schema_version": 2`, each item's `"score"` → `"editorial_score"` (keep the values). In `test_news_sentiment_fixture.py`: `ITEMS_STORY_KEYS` (line ~46) `"score"` → `"editorial_score"`; `test_items_wire_fixture_matches_contract_essentials` → `assert body["schema_version"] == 2`. Update the fixture-loader docstring's "verified against prod" date to the Task 9 verification date. Optional hygiene, same commit: rename the inert `"score"` keys in the adapter tests' inline items dicts (e.g. `test_feed_from_items_maps_exact_five_keys`, ~line 583) to `"editorial_score"` so test dicts mirror the live wire — the projection ignores them either way.
+- [ ] **Step 4:** In `test_sentiment_score_fallback.py`: delete `test_project_entry_falls_back_to_v1_score` and `test_project_entry_prefers_sentiment_score_when_both_present`; keep the v2 test; module docstring now says the fallback is gone and this pins strict v2 reads.
+- [ ] **Step 5:** Apply the doc edits listed above. Run the ATL suite (`pytest dashboard/backend/tests/ --timeout=180 -p no:cacheprovider`) — PASS.
+- [ ] **Step 6:** Commit `feat(news): require sentiment_score (drop v1 fallback)` + a second commit `docs(news): items contract speaks v2 (editorial_score)` if the diff reads better split; push, `gh pr create` with a two-line body linking PR-1 and the FinSearch PR. User merges.
 
 ---
 
 ### Task 11: Context lake + followups
 
-- [ ] Update `finsearch-atl-news-sentiment-bridge.md` memory: score-collision resolved (editorial_score/sentiment_score, both v2), PR numbers, fallback lifecycle; drop the stale "wire mismatch" blocker line once #110 is merged.
+- [ ] Update `finsearch-atl-news-sentiment-bridge.md` memory: score-collision resolved (editorial_score/sentiment_score, both v2), PR numbers, fallback lifecycle; drop the stale "wire mismatch" blocker line — #110 MERGED 2026-07-14 15:36Z (`802c0852`), which also redeployed ATL prod and flipped the Home panel to real items.
 - [ ] Update `heartbeat-single-file-deploy-contract.md`: parity corpus now includes the legacy-score strictness cases; VERSIONs bumped.
 - [ ] Central DB: decision entry (why full-depth, no-compat) in `/mnt/d/CENTRAL-DATABASE/decisions/2026-07.md` + finsearch/ATL project.md touch-ups.
 - [ ] Surface "user-facing docs to update" list: `Docs/source/api_reference.rst` ships in the PR (done in Task 7); readthedocs rebuilds on merge — verify the hosted page rendered the new note.
