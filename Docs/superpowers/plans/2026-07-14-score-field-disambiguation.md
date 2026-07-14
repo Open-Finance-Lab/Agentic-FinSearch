@@ -653,6 +653,22 @@ CI deploys both artifacts concurrently on the merge push: `heartbeat-tests.yml` 
 ```bash
 ssh finsearch-deploy 'systemctl --user start finsearch-heartbeat.service'
 ```
+
+> **CORRECTED 2026-07-15 (final whole-branch review): the kick can silently no-op — verify it produced a batch.**
+> `news_heartbeat.py:849` does `fresh = filter_window(merged, now, hours, seen=state)` and then
+> `if not fresh: log("nothing new — no digest today"); return 0` — **exiting 0 without writing any
+> `items-*.jsonl`**. `filter_window` (`:276-279`) drops every story whose `guid` is already in the seen-state,
+> and the daily 11:00 UTC run has already marked today's stories seen. So a kick shortly after it writes
+> nothing while logging what reads like success. There is **no `--force`/state-bypass flag** (only `--dry-run`
+> and `--env-file`, `:798-800`).
+>
+> Therefore: **confirm a fresh `items-*.jsonl` mtime, not merely exit 0.** Both the forward deploy and the
+> rollback depend on this step actually producing a batch.
+>
+> Two useful properties: `--dry-run` **does** write the jsonl (the write at `:882` precedes the `if dry_run`
+> check at `:886`) and leaves the seen-state untouched, which makes it the right kick mode here. And a same-day
+> kick writes a supplemental stem `items-<date>-<HHMMSS>.jsonl` (`:876-880`) — a new filename, so it is picked
+> up both by the signals sweep and by the endpoint's newest-by-mtime selection.
 - [ ] **Step 3:** Verify the new batch speaks v2 (expect `editorial_score` present, bare `"score"` absent):
 ```bash
 ssh finsearch-deploy 'tail -1 "$(ls -t ~/fingpt/heartbeat/digests/items-*.jsonl | head -1)" | grep -c editorial_score'
@@ -661,7 +677,23 @@ ssh finsearch-deploy 'tail -1 "$(ls -t ~/fingpt/heartbeat/digests/items-*.jsonl 
 Expected: `1` then `0`.
 - [ ] **Step 4:** Verify the wire (same prod base URL + bearer used for the #359 live verification): `/api/news/items/?limit=1` → 200, `schema_version: 2`, item has `editorial_score`; `/api/signals/news/` → 200, `schema_version: 2`, entries have `sentiment_score` (normalizer, while the newest artifact is still v1); `/api/signals/news/?as_of=2026-07-10` → also v2-normalized.
 - [ ] **Step 5:** After the next 20-min signals run: newest `signals-*.json` on disk has `"schema_version": 2` and `sentiment_score` natively. Check ATL's Home panel: sentiment chips render (fallback path now reading `sentiment_score`), real items in the "Latest news" column, and **no `degraded` drift badge** — PR #110's `_alarm_if_all_dropped` must not fire, since `_feed_from_items` never reads the items `score`. (During the pre-kick items-404 window the panel silently shows the Phase-A representative feed with no badge — expected, not drift.)
-- [ ] **Rollback note:** revert Heartbeat and Django **together** and kick another manual heartbeat run (strictness is symmetric — a v2 batch fails the old gate exactly as a v1 batch fails the new one). ATL's fallback keeps the panel alive in both directions until PR-2.
+- [ ] **Rollback note:** revert Heartbeat and Django **together** and kick another manual heartbeat run (see the Step-2 correction — verify the kick actually wrote a batch). ATL's fallback keeps the panel alive in both directions until PR-2.
+
+> **CORRECTED 2026-07-15 (final whole-branch review): the "strictness is symmetric" claim holds for items, NOT for signals.**
+>
+> - **Items — symmetric, as originally written.** Both gate copies key on `REQUIRED_FIELDS`, so a v2 batch is a
+>   missing-required-field poison pill to the reverted gate exactly as a v1 batch is to the new one. Fail-closed
+>   both ways, pinned by `test_legacy_score_only_story_poisons_batch_in_both_copies`.
+> - **Signals — NOT symmetric.** The forward direction is protected by `_normalize_legacy_signal_entry`
+>   (v1 on disk → v2 on the wire). There is **no inverse**: reverted v1 Django has no normalizer, and
+>   `_load_artifact` never inspects `schema_version`, so it serves the newest **v2** artifact verbatim —
+>   `sentiment_score` and `schema_version: 2` on a wire whose reverted docs and consumers expect `score`.
+>   The revert only converges once a manual heartbeat run **and** a subsequent signals run have regenerated a
+>   v1 artifact; until then the signals wire emits v2 bodies from v1 code.
+>
+> Net: the forward deploy is safe for signals from the first request (that is what the normalizer buys); the
+> **rollback** has a gap the forward path does not. Plan the rollback around regenerating a v1 artifact, not
+> around symmetry.
 
 ---
 
