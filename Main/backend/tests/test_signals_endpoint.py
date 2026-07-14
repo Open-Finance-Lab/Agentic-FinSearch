@@ -452,3 +452,26 @@ class SignalsEndpointTests(SimpleTestCase):
         self.assertEqual(body["schema_version"], 2)
         self.assertEqual(body["signals"]["MSFT"]["sentiment_score"], 0.5)
         self.assertNotIn("score", body["signals"]["MSFT"])
+
+    def test_pre_deploy_etag_does_not_304_into_stale_v1_body(self):
+        # Regression: a client holding an ETag computed by the pre-rename
+        # (unsalted) validator must not revalidate a 304 against an
+        # unchanged-on-disk legacy artifact — that would serve the client's
+        # cached v1 body (carrying `score`) forever, defeating the
+        # normalizer. The ETag must be salted with the wire schema version
+        # so any wire-shape change invalidates every old cache entry.
+        legacy_entry = dict(DEFAULT_SIGNAL)
+        legacy_entry["score"] = legacy_entry.pop("sentiment_score")
+        art = make_artifact(self._recent_iso(), signals={"MSFT": legacy_entry})
+        art["schema_version"] = 1
+        self._write("2026-07-06", art)
+        # What the OLD (unsalted) validator would have produced for this
+        # exact artifact, tickers-unfiltered — reconstructed independently
+        # of _etag() so this test doesn't just re-derive its own answer.
+        stale_etag = f'"{art["generated_at"]}|{art["source_items"]}|"'
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL, HTTP_IF_NONE_MATCH=stale_etag)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["signals"]["MSFT"]["sentiment_score"], 0.5)
+        self.assertNotIn("score", body["signals"]["MSFT"])

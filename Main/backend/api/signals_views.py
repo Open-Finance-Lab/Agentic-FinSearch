@@ -155,7 +155,15 @@ def _etag(request: HttpRequest):
     # separator), and "+"-joined rather than ","-joined because Django's
     # parse_etags() rejects an ETag containing a comma (HTTP list separator).
     tickers = "+".join(quote(t, safe="") for t in _tickers_filter(request))
-    return f'"{artifact["generated_at"]}|{artifact.get("source_items", "")}|{tickers}"'
+    # Salted with the wire schema version: the artifact on disk can be
+    # byte-identical across a wire-shape change (e.g. this rename's legacy
+    # normalizer), which would otherwise leave the ETag unchanged while the
+    # served body changes — a conditional request could then 304 a client
+    # into a stale body. The salt guarantees a wire-shape bump invalidates
+    # every cached ETag, including ?as_of reads of artifacts that never
+    # change again.
+    return (f'"v{_SIGNALS_WIRE_SCHEMA_VERSION}|{artifact["generated_at"]}'
+            f'|{artifact.get("source_items", "")}|{tickers}"')
 
 
 def _last_modified(request: HttpRequest):
