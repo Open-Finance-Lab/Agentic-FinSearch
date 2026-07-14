@@ -47,7 +47,7 @@ def bulk_digest(n=40):
     """A digest bulky enough to force multi-message Discord packing."""
     stories = [story(guid=f"g{i}", title=("Long headline %d " % i) + "x" * 120,
                      link=f"https://finance.yahoo.com/news/long-{i}.html",
-                     score=5.0) for i in range(n)]
+                     editorial_score=5.0) for i in range(n)]
     digest = {"overview": "O" * 500,
               "sections": [{"title": "Market Pulse",
                             "items": [{"guid": f"g{i}", "summary": "S" * 300}
@@ -156,10 +156,10 @@ class TestMerge(unittest.TestCase):
 class TestNearDups(unittest.TestCase):
     def test_collapses_near_identical_titles(self):
         a = story(guid="a", title="Apple unveils new AI chip at WWDC event",
-                  score=5.0, tickers=["AAPL"])
+                  editorial_score=5.0, tickers=["AAPL"])
         b = story(guid="b", title="Apple unveils its new AI chip at WWDC",
-                  score=3.0, tickers=["NVDA"])
-        c = story(guid="c", title="Fed holds rates steady in June meeting", score=4.0)
+                  editorial_score=3.0, tickers=["NVDA"])
+        c = story(guid="c", title="Fed holds rates steady in June meeting", editorial_score=4.0)
         out = nh.collapse_near_dups([a, b, c])
         self.assertEqual(len(out), 2)
         kept = next(s for s in out if "Apple" in s["title"])
@@ -190,7 +190,8 @@ class TestScoring(unittest.TestCase):
                       source="Reuters", feeds=["topstories", "rssindex"])
         ranked = nh.rank_stories([listicle, macro], watchlist=["AAPL"], now=NOW)
         self.assertEqual(ranked[0]["guid"], "m")
-        self.assertGreater(ranked[0]["score"], ranked[1]["score"] + 2)
+        self.assertGreater(ranked[0]["editorial_score"],
+                           ranked[1]["editorial_score"] + 2)
 
     def test_corroboration_and_watchlist_boost(self):
         plain = story(guid="p", title="Company expands office space", source="Zacks")
@@ -207,12 +208,12 @@ class TestExtractiveFallback(unittest.TestCase):
         for i in range(12):
             stories.append(story(
                 guid=f"m{i}", title=f"Market story {i} on earnings and rates",
-                description=f"Market detail {i}. Extra.", score=10.0 - i))
+                description=f"Market detail {i}. Extra.", editorial_score=10.0 - i))
         for i in range(4):
             stories.append(story(
                 guid=f"c{i}", title=f"NVDA story {i} beats guidance",
                 tickers=["NVDA"], description=f"Company detail {i}. More.",
-                score=8.0 - i))
+                editorial_score=8.0 - i))
         digest = nh.extractive_digest(stories, now=NOW)
         self.assertTrue(digest["overview"])
         titles = [sec["title"] for sec in digest["sections"]]
@@ -225,7 +226,7 @@ class TestExtractiveFallback(unittest.TestCase):
 
     def test_summary_is_quoted_first_sentence_of_description(self):
         s = story(guid="x", description="Lead sentence here. Trailing detail.",
-                  score=1.0)
+                  editorial_score=1.0)
         digest = nh.extractive_digest([s], now=NOW)
         item = digest["sections"][0]["items"][0]
         # excerpted publisher prose must be visibly marked as a quotation
@@ -358,7 +359,7 @@ class TestRender(unittest.TestCase):
     def _digest_and_index(self, n=3):
         stories = [story(guid=f"g{i}", title=f"Story {i} about earnings",
                          link=f"https://finance.yahoo.com/news/story-{i}.html",
-                         score=5.0) for i in range(n)]
+                         editorial_score=5.0) for i in range(n)]
         digest = {
             "overview": "A calm day in the markets.",
             "sections": [{"title": "Market Pulse", "items": [
@@ -404,7 +405,7 @@ class TestSecurityHardening(unittest.TestCase):
     def test_masked_link_injection_is_neutralized(self):
         evil = story(guid="e",
                      title="Good News ](https://evil.example/phish) click",
-                     link="https://finance.yahoo.com/news/real.html", score=5.0)
+                     link="https://finance.yahoo.com/news/real.html", editorial_score=5.0)
         digest = {"overview": "Day ](https://evil.example/o) end.",
                   "sections": [{"title": "Market Pulse", "items": [
                       {"guid": "e", "summary": "Sum ](https://evil.example/s) x."}]}]}
