@@ -33,7 +33,13 @@ logger = logging.getLogger(__name__)
 
 _PUBLIC_STRIP = ("generator", "model", "prompt_version")
 
-_SIGNALS_WIRE_SCHEMA_VERSION = 2  # wire is always v2; v1 disk artifacts are normalized below
+# The wire format the view serves. Artifacts on disk below this version are
+# normalized up to it; the wire is always this version.
+# BUMPING THIS: it now gates three things — the entry normalizer, the ETag salt,
+# and whether Last-Modified is offered at all. Raise it in lockstep with
+# news_signals.py's SCHEMA_VERSION, or artifacts written at the newer version
+# get relabelled to this one on the wire while carrying their own content.
+_SIGNALS_WIRE_SCHEMA_VERSION = 2
 
 
 def _normalize_legacy_signal_entry(entry):

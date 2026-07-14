@@ -727,9 +727,12 @@ guid, n_articles}`` with ``sentiment_score`` in ``[-1, 1]``.
 
 ``404 {"error": "no_signals"}`` when no artifact exists yet. Responses carry
 an ``ETag`` validator and ``Cache-Control: public, max-age=300``.
-``Last-Modified`` is sent only on unfiltered responses — ``tickers=``-filtered
-variants are ETag-only, so conditional requests for them must use
-``If-None-Match``.
+``Last-Modified`` is sent only on unfiltered responses whose artifact is
+already in the current wire format. ``tickers=``-filtered variants are
+ETag-only, and artifacts predating the 2026-07-14 field rename omit it as well
+— their served representation differs from the one their timestamp describes,
+which ``Last-Modified`` cannot express. Prefer ``If-None-Match`` for
+conditional requests: the ``ETag`` is always present and always correct.
 
 News Items
 ~~~~~~~~~~
