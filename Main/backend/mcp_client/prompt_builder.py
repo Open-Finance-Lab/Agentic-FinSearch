@@ -59,6 +59,19 @@ def wrap_untrusted_tool_output(text: str, tool_name: str) -> str:
     return f"{USER_CONTEXT_OPEN}\n(tool result: {tool_name})\n{safe}\n{USER_CONTEXT_CLOSE}"
 
 
+def wrap_untrusted_context(content: str) -> str:
+    """Wrap caller/session-supplied context in the untrusted-data boundary
+    (USER_CONTEXT_OPEN/CLOSE) and defang any embedded boundary markers, so
+    prompt-injection text carried in it is treated as DATA, not instructions.
+
+    Shared by the agent path (via PromptBuilder.build's system_prompt block)
+    and the direct/persona dispatch path in datascraper, which bypasses
+    PromptBuilder entirely — both must mark API-supplied context identically so
+    prompts/_security.md rule 5 governs it uniformly."""
+    safe = _defang_boundary_markers(str(content))
+    return f"{USER_CONTEXT_OPEN}\n{safe}\n{USER_CONTEXT_CLOSE}"
+
+
 # Marker in core.md where the shared security fragment is spliced in.
 # The fragment lives in prompts/_security.md so datascraper.py and
 # PromptBuilder both read the same source.

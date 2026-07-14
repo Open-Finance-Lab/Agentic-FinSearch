@@ -13,6 +13,7 @@ from openai import OpenAI
 from anthropic import Anthropic
 
 from mcp_client.agent import create_fin_agent, USER_ONLY_MODELS
+from mcp_client.prompt_builder import wrap_untrusted_context
 from .models_config import (
     MODELS_CONFIG,
     PROVIDER_CONFIGS,
@@ -162,6 +163,26 @@ def load_persona_instruction(name: str) -> str:
         )
         return _PERSONA_FALLBACKS.get(name, INSTRUCTION)
     return f"{prose}\n{_CONTEXT_CLAUSE}\n\n{_SECURITY_GUARDRAILS}"
+
+
+def _direct_dispatch_target(model: str) -> tuple[str, dict]:
+    """Resolve a request's `model` to the (key, config) the dispatch guards use.
+
+    Exact MODELS_CONFIG key first. If `model` is not a key but is a raw
+    `model_name` shared by a direct (no-tools) entry — e.g. the published
+    ``gemini-3-flash-preview``, which both FinGPT and FinSearch-Trader use —
+    resolve to that direct entry so an ambiguous identifier fails SAFE onto the
+    no-tools path instead of silently reaching the tool/research pipeline (a
+    look-ahead-safety violation for backtest consumers). A name with no direct
+    match is returned unresolved (config None) so existing behaviour is kept.
+    """
+    config = get_model_config(model)
+    if config is not None:
+        return model, config
+    for key, cfg in MODELS_CONFIG.items():
+        if cfg.get("model_name") == model and cfg.get("direct"):
+            return key, cfg
+    return model, None
 
 
 def _direct_regular_stream(model_config: dict, user_input: str,
@@ -370,14 +391,20 @@ def _prepare_messages(message_list: list[dict], user_input: str, model: str = No
         msgs.append({"role": "user", "content": content})
 
     instruction = INSTRUCTION
-    if model:
-        model_config = get_model_config(model)
-        persona = (model_config or {}).get("persona")
-        if persona:
-            instruction = load_persona_instruction(persona)
-            logging.info("[PERSONA] Using %s system prompt", persona)
+    model_config = get_model_config(model) if model else None
+    persona = (model_config or {}).get("persona")
+    if persona:
+        instruction = load_persona_instruction(persona)
+        logging.info("[PERSONA] Using %s system prompt", persona)
 
     if system_message:
+        if model_config and model_config.get("direct"):
+            # Direct/persona models bypass PromptBuilder, so caller/session
+            # context (which can carry scraped/search text) would otherwise be
+            # concatenated raw into the trusted instruction. Mark it as
+            # untrusted data — mirroring the agent path — so injected directives
+            # inside it are governed by _security.md rule 5, not obeyed.
+            system_message = wrap_untrusted_context(system_message)
         instruction_payload = f"{system_message} {instruction}".strip()
     else:
         instruction_payload = instruction
@@ -810,7 +837,7 @@ def create_advanced_response(
 
     # Direct (no-tools) models must never enter the research/tool pipeline —
     # for backtest-style consumers this is a look-ahead safety invariant.
-    model_config = get_model_config(model)
+    model, model_config = _direct_dispatch_target(model)
     if model_config and model_config.get("direct"):
         logging.info(f"[RESEARCH] {model} is a direct (no-tools) model; using direct response")
         qt.set_data_source("direct_llm")
@@ -977,7 +1004,7 @@ def create_advanced_response_streaming(
 
     # Direct (no-tools) models bypass research/tool machinery (see
     # create_advanced_response for the rationale).
-    model_config = get_model_config(model)
+    model, model_config = _direct_dispatch_target(model)
     if model_config and model_config.get("direct"):
         logging.info(f"[RESEARCH STREAM] {model} is a direct (no-tools) model; using direct response stream")
         regular_stream = _direct_regular_stream(model_config, user_input, message_list, model)
@@ -1127,7 +1154,7 @@ def create_agent_response(
     from datascraper.quality_logger import QualityTracker
     qt = QualityTracker(mode="thinking", query=user_input, model=model)
 
-    model_config = get_model_config(model)
+    model, model_config = _direct_dispatch_target(model)
     actual_model_name = model_config.get("model_name") if model_config else model
 
     if model_config and model_config.get("direct"):
@@ -1374,7 +1401,7 @@ def create_agent_response_stream(
     """
     state: Dict[str, str] = {"final_output": ""}
 
-    model_config = get_model_config(model)
+    model, model_config = _direct_dispatch_target(model)
     if model_config and model_config.get("direct"):
         logging.info(f"[AGENT STREAM] {model} is a direct (no-tools) model; using direct response stream")
         regular_stream = _direct_regular_stream(model_config, user_input, message_list, model)
