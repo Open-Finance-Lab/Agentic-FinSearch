@@ -37,14 +37,18 @@ _SIGNALS_WIRE_SCHEMA_VERSION = 2  # wire is always v2; v1 disk artifacts are nor
 
 
 def _normalize_legacy_signal_entry(entry):
-    """v1 artifacts (?as_of reads) predate the score->sentiment_score rename;
-    rename at the boundary so `score` never reaches the wire. Copies — the
-    top-level body is fresh, but entry dicts are shared references into the
-    memoized artifact and must not be mutated. Odd shapes pass through
-    untouched (defensive)."""
-    if isinstance(entry, dict) and "score" in entry and "sentiment_score" not in entry:
-        entry = dict(entry)
-        entry["sentiment_score"] = entry.pop("score")
+    """v1 artifacts predate the score->sentiment_score rename; rename at the
+    boundary so `score` never reaches the wire, whether the artifact is read
+    as latest or via ?as_of. `sentiment_score` wins if an entry somehow carries
+    both — the v2 name is authoritative, and the legacy key is dropped rather
+    than allowed to overwrite it. Copies — the top-level body is fresh, but
+    entry dicts are shared references into the loaded artifact and must not be
+    mutated. Non-dict entries pass through untouched (defensive)."""
+    if not isinstance(entry, dict) or "score" not in entry:
+        return entry
+    entry = dict(entry)
+    legacy = entry.pop("score")
+    entry.setdefault("sentiment_score", legacy)
     return entry
 
 
@@ -183,10 +187,10 @@ def news_signals(request: HttpRequest) -> JsonResponse:
     if artifact is None:
         return JsonResponse({'error': 'no_signals'}, status=404)
     body = {k: v for k, v in artifact.items() if k not in _PUBLIC_STRIP}
+    body["signals"] = {t: _normalize_legacy_signal_entry(e)
+                       for t, e in (body.get("signals") or {}).items()}
     if body.get("schema_version") != _SIGNALS_WIRE_SCHEMA_VERSION:
         body["schema_version"] = _SIGNALS_WIRE_SCHEMA_VERSION
-        body["signals"] = {t: _normalize_legacy_signal_entry(e)
-                           for t, e in (body.get("signals") or {}).items()}
     generated = datetime.fromisoformat(artifact["generated_at"])
     now = datetime.now(timezone.utc)
     body["staleness_hours"] = round(

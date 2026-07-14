@@ -422,3 +422,33 @@ class SignalsEndpointTests(SimpleTestCase):
         for body in (first, second):
             self.assertEqual(body["signals"]["MSFT"]["sentiment_score"], 0.5)
             self.assertNotIn("score", body["signals"]["MSFT"])
+
+    def test_entry_with_both_keys_keeps_v2_value_not_legacy(self):
+        # An entry somehow carrying both a v2 sentiment_score and a stray
+        # legacy score must not let the legacy value win — sentiment_score
+        # is authoritative. Distinct values so an overwrite would be caught.
+        entry = dict(DEFAULT_SIGNAL, sentiment_score=0.5, score=-0.9)
+        art = make_artifact(self._recent_iso(), signals={"MSFT": entry})
+        self._write("2026-07-06", art)
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        body = resp.json()
+        self.assertEqual(body["signals"]["MSFT"]["sentiment_score"], 0.5)
+        self.assertNotIn("score", body["signals"]["MSFT"])
+
+    def test_v2_labeled_artifact_with_stray_score_still_stripped(self):
+        # The per-entry normalizer must not be gated by the artifact-level
+        # schema_version check: a v2-labeled artifact with a stray score on
+        # one entry (e.g. a partially-migrated producer) must still have
+        # that score stripped, not just artifacts labeled schema_version 1.
+        legacy_entry = dict(DEFAULT_SIGNAL)
+        legacy_entry["score"] = legacy_entry.pop("sentiment_score")
+        art = make_artifact(self._recent_iso(), signals={"MSFT": legacy_entry})
+        art["schema_version"] = 2
+        self._write("2026-07-06", art)
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        body = resp.json()
+        self.assertEqual(body["schema_version"], 2)
+        self.assertEqual(body["signals"]["MSFT"]["sentiment_score"], 0.5)
+        self.assertNotIn("score", body["signals"]["MSFT"])
