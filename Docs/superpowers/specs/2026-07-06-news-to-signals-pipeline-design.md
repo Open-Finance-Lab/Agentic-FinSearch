@@ -197,7 +197,7 @@ A machine-readable JSON Schema ships at `Heartbeat/schemas/signals-v1.schema.jso
 
 ## 5. Configuration (the v1 tuning surface)
 
-Env vars read by `news_signals.py` (module constants as defaults). This is the surface future user-facing tuning builds on:
+Env vars read by `news_signals.py` (module constants as defaults). This is the surface future user-facing tuning builds on. All are pipeline-only except `SIGNALS_MAX_FILE_MB`, which the Django API reads too (see its row):
 
 | Var | Default | Meaning |
 |-----|---------|---------|
@@ -209,7 +209,7 @@ Env vars read by `news_signals.py` (module constants as defaults). This is the s
 | `SIGNALS_THRESHOLD` | `0.20` | ± threshold for bullish/bearish label (40/60 band, empirically backed; was 0.15) |
 | `SIGNALS_DAMP_CAP` | `0.7` | Max \|score\| when under-corroborated |
 | `SIGNALS_DAMP_MIN_ARTICLES` | `2` | Corroboration needed for \|score\| > damp cap |
-| `SIGNALS_MAX_FILE_MB` | `10` | Reject oversized items files |
+| `SIGNALS_MAX_FILE_MB` | `10` | Reject oversized items files. **Two readers as of 2026-07-14:** `news_signals.py` (via `load_config`) and the Django API (via `settings.RAW_ITEMS_MAX_FILE_MB`, which `GET /api/news/items/` enforces when validating a batch). Deliberately one operator knob — raising it for the pipeline without raising it for the API would 404 a batch the pipeline happily accepted. Set it in `.env.production` alongside the heartbeat's own env file; the two defaults are pinned together by `Heartbeat/tests/test_port_parity.py`. |
 | `SIGNALS_STALENESS_ALERT_H` | `20` | Canary threshold (§6-C). Tuned, not arbitrary: the daily canary check runs 2 h after the daily beat, so a single fully-missed day leaves the newest artifact ~25.5 h old at the *next* day's check — a 30 h threshold would not cross that (it silently absorbs one entire missed day, only firing after a second consecutive miss); 20 h does. |
 
 ## 6. Failure policy (every mode decided)
