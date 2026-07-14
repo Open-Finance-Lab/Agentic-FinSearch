@@ -176,8 +176,17 @@ def _last_modified(request: HttpRequest):
     if _tickers_filter(request):
         return None
     artifact = _get_artifact(request)
-    return (datetime.fromisoformat(artifact["generated_at"])
-            if artifact else None)
+    if artifact is None:
+        return None
+    # A pre-v2 artifact's *representation* changes at the wire boundary while
+    # its generated_at does not, and Last-Modified cannot express that (Django
+    # skips the ETag entirely when If-None-Match is absent — get_conditional_
+    # response step 4), so an IMS-only revalidation would 304 a client into a
+    # stale v1 body. Artifacts the normalizer rewrites don't get the validator;
+    # native-v2 artifacts keep it. Self-retiring once every artifact is v2.
+    if artifact.get("schema_version") != _SIGNALS_WIRE_SCHEMA_VERSION:
+        return None
+    return datetime.fromisoformat(artifact["generated_at"])
 
 
 @csrf_exempt

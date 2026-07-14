@@ -11,6 +11,7 @@ from unittest import mock
 
 from django.core.cache import cache
 from django.test import SimpleTestCase, override_settings
+from django.utils.http import http_date
 
 from api import signals_views
 from tests.shared_settings import HERMETIC_REQUEST_SETTINGS as _HERMETIC
@@ -450,6 +451,31 @@ class SignalsEndpointTests(SimpleTestCase):
             resp = self.client.get(URL)
         body = resp.json()
         self.assertEqual(body["schema_version"], 2)
+        self.assertEqual(body["signals"]["MSFT"]["sentiment_score"], 0.5)
+        self.assertNotIn("score", body["signals"]["MSFT"])
+
+    def test_pre_deploy_if_modified_since_does_not_304_into_stale_v1_body(self):
+        # IMS twin of the ETag regression below: with no If-None-Match,
+        # Django answers from If-Modified-Since alone and never consults the
+        # ETag (see test_if_modified_since_revalidates_unfiltered_but_never_
+        # filtered's comment) — so the ETag salt alone cannot stop a client
+        # that cached a pre-deploy IMS value from revalidating a 304 against
+        # a v1 artifact whose generated_at hasn't changed. A v1 artifact
+        # must not emit Last-Modified at all.
+        legacy_entry = dict(DEFAULT_SIGNAL)
+        legacy_entry["score"] = legacy_entry.pop("sentiment_score")
+        art = make_artifact(self._recent_iso(), signals={"MSFT": legacy_entry})
+        art["schema_version"] = 1
+        self._write("2026-07-06", art)
+        # A well-formed IMS value a client could have cached pre-deploy —
+        # formatted independently of the view (http_date on generated_at),
+        # not read back from a live response, since a v1 artifact no longer
+        # emits Last-Modified at all.
+        stale_ims = http_date(datetime.fromisoformat(art["generated_at"]).timestamp())
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL, HTTP_IF_MODIFIED_SINCE=stale_ims)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
         self.assertEqual(body["signals"]["MSFT"]["sentiment_score"], 0.5)
         self.assertNotIn("score", body["signals"]["MSFT"])
 
