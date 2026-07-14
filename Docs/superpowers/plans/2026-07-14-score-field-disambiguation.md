@@ -289,18 +289,20 @@ In `test_serves_newest_batch_default_limit_shape` (lines 74-100): `body["schema_
 ```
 Then `grep -n '\bscore\b' Main/backend/tests/test_news_items_endpoint.py` and convert any remaining `score=` kwargs / `["score"]` lookups the grep surfaces (e.g. the malformed-numeric test passes `score="NaN-ish"` style values — same rename, keep the malformed values).
 
-Add one new test pinning the poison-pill on legacy batches (alongside `test_missing_required_field_poisons_batch`, lines 214-223, reusing its batch-writing pattern):
+Add one new test pinning the poison-pill on legacy batches (alongside `test_missing_required_field_poisons_batch`, lines 214-223, mirroring its exact write-and-request pattern):
 ```python
     def test_legacy_score_only_batch_poisons(self):
         # Pre-rename batch: has score, lacks editorial_score -> missing
         # required field -> whole batch rejected (strict cutover, no compat).
         item = make_item("g1")
         item["score"] = item.pop("editorial_score")
-        self._write_batch("items-2026-07-06.jsonl", [item])
-        resp = self.client.get(PATH, **AUTH)
+        path = self.dir / "items-2026-07-06.jsonl"
+        path.write_text(json.dumps(item) + "\n", encoding="utf-8")
+        with override_settings(RAW_ITEMS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
         self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json(), {"error": "no_items"})
 ```
-(Use the same batch-write helper + auth constants the sibling tests at lines 214-232 use — copy their exact call pattern.)
 
 - [ ] **Step 2: Update Heartbeat reader tests (failing first)**
 
@@ -310,15 +312,21 @@ Add one new test pinning the poison-pill on legacy batches (alongside `test_miss
 
 - [ ] **Step 3: Update the parity corpus + add strictness cases**
 
-In `test_port_parity.py` `TestValidateItemsParity` (lines 256-358): rename every `"score"` key in the corpus stories to `"editorial_score"` (keep the malformed-numeric values as-is — the case the corpus exists for). Add two cases using the class's existing batch-write helper and `_assert_gate_parity` pattern (copy the exact helper invocation from the neighboring tests):
+In `test_port_parity.py` — note this file has its OWN `make_story(**over)` builder at line 128, separate from `test_news_signals.py`'s:
+
+1. Builder base dict (line ~128 area): `"score": 5.0` → `"editorial_score": 5.0`.
+2. Corpus kwargs in `test_validate_items_matches_across_corpus` (the three numeric-parse cases, lines ~340-345): `make_story(guid="bad", score="n/a")` / `score=None` / `score={}` → `editorial_score="n/a"` / `editorial_score=None` / `editorial_score={}` (keep the malformed values — the parse guard is the case the corpus exists for). Rename the case labels `score_unparseable`/`score_none`/`score_non_scalar` → `editorial_score_*` to match.
+3. `test_missing_required_field_raises_valueerror_on_both` (line ~338): `del story["score"]` → `del story["editorial_score"]`.
+
+Then add two strictness cases in `TestValidateItemsParity`, using the module-level `write_stories(self._td, stories, name=...)` helper the corpus already uses:
 
 ```python
     def test_legacy_score_only_story_poisons_batch_in_both_copies(self):
         # Strict rename: a pre-rename story (score, no editorial_score) is a
         # MISSING REQUIRED FIELD -> batch-level ValueError in BOTH copies.
-        story = {"guid": "g1", "title": "t", "link": "https://e/x",
-                 "source": "s", "published": time.time(), "score": 5.0}
-        path = self._write(json.dumps(story))
+        story = make_story()
+        story["score"] = story.pop("editorial_score")
+        path = write_stories(self._td, [story])
         with self.assertRaises(ValueError):
             _PORTED_NS["_validate_items"](path, 10)
         with self.assertRaises(ValueError):
@@ -327,13 +335,12 @@ In `test_port_parity.py` `TestValidateItemsParity` (lines 256-358): rename every
     def test_extra_legacy_score_key_passes_gate_identically(self):
         # A story carrying BOTH keys validates; the stray legacy key is the
         # projection layer's problem (dropped at the wire), not the gate's.
-        story = {"guid": "g1", "title": "t", "link": "https://e/x",
-                 "source": "s", "published": time.time(),
-                 "editorial_score": 5.0, "score": 4.0}
-        path = self._write(json.dumps(story))
-        self._assert_gate_parity(path, 10)
+        story = make_story()
+        story["score"] = 4.0
+        path = write_stories(self._td, [story])
+        self._assert_gate_parity(path)
 ```
-(`self._write` here stands for the class's actual single-batch write helper — match the existing methods' name and signature exactly; do not invent a second helper.)
+(If `write_stories` requires the `name=` kwarg, pass `name="items-legacy.jsonl"` / `name="items-bothkeys.jsonl"` — match the corpus invocations.)
 
 - [ ] **Step 4: Run both suites to verify failure**
 
@@ -418,7 +425,7 @@ Expected: FAIL — writer still emits `score`, schema v2 file missing.
 ```
 (the local `score` variable and the `entry.get("score")` LLM-reply parse at line 477 stay).
 
-Create `Heartbeat/schemas/signals-v2.schema.json` as an exact copy of `signals-v1.schema.json` with exactly three diffs:
+Create `Heartbeat/schemas/signals-v2.schema.json` as an exact copy of `signals-v1.schema.json` with ONLY these diffs:
 - `"$id": "signals-v2.schema.json"`
 - `"title": "FinSearch news signals artifact v2 (2026-07-14 score-field disambiguation)"`
 - `"schema_version": { "const": 2 }`
@@ -470,25 +477,26 @@ In `make_artifact`: `"schema_version": 2,`. In the main shape test add:
         self.assertEqual(body["schema_version"], 2)
         self.assertNotIn("score", body["signals"]["MSFT"])
 ```
-Add the normalizer test (same file, reusing the suite's artifact-writing pattern):
+Add the normalizer test (same file; `URL`, `self._write(stem, artifact)`, `self._recent_iso`, and the `override_settings(SIGNALS_DIR=..., **_HERMETIC)` pattern are the suite's existing helpers — see `test_as_of_prefers_newer_stem_date_over_newer_mtime` for the as_of idiom):
 ```python
     def test_legacy_v1_artifact_normalized_to_wire_v2(self):
-        # Historical artifacts (?as_of reads) predate the rename; the wire
-        # must still be uniformly v2 — score never escapes the boundary.
+        # Historical artifacts predate the rename; the wire must be uniformly
+        # v2 whether reached as latest or via ?as_of — score never escapes.
         legacy_entry = dict(DEFAULT_SIGNAL)
         legacy_entry["score"] = legacy_entry.pop("sentiment_score")
-        art = make_artifact(generated_at="2026-07-10T00:00:00+00:00",
-                            signals={"MSFT": legacy_entry})
+        art = make_artifact(self._recent_iso(2.0), signals={"MSFT": legacy_entry})
         art["schema_version"] = 1
-        self._write_artifact("signals-2026-07-10.json", art)
-        resp = self.client.get(PATH, **AUTH)
-        body = resp.json()
-        self.assertEqual(body["schema_version"], 2)
-        entry = body["signals"]["MSFT"]
-        self.assertEqual(entry["sentiment_score"], 0.5)
-        self.assertNotIn("score", entry)
+        self._write("2026-07-10", art)
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            for query in ({}, {"as_of": "2026-07-10"}):
+                with self.subTest(query=query):
+                    resp = self.client.get(URL, query)
+                    body = resp.json()
+                    self.assertEqual(body["schema_version"], 2)
+                    entry = body["signals"]["MSFT"]
+                    self.assertEqual(entry["sentiment_score"], 0.5)
+                    self.assertNotIn("score", entry)
 ```
-(Match the suite's actual artifact-write helper and auth/PATH constants — copy the invocation from `test_serves_newest_by_stem_strips_private_adds_staleness`.)
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -500,22 +508,26 @@ Expected: FAIL — view is pass-through, no normalization.
 In `signals_views.py`, add beside `_PUBLIC_STRIP` (line 34):
 ```python
 _SIGNALS_WIRE_SCHEMA_VERSION = 2  # wire is always v2; v1 disk artifacts are normalized below
+
+
+def _normalize_legacy_signal_entry(entry):
+    """v1 artifacts (?as_of reads) predate the score->sentiment_score rename;
+    rename at the boundary so `score` never reaches the wire. Copies — the
+    top-level body is fresh, but entry dicts are shared references into the
+    memoized artifact and must not be mutated. Odd shapes pass through
+    untouched (defensive)."""
+    if isinstance(entry, dict) and "score" in entry and "sentiment_score" not in entry:
+        entry = dict(entry)
+        entry["sentiment_score"] = entry.pop("score")
+    return entry
 ```
 In the `news_signals` view body, after `body = {k: v for k, v in artifact.items() if k not in _PUBLIC_STRIP}` (line 170), insert:
 ```python
     if body.get("schema_version") != _SIGNALS_WIRE_SCHEMA_VERSION:
-        # Historical v1 artifacts (?as_of reads) predate the score-field
-        # rename; normalize at the boundary so `score` never reaches the
-        # wire. Defensive per-entry: odd shapes pass through untouched.
         body["schema_version"] = _SIGNALS_WIRE_SCHEMA_VERSION
-        body["signals"] = {
-            t: ({**e, "sentiment_score": {**e}.pop("score")}
-                if isinstance(e, dict) and "score" in e
-                and "sentiment_score" not in e else e)
-            for t, e in body["signals"].items()
-        }
+        body["signals"] = {t: _normalize_legacy_signal_entry(e)
+                           for t, e in (body.get("signals") or {}).items()}
 ```
-Then simplify that dict-surgery into a small helper if the inline form reads poorly — behavior pinned by the test either way. The `{**e}` copy matters: `_get_artifact` memoizes per-request, but never mutate the loaded artifact in place.
 
 - [ ] **Step 4: Run the backend suite**
 
