@@ -24,6 +24,7 @@ urlpatterns = [
     path('api/axioms/has_claims/', views.has_axiom_claims, name='axioms_has_claims'),
     path('api/axioms/xbrl/<str:filename>/', views.xbrl_filing_download, name='axioms_xbrl_filing'),
     path('api/signals/news/', signals_views.news_signals, name='news_signals'),
+    path('api/news/items/', signals_views.news_items, name='news_items'),
 
     # Standard OpenAI-compatible API
     path('v1/models', openai_views.models_list, name='openai_models_list'),

@@ -170,6 +170,11 @@ API_RATE_LIMIT = os.getenv('API_RATE_LIMIT', '600/h')
 # path means the endpoint fail-closes to 404 {"error": "no_signals"}.
 SIGNALS_DIR = os.getenv('SIGNALS_DIR', '')
 
+# Raw news-items directory (ATL integration Phase B). In prod this is a
+# runtime-enforced :ro mount of the heartbeat's digests/ dir ONLY; unset or
+# missing path means the endpoint fail-closes to 404 {"error": "no_items"}.
+RAW_ITEMS_DIR = os.getenv('RAW_ITEMS_DIR', '')
+
 # FinGPT API authentication.
 # When FINGPT_API_KEY is set, all /v1/* endpoints require:
 #     Authorization: Bearer <FINGPT_API_KEY>

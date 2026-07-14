@@ -102,6 +102,33 @@ def test_signals_accepts_valid_bearer(monkeypatch):
     assert resp.status_code != 401
 
 
+# news_items (ATL integration Phase B) — same coverage shape as the signals
+# tests directly above (this endpoint isn't in GATED_EXTENSION_PATHS either,
+# it has its own dedicated 401/dev-mode/valid-bearer tests).
+@override_settings(**HERMETIC_REQUEST_SETTINGS)
+def test_items_401_when_key_set_no_header(monkeypatch):
+    monkeypatch.setenv("FINGPT_API_KEY", "sekret")
+    assert Client().get("/api/news/items/").status_code == 401
+
+
+@override_settings(REQUIRE_FINGPT_API_KEY=False, RAW_ITEMS_DIR="",
+                   **HERMETIC_REQUEST_SETTINGS)
+def test_items_open_when_no_key(monkeypatch):
+    monkeypatch.delenv("FINGPT_API_KEY", raising=False)
+    # 404 no_items (empty RAW_ITEMS_DIR) proves it reached the view, not 401
+    assert Client().get("/api/news/items/").status_code in (200, 404)
+
+
+@override_settings(RAW_ITEMS_DIR="", **HERMETIC_REQUEST_SETTINGS)
+def test_items_accepts_valid_bearer(monkeypatch):
+    # Prod path: key set + valid Bearer header -> auth passes, request reaches
+    # the view (404 no_items with empty RAW_ITEMS_DIR) through real URL dispatch.
+    monkeypatch.setenv("FINGPT_API_KEY", "sekret")
+    resp = Client().get("/api/news/items/",
+                        HTTP_AUTHORIZATION="Bearer sekret")
+    assert resp.status_code != 401
+
+
 # ---------------------------------------------------------------------------
 # Phase 3: the 14 extension-facing views must enforce bearer auth. health/ and
 # the xbrl download stay exempt. Client-driven so the decorator is proven

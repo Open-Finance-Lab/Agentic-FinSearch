@@ -15,6 +15,7 @@ pipeline state.
 import json
 import logging
 import re
+import unicodedata
 from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -175,6 +176,175 @@ def news_signals(request: HttpRequest) -> JsonResponse:
     if wanted:
         body["signals"] = {k: v for k, v in body["signals"].items()
                            if k in wanted}
+    response = JsonResponse(body)
+    response["Cache-Control"] = "public, max-age=300"
+    return response
+
+
+# --- Raw news-items endpoint (ATL integration Phase B) ---------------------
+# Sibling of news_signals, but reads items-*.jsonl batches directly with no
+# subject/roundup/LLM gating (news_signals' select_candidates etc. is dropped
+# entirely — this serves the raw, ungated feed). The validation/sanitization
+# below is PORTED byte-faithfully from Heartbeat/news_signals.py
+# (validation_gate/clean_text) — that script is deliberately isolated and not
+# importable from the Django app — because it is a security trust boundary
+# (spec §7.1): do not paraphrase it.
+REQUIRED_FIELDS = ("guid", "title", "link", "source", "published", "score")
+FIELD_CAPS = {"title": 500, "description": 5000, "link": 2000, "source": 200, "guid": 200}
+
+# Control chars + bidi/direction overrides (recency/spoofing hygiene, spec 7.1).
+_CONTROL_RE = re.compile(
+    "[\x00-\x08\x0b\x0c\x0e-\x1f\x7f"
+    "\u200e\u200f\u202a-\u202e\u2066-\u2069]"
+)
+_LINEBREAK_RE = re.compile("[\t\n\v\f\r\x1c-\x1e\x85\u2028\u2029]+")
+
+
+def _clean_text(s, cap):
+    # line boundaries first — _CONTROL_RE would strip \v/\f/\x1c-\x1e to nothing and fuse words
+    s = _LINEBREAK_RE.sub(" ", unicodedata.normalize("NFC", s or ""))
+    s = _CONTROL_RE.sub("", s)
+    s = s.replace("NEWS_DATA", "")   # datamarking token can never come from the feed
+    return s[:cap]
+
+
+_MAX_ITEMS_FILE_MB = 10   # matches Heartbeat SIGNALS_MAX_FILE_MB default
+
+
+def _validate_items(path, max_file_mb=_MAX_ITEMS_FILE_MB):
+    """Input trust boundary (ported from Heartbeat's validation_gate).
+    Batch-level defects raise ValueError (poison pill); a bad `published` or
+    numeric field drops only that story."""
+    st = path.stat()
+    if st.st_size > max_file_mb * 1024 * 1024:
+        raise ValueError(f"file exceeds {max_file_mb}MB")
+    lo, hi = st.st_mtime - 30 * 86400, st.st_mtime + 3600
+    stories = []
+    for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        story = json.loads(line)                       # JSONDecodeError -> ValueError -> poison pill
+        for field in REQUIRED_FIELDS:
+            if field not in story:
+                raise ValueError(f"line {i}: missing required field {field}")
+        try:
+            published = float(story["published"]); story["score"] = float(story["score"])
+        except (TypeError, ValueError):
+            continue                                   # malformed numerics: drop story, keep batch
+        if not (lo <= published <= hi):
+            continue                                   # forged/insane epoch: drop story, keep batch
+        story["published"] = published
+        story["title"] = _clean_text(story["title"], FIELD_CAPS["title"])
+        story["description"] = _clean_text(story.get("description", ""), FIELD_CAPS["description"])
+        story["source"] = _clean_text(story["source"], FIELD_CAPS["source"])
+        story["guid"] = _clean_text(str(story["guid"]), FIELD_CAPS["guid"])
+        story["link"] = _clean_text(str(story["link"]), FIELD_CAPS["link"])
+        story["tickers"] = [t.upper() for t in story.get("tickers", [])]
+        stories.append(story)
+    return stories
+
+
+# The response contract's 8 keys, exactly — extra input keys (e.g. "feeds")
+# are dropped at projection time in the view body.
+_ITEMS_CONTRACT_FIELDS = ("guid", "title", "link", "source", "published",
+                          "description", "tickers", "score")
+
+
+def _load_items():
+    """-> (newest_path, stories_sorted_desc) or None. No ?as_of for items:
+    always the single newest batch. Mirrors _load_artifact's fail-closed
+    contract — any locate/read/validate failure (including a batch that
+    vanishes mid-race, or one that validates to zero stories) returns None,
+    never falling back to an older batch."""
+    configured = getattr(settings, "RAW_ITEMS_DIR", "")
+    if not configured:
+        return None
+    directory = Path(configured)
+    if not directory.is_dir():
+        return None
+    candidates = list(directory.glob("items-*.jsonl"))
+    if not candidates:
+        return None
+    newest = None
+    try:
+        # stat() stays inside the try: a file pruned between glob() and
+        # stat() fails closed, never 500s (same race as _load_artifact).
+        newest = max(candidates, key=lambda p: (p.stat().st_mtime, p.name))
+        stories = _validate_items(newest)
+        stories.sort(key=lambda s: s["published"], reverse=True)
+        if not stories:
+            return None
+        return newest, stories
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        logger.error("news_items: unreadable batch %s: %s",
+                     newest.name if newest else "<vanished>", exc)
+        return None  # fail closed: unreadable/empty == no items
+
+
+def _get_items(request: HttpRequest):
+    """One disk load per request: @condition calls the etag/last-modified
+    functions before the view body runs, and all three need the loaded
+    batch. Mirrors _get_artifact."""
+    if not hasattr(request, "_news_items"):
+        request._news_items = _load_items()
+    return request._news_items
+
+
+def _parse_limit(request: HttpRequest):
+    """Parse ?limit. Absent -> None (caller defaults to 50); present but not
+    a base-10 integer -> raises ValueError (the view maps that to a 400);
+    otherwise clamped to [1, 200]."""
+    raw = request.GET.get("limit")
+    if raw is None:
+        return None
+    return max(1, min(200, int(raw)))
+
+
+def _items_etag(request: HttpRequest):
+    loaded = _get_items(request)
+    if loaded is None:
+        return None
+    try:
+        limit = _parse_limit(request)
+    except ValueError:
+        return None  # bad limit: skip conditional handling, view re-parses -> 400
+    path, _ = loaded
+    return f'"{path.name}|{path.stat().st_mtime}|{limit or 50}"'
+
+
+def _items_last_modified(request: HttpRequest):
+    # Only the default-limit variant carries Last-Modified: an explicit
+    # ?limit slices the batch differently, so only the ETag (which encodes
+    # the limit) can identify that variant — same stance as _last_modified's
+    # tickers-filter handling above.
+    if request.GET.get("limit") is not None:
+        return None
+    loaded = _get_items(request)
+    if loaded is None:
+        return None
+    path, _ = loaded
+    return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+
+
+@csrf_exempt
+@require_bearer_auth
+@require_http_methods(["GET"])
+@ratelimit(key='api.identity.ratelimit_key', rate=settings.API_RATE_LIMIT,
+           method=ALL, block=True)
+@condition(etag_func=_items_etag, last_modified_func=_items_last_modified)
+def news_items(request: HttpRequest) -> JsonResponse:
+    try:
+        limit = _parse_limit(request)
+    except ValueError:
+        return JsonResponse({'error': 'bad_limit'}, status=400)
+    loaded = _get_items(request)
+    if loaded is None:
+        return JsonResponse({'error': 'no_items'}, status=404)
+    path, stories = loaded
+    effective_limit = limit or 50
+    sliced = stories[:effective_limit]
+    items = [{k: story[k] for k in _ITEMS_CONTRACT_FIELDS} for story in sliced]
+    body = {"items": items, "count": len(items), "batch": path.name}
     response = JsonResponse(body)
     response["Cache-Control"] = "public, max-age=300"
     return response
