@@ -20,7 +20,7 @@ URL = "/api/signals/news/"
 # The single MSFT signal make_artifact() emits by default; tests composing
 # custom `signals` dicts copy it instead of round-tripping a throwaway
 # make_artifact() call just to reach one nested literal.
-DEFAULT_SIGNAL = {"sentiment": "bullish", "score": 0.5, "rationale": "r",
+DEFAULT_SIGNAL = {"sentiment": "bullish", "sentiment_score": 0.5, "rationale": "r",
                   "headline": "h", "source": "Reuters",
                   "url": "https://example.com/a", "published": 1783330000.0,
                   "guid": "g1", "n_articles": 2}
@@ -28,7 +28,7 @@ DEFAULT_SIGNAL = {"sentiment": "bullish", "score": 0.5, "rationale": "r",
 
 def make_artifact(generated_at, signals=None):
     return {
-        "schema_version": 1, "profile": "default",
+        "schema_version": 2, "profile": "default",
         "generated_at": generated_at,
         "generator": "news_signals.py/test", "model": "gpt-4o-mini",
         "prompt_version": 1, "source_items": "items-x.jsonl",
@@ -87,6 +87,8 @@ class SignalsEndpointTests(SimpleTestCase):
         self.assertEqual(resp["Cache-Control"], "public, max-age=300")
         self.assertTrue(resp.has_header("ETag"))
         self.assertTrue(resp.has_header("Last-Modified"))
+        self.assertEqual(body["schema_version"], 2)
+        self.assertNotIn("score", body["signals"]["MSFT"])
 
     def test_serves_newest_by_mtime_not_stem_for_same_day_supplemental(self):
         # Same-day supplemental stems (items-<date>-<HHMMSS>.jsonl ->
@@ -379,3 +381,44 @@ class SignalsEndpointTests(SimpleTestCase):
             resp = self.client.get(URL + "?as_of=")
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json(), {"error": "bad_as_of"})
+
+    def test_legacy_v1_artifact_normalized_to_wire_v2(self):
+        # Historical artifacts predate the rename; the wire must be uniformly
+        # v2 whether reached as latest or via ?as_of — score never escapes.
+        legacy_entry = dict(DEFAULT_SIGNAL)
+        legacy_entry["score"] = legacy_entry.pop("sentiment_score")
+        art = make_artifact(self._recent_iso(2.0), signals={"MSFT": legacy_entry})
+        art["schema_version"] = 1
+        self._write("2026-07-10", art)
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            for query in ({}, {"as_of": "2026-07-10"}):
+                with self.subTest(query=query):
+                    resp = self.client.get(URL, query)
+                    body = resp.json()
+                    self.assertEqual(body["schema_version"], 2)
+                    entry = body["signals"]["MSFT"]
+                    self.assertEqual(entry["sentiment_score"], 0.5)
+                    self.assertNotIn("score", entry)
+
+    def test_legacy_normalization_does_not_mutate_shared_artifact(self):
+        # _get_artifact's per-request memoization means the SAME artifact
+        # dict is read by _etag, _last_modified, and the view body within
+        # one request; _load_artifact itself re-reads from disk on every
+        # call today, so this can't be reached through the real loader —
+        # mock it to return one shared dict across two separate requests
+        # (as a future response cache would) and confirm the normalizer's
+        # entry-copy still holds: neither the original artifact nor the
+        # second response is corrupted by the first request's rename.
+        legacy_entry = dict(DEFAULT_SIGNAL)
+        legacy_entry["score"] = legacy_entry.pop("sentiment_score")
+        art = make_artifact(self._recent_iso(), signals={"MSFT": legacy_entry})
+        art["schema_version"] = 1
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC), \
+             mock.patch.object(signals_views, "_load_artifact", return_value=art):
+            first = self.client.get(URL).json()
+            second = self.client.get(URL).json()
+        self.assertIn("score", art["signals"]["MSFT"])
+        self.assertNotIn("sentiment_score", art["signals"]["MSFT"])
+        for body in (first, second):
+            self.assertEqual(body["signals"]["MSFT"]["sentiment_score"], 0.5)
+            self.assertNotIn("score", body["signals"]["MSFT"])
