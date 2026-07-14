@@ -24,7 +24,7 @@ import urllib.request
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-VERSION = "2026-07-14.1"
+VERSION = "2026-07-14.2"
 SCHEMA_VERSION = 1
 PROMPT_VERSION = 1
 
@@ -42,7 +42,7 @@ DOW_30 = [
 # Non-Dow tickers FinSearch also tracks for its own community digests.
 WATCHLIST_EXTRAS = ["META", "TSLA", "BRK-B", "BTC-USD"]
 DEFAULT_WATCHLIST = " ".join(sorted(set(DOW_30) | set(WATCHLIST_EXTRAS)))
-REQUIRED_FIELDS = ("guid", "title", "link", "source", "published", "score")
+REQUIRED_FIELDS = ("guid", "title", "link", "source", "published", "editorial_score")
 FIELD_CAPS = {"title": 500, "description": 5000, "link": 2000, "source": 200,
               "guid": 200}
 # Required fields that must be strings. A malformed type drops the story — same
@@ -185,7 +185,7 @@ def validation_gate(path, max_file_mb):
                 raise ValueError(f"line {i}: missing required field {field}")
         try:
             published = float(story["published"])
-            story["score"] = float(story["score"])
+            story["editorial_score"] = float(story["editorial_score"])
         except (TypeError, ValueError):
             continue  # malformed numeric types: drop the story, keep the batch
         if not (lo <= published <= hi):
@@ -342,7 +342,7 @@ def select_candidates(stories, watchlist, cfg):
             "tickers_capped": 0}
     by_ticker = {}
     for story in stories:
-        if float(story["score"]) < cfg["min_editorial"]:
+        if float(story["editorial_score"]) < cfg["min_editorial"]:
             continue
         tagged = [t for t in dict.fromkeys(story["tickers"])  # deduped, order kept
                   if t in watchlist]
@@ -365,7 +365,7 @@ def select_candidates(stories, watchlist, cfg):
     capped, n_articles = {}, {}
     for ticker in sorted(by_ticker):
         lst = by_ticker[ticker]
-        lst.sort(key=lambda s: (-float(s["score"]), -float(s["published"])))
+        lst.sort(key=lambda s: (-float(s["editorial_score"]), -float(s["published"])))
         lst, collapsed = collapse_dup_titles(lst)
         diag["near_dups_collapsed"] += collapsed
         n_articles[ticker] = len(lst)

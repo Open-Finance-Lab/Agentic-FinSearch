@@ -17,23 +17,23 @@ from tests.shared_settings import HERMETIC_REQUEST_SETTINGS as _HERMETIC
 
 URL = "/api/news/items/"
 
-# Wire keys (news-story v1): disk batches stay RSS-native (title/link); the
+# Wire keys (news-story v2): disk batches stay RSS-native (title/link); the
 # view projection renames to the shared vocabulary the live signals endpoint
 # already speaks (headline/url). make_item below builds DISK-shape items.
 CONTRACT_KEYS = {"guid", "headline", "url", "source", "published",
-                 "description", "tickers", "score"}
+                 "description", "tickers", "editorial_score"}
 
 
 def make_item(guid, title="Example headline", link="https://example.com/a",
               source="Reuters", published=None, description="A description.",
-              tickers=None, score=0.7, **extra):
+              tickers=None, editorial_score=0.7, **extra):
     if published is None:
         published = time.time() - 3600  # 1h ago by default
     item = {
         "guid": guid, "title": title, "link": link, "source": source,
         "published": published, "description": description,
         "tickers": tickers if tickers is not None else ["AAPL"],
-        "score": score,
+        "editorial_score": editorial_score,
     }
     item.update(extra)
     return item
@@ -83,7 +83,7 @@ class NewsItemsEndpointTests(SimpleTestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertEqual(set(body), {"schema_version", "items", "count", "batch"})
-        self.assertEqual(body["schema_version"], 1)
+        self.assertEqual(body["schema_version"], 2)
         self.assertEqual(body["batch"], "items-2026-07-06.jsonl")
         self.assertEqual(body["count"], 3)
         self.assertEqual([it["guid"] for it in body["items"]], ["g0", "g1", "g2"])
@@ -93,8 +93,9 @@ class NewsItemsEndpointTests(SimpleTestCase):
         self.assertEqual(body["items"][0]["headline"], "Example headline")
         self.assertEqual(body["items"][0]["url"], "https://example.com/a")
         self.assertIsInstance(body["items"][0]["published"], float)
-        self.assertIsInstance(body["items"][0]["score"], float)
+        self.assertIsInstance(body["items"][0]["editorial_score"], float)
         self.assertIsInstance(body["items"][0]["tickers"], list)
+        self.assertNotIn("score", body["items"][0])
         self.assertEqual(resp["Cache-Control"], "public, max-age=300")
         self.assertTrue(resp.has_header("ETag"))
         self.assertTrue(resp.has_header("Last-Modified"))
@@ -217,6 +218,18 @@ class NewsItemsEndpointTests(SimpleTestCase):
         del bad["source"]
         path = self.dir / "items-2026-07-06.jsonl"
         path.write_text(json.dumps(good) + "\n" + json.dumps(bad) + "\n", encoding="utf-8")
+        with override_settings(RAW_ITEMS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.json(), {"error": "no_items"})
+
+    def test_legacy_score_only_batch_poisons(self):
+        # Pre-rename batch: has score, lacks editorial_score -> missing
+        # required field -> whole batch rejected (strict cutover, no compat).
+        item = make_item("g1")
+        item["score"] = item.pop("editorial_score")
+        path = self.dir / "items-2026-07-06.jsonl"
+        path.write_text(json.dumps(item) + "\n", encoding="utf-8")
         with override_settings(RAW_ITEMS_DIR=str(self.dir), **_HERMETIC):
             resp = self.client.get(URL)
         self.assertEqual(resp.status_code, 404)

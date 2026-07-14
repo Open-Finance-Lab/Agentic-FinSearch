@@ -198,7 +198,7 @@ def news_signals(request: HttpRequest) -> JsonResponse:
 # SIGNALS_MAX_FILE_MB in load_config; here the same env var arrives via
 # settings.RAW_ITEMS_MAX_FILE_MB (one operator knob, two readers). The parity
 # test pins the two defaults together.
-REQUIRED_FIELDS = ("guid", "title", "link", "source", "published", "score")
+REQUIRED_FIELDS = ("guid", "title", "link", "source", "published", "editorial_score")
 FIELD_CAPS = {"title": 500, "description": 5000, "link": 2000, "source": 200, "guid": 200}
 # Required fields that must be strings. A malformed type drops the story — same
 # stance as the numeric parse in _validate_items — so a corrupt field can never
@@ -249,7 +249,7 @@ def _validate_items(path, max_file_mb=None):
                 raise ValueError(f"line {i}: missing required field {field}")
         try:
             published = float(story["published"])
-            story["score"] = float(story["score"])
+            story["editorial_score"] = float(story["editorial_score"])
         except (TypeError, ValueError):
             continue                                   # malformed numerics: drop story, keep batch
         if not (lo <= published <= hi):
@@ -278,13 +278,13 @@ def _validate_items(path, max_file_mb=None):
 # "feeds") are dropped at projection time in the view body.
 # _ITEMS_CONTRACT_FIELDS names the DISK keys (RSS-native title/link — the
 # scraper's format, validated above); _ITEMS_WIRE_RENAMES maps them to the
-# news-story v1 vocabulary the wire speaks (headline/url — the nouns the live
+# news-story vocabulary the wire speaks (headline/url — the nouns the live
 # signals endpoint already uses). Disk stays scraper-native; the API boundary
 # does the rename. Contract doc: ATL docs/integrations/finsearch-news-items.md.
 _ITEMS_CONTRACT_FIELDS = ("guid", "title", "link", "source", "published",
-                          "description", "tickers", "score")
+                          "description", "tickers", "editorial_score")
 _ITEMS_WIRE_RENAMES = {"title": "headline", "link": "url"}
-_ITEMS_SCHEMA_VERSION = 1  # news-story v1 — add fields additively; bump on breaking change
+_ITEMS_SCHEMA_VERSION = 2  # news-story v2: score -> editorial_score (2026-07-14 spec)
 
 
 def _load_items():

@@ -133,7 +133,7 @@ def make_story(**over):
         "guid": "g1", "title": "Microsoft raises Azure guidance",
         "link": "https://example.com/a", "source": "Reuters",
         "published": time.time() - 3600, "description": "desc",
-        "tickers": ["MSFT"], "score": 5.0,
+        "tickers": ["MSFT"], "editorial_score": 5.0,
     }
     s.update(over)
     return s
@@ -287,17 +287,20 @@ class TestValidateItemsParity(unittest.TestCase):
             # shipped without them and went green over a real one-sided edit
             # that deleted _validate_items' try/except entirely (PR #359
             # review, P0). No other case reaches float(), because every other
-            # story here carries a well-formed published/score -- the window
-            # cases exercise the `lo <= published <= hi` compare, not the
+            # story here carries a well-formed published/editorial_score -- the
+            # window cases exercise the `lo <= published <= hi` compare, not the
             # parse. Each must drop the bad story and keep the good one on
             # BOTH copies; if either side raises instead, _assert_gate_parity
             # errors, which is the signal we want.
-            "score_unparseable": [make_story(guid="good"),
-                                  make_story(guid="bad", score="n/a")],
-            "score_none": [make_story(guid="good"),
-                           make_story(guid="bad", score=None)],
-            "score_non_scalar": [make_story(guid="good"),
-                                 make_story(guid="bad", score={})],
+            "editorial_score_unparseable": [
+                make_story(guid="good"),
+                make_story(guid="bad", editorial_score="n/a")],
+            "editorial_score_none": [
+                make_story(guid="good"),
+                make_story(guid="bad", editorial_score=None)],
+            "editorial_score_non_scalar": [
+                make_story(guid="good"),
+                make_story(guid="bad", editorial_score={})],
             "published_unparseable": [make_story(guid="good"),
                                       make_story(guid="bad",
                                                  published="yesterday")],
@@ -336,12 +339,31 @@ class TestValidateItemsParity(unittest.TestCase):
 
     def test_missing_required_field_raises_valueerror_on_both(self):
         story = make_story()
-        del story["score"]
+        del story["editorial_score"]
         path = write_stories(self._td, [story])
         with self.assertRaises(ValueError):
             _PORTED_NS["_validate_items"](path, 10)
         with self.assertRaises(ValueError):
             ns.validation_gate(path, 10)
+
+    def test_legacy_score_only_story_poisons_batch_in_both_copies(self):
+        # Strict rename: a pre-rename story (score, no editorial_score) is a
+        # MISSING REQUIRED FIELD -> batch-level ValueError in BOTH copies.
+        story = make_story()
+        story["score"] = story.pop("editorial_score")
+        path = write_stories(self._td, [story], name="items-legacy.jsonl")
+        with self.assertRaises(ValueError):
+            _PORTED_NS["_validate_items"](path, 10)
+        with self.assertRaises(ValueError):
+            ns.validation_gate(path, 10)
+
+    def test_extra_legacy_score_key_passes_gate_identically(self):
+        # A story carrying BOTH keys validates; the stray legacy key is the
+        # projection layer's problem (dropped at the wire), not the gate's.
+        story = make_story()
+        story["score"] = 4.0
+        path = write_stories(self._td, [story], name="items-bothkeys.jsonl")
+        self._assert_gate_parity(path)
 
     def test_malformed_json_line_raises_valueerror_on_both(self):
         path = write_lines(self._td, ['{"broken\n'])

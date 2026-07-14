@@ -2,7 +2,7 @@
   "schema_version": 1,
   "profile": "default",
   "generated_at": "2026-07-06T15:00:00+00:00",
-  "generator": "news_signals.py/2026-07-14.1",
+  "generator": "news_signals.py/2026-07-14.2",
   "model": "gpt-4o-mini",
   "prompt_version": 1,
   "source_items": "items-fixture.jsonl",

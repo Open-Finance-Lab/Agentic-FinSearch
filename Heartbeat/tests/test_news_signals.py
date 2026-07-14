@@ -193,7 +193,7 @@ def make_story(**over):
         "guid": "g1", "title": "Microsoft raises Azure guidance",
         "link": "https://example.com/a", "source": "Reuters",
         "published": time.time() - 3600, "description": "desc",
-        "tickers": ["MSFT"], "feeds": ["news"], "score": 5.0,
+        "tickers": ["MSFT"], "feeds": ["news"], "editorial_score": 5.0,
     }
     s.update(over)
     return s
@@ -258,8 +258,8 @@ class TestValidationGate(unittest.TestCase):
         stories = ns.validation_gate(p, 10)
         self.assertEqual([s["guid"] for s in stories], ["ok"])
 
-    def test_score_null_drops_story_not_batch(self):
-        bad = make_story(guid="bad", score=None)
+    def test_editorial_score_null_drops_story_not_batch(self):
+        bad = make_story(guid="bad", editorial_score=None)
         ok = make_story(guid="ok")
         p = write_items(self.td, [bad, ok])
         stories = ns.validation_gate(p, 10)
@@ -399,9 +399,12 @@ class TestSelection(unittest.TestCase):
 
     def test_near_dups_collapse_and_n_articles_counts_distinct(self):
         stories = [
-            make_story(guid="a", title="Microsoft raises Azure guidance", score=6.0),
-            make_story(guid="b", title="Microsoft raises Azure guidance!", score=3.0),
-            make_story(guid="c", title="Microsoft cloud momentum lifts outlook", score=4.0),
+            make_story(guid="a", title="Microsoft raises Azure guidance",
+                       editorial_score=6.0),
+            make_story(guid="b", title="Microsoft raises Azure guidance!",
+                       editorial_score=3.0),
+            make_story(guid="c", title="Microsoft cloud momentum lifts outlook",
+                       editorial_score=4.0),
         ]
         capped, n_articles, diag = ns.select_candidates(
             stories, ["MSFT"], self._cfg())
@@ -424,8 +427,8 @@ class TestSelection(unittest.TestCase):
 
     def test_editorial_gate_and_cap_order(self):
         cfg = self._cfg()
-        stories = [make_story(guid="low", score=1.0)] + [
-            make_story(guid=f"g{i}", score=3.0 + i,
+        stories = [make_story(guid="low", editorial_score=1.0)] + [
+            make_story(guid=f"g{i}", editorial_score=3.0 + i,
                        title=f"Microsoft ships product number {i} today",
                        published=time.time() - i * 60)
             for i in range(5)
@@ -650,11 +653,11 @@ class TestProcessBatch(unittest.TestCase):
         # copies of one story can never satisfy the corroboration damper.
         p = write_items(self.td, [
             make_story(guid="d1", title="Nvidia unveils next-gen GPU lineup",
-                       tickers=["NVDA"], score=6.0),
+                       tickers=["NVDA"], editorial_score=6.0),
             make_story(guid="d2", title="Nvidia unveils next-gen GPU lineup!",
-                       tickers=["NVDA"], score=5.0),
+                       tickers=["NVDA"], editorial_score=5.0),
             make_story(guid="d3", title="Nvidia unveils next-gen GPU lineup.",
-                       tickers=["NVDA"], score=4.0),
+                       tickers=["NVDA"], editorial_score=4.0),
         ])
         llm = fake_llm_factory({"overview": "o", "tickers":
             {"NVDA": {"score": 0.95, "guid": "d1", "rationale": "r"}}})
