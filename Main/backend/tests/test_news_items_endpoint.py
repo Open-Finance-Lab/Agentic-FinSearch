@@ -17,7 +17,10 @@ from tests.shared_settings import HERMETIC_REQUEST_SETTINGS as _HERMETIC
 
 URL = "/api/news/items/"
 
-CONTRACT_KEYS = {"guid", "title", "link", "source", "published",
+# Wire keys (news-story v1): disk batches stay RSS-native (title/link); the
+# view projection renames to the shared vocabulary the live signals endpoint
+# already speaks (headline/url). make_item below builds DISK-shape items.
+CONTRACT_KEYS = {"guid", "headline", "url", "source", "published",
                  "description", "tickers", "score"}
 
 
@@ -79,12 +82,16 @@ class NewsItemsEndpointTests(SimpleTestCase):
             resp = self.client.get(URL)
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
-        self.assertEqual(set(body), {"items", "count", "batch"})
+        self.assertEqual(set(body), {"schema_version", "items", "count", "batch"})
+        self.assertEqual(body["schema_version"], 1)
         self.assertEqual(body["batch"], "items-2026-07-06.jsonl")
         self.assertEqual(body["count"], 3)
         self.assertEqual([it["guid"] for it in body["items"]], ["g0", "g1", "g2"])
         for it in body["items"]:
             self.assertEqual(set(it), CONTRACT_KEYS)
+        # rename fidelity: wire headline/url carry the disk title/link values
+        self.assertEqual(body["items"][0]["headline"], "Example headline")
+        self.assertEqual(body["items"][0]["url"], "https://example.com/a")
         self.assertIsInstance(body["items"][0]["published"], float)
         self.assertIsInstance(body["items"][0]["score"], float)
         self.assertIsInstance(body["items"][0]["tickers"], list)
@@ -283,10 +290,10 @@ class NewsItemsEndpointTests(SimpleTestCase):
         with override_settings(RAW_ITEMS_DIR=str(self.dir), **_HERMETIC):
             resp = self.client.get(URL)
         self.assertEqual(resp.status_code, 200)
-        served_title = resp.json()["items"][0]["title"]
-        self.assertNotIn("\u202e", served_title)
-        self.assertNotIn("NEWS_DATA", served_title)
-        self.assertLessEqual(len(served_title), 500)
+        served_headline = resp.json()["items"][0]["headline"]
+        self.assertNotIn("\u202e", served_headline)
+        self.assertNotIn("NEWS_DATA", served_headline)
+        self.assertLessEqual(len(served_headline), 500)
 
     # 17. zero valid stories after the gate
     def test_zero_valid_stories_404s(self):

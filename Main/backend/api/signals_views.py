@@ -249,10 +249,17 @@ def _validate_items(path, max_file_mb=_MAX_ITEMS_FILE_MB):
     return stories
 
 
-# The response contract's 8 keys, exactly — extra input keys (e.g. "feeds")
-# are dropped at projection time in the view body.
+# The response contract's 8 per-story keys, exactly — extra input keys (e.g.
+# "feeds") are dropped at projection time in the view body.
+# _ITEMS_CONTRACT_FIELDS names the DISK keys (RSS-native title/link — the
+# scraper's format, validated above); _ITEMS_WIRE_RENAMES maps them to the
+# news-story v1 vocabulary the wire speaks (headline/url — the nouns the live
+# signals endpoint already uses). Disk stays scraper-native; the API boundary
+# does the rename. Contract doc: ATL docs/integrations/finsearch-news-items.md.
 _ITEMS_CONTRACT_FIELDS = ("guid", "title", "link", "source", "published",
                           "description", "tickers", "score")
+_ITEMS_WIRE_RENAMES = {"title": "headline", "link": "url"}
+_ITEMS_SCHEMA_VERSION = 1  # news-story v1 — add fields additively; bump on breaking change
 
 
 def _load_items():
@@ -359,8 +366,10 @@ def news_items(request: HttpRequest) -> JsonResponse:
     path, _mtime, stories = loaded
     effective_limit = limit or 50
     sliced = stories[:effective_limit]
-    items = [{k: story[k] for k in _ITEMS_CONTRACT_FIELDS} for story in sliced]
-    body = {"items": items, "count": len(items), "batch": path.name}
+    items = [{_ITEMS_WIRE_RENAMES.get(k, k): story[k] for k in _ITEMS_CONTRACT_FIELDS}
+             for story in sliced]
+    body = {"schema_version": _ITEMS_SCHEMA_VERSION, "items": items,
+            "count": len(items), "batch": path.name}
     response = JsonResponse(body)
     response["Cache-Control"] = "public, max-age=300"
     return response
