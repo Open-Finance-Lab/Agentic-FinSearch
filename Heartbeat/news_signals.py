@@ -25,7 +25,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 VERSION = "2026-07-14.2"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 PROMPT_VERSION = 1
 
 # Dow Jones Industrial Average constituents.
@@ -49,13 +49,13 @@ FIELD_CAPS = {"title": 500, "description": 5000, "link": 2000, "source": 200,
 # stance as the numeric parse in validation_gate — so a corrupt field can never
 # reach clean_text as a non-str and can never poison the whole batch.
 TEXT_REQUIRED_FIELDS = ("guid", "title", "link", "source")
-# Caps for the LLM/exception-derived output fields, pinned by the signals-v1
+# Caps for the LLM/exception-derived output fields, pinned by the signals-v2
 # schema's maxLength values (headline/source/url are covered by FIELD_CAPS:
 # they pass through from the validated input). Same single-source-of-truth
 # discipline as DIAGNOSTIC_FIELDS — the schema-parity test asserts the code
 # and the published contract never drift.
 OUTPUT_CAPS = {"news_overview": 300, "rationale": 280, "status_reason": 200}
-# signals-v1 pins window_hours >= 1; enforced at config load because nothing
+# signals-v2 pins window_hours >= 1; enforced at config load because nothing
 # validates artifacts at runtime.
 WINDOW_HOURS_MIN = 1
 LLM_TIMEOUT = 120
@@ -483,7 +483,7 @@ def validate_response(out, cands, n_articles, cfg, diag):
             diag["scores_damped"] += 1
         signals[ticker] = {
             "sentiment": derive_label(score, cfg["threshold"]),
-            "score": round(score, 2),
+            "sentiment_score": round(score, 2),
             "rationale": clean_text(str(entry.get("rationale") or ""),
                                     OUTPUT_CAPS["rationale"]),
             "headline": rep["title"],

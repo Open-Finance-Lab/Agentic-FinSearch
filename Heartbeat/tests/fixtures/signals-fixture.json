@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "profile": "default",
   "generated_at": "2026-07-06T15:00:00+00:00",
   "generator": "news_signals.py/2026-07-14.2",
@@ -31,7 +31,7 @@
   "signals": {
     "MSFT": {
       "sentiment": "bullish",
-      "score": 0.5,
+      "sentiment_score": 0.5,
       "rationale": "Two distinct outlets report upbeat Azure guidance.",
       "headline": "Microsoft raises Azure guidance after record quarter",
       "source": "Reuters",
@@ -42,7 +42,7 @@
     },
     "NVDA": {
       "sentiment": "bullish",
-      "score": 0.7,
+      "sentiment_score": 0.7,
       "rationale": "Single story reports record datacenter orders.",
       "headline": "Nvidia reports record datacenter orders",
       "source": "CNBC",

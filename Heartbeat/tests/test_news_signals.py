@@ -9,13 +9,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import news_signals as ns
 from fake_http import FakeResponse, assert_no_resource_warnings, http_429
 
-SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "signals-v1.schema.json"
+SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "signals-v2.schema.json"
 
 # Derived from the generator's single source of truth; the schema-parity
 # test pins it against the published contract independently.
 DIAG_KEYS = list(ns.DIAGNOSTIC_FIELDS)
 SIGNAL_KEYS = [
-    "sentiment", "score", "rationale", "headline", "source", "url",
+    "sentiment", "sentiment_score", "rationale", "headline", "source", "url",
     "published", "guid", "n_articles",
 ]
 
@@ -27,7 +27,7 @@ class TestSchemaFile(unittest.TestCase):
 
     def test_schema_parses_and_pins_the_contract(self):
         schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(schema["properties"]["schema_version"]["const"], 1)
+        self.assertEqual(schema["properties"]["schema_version"]["const"], 2)
         diag = schema["properties"]["diagnostics"]
         self.assertEqual(sorted(diag["required"]), sorted(DIAG_KEYS))
         self.assertFalse(diag.get("additionalProperties", True))
@@ -585,7 +585,7 @@ class TestValidateResponse(unittest.TestCase):
                {"MSFT": {"score": 5.0, "guid": "m1", "rationale": "r"}}}
         _, signals = ns.validate_response(out, cands, n, cfg, diag)
         e = signals["MSFT"]
-        self.assertEqual(e["score"], 0.7)          # clamped to 1.0 then damped
+        self.assertEqual(e["sentiment_score"], 0.7)          # clamped to 1.0 then damped
         self.assertEqual(e["sentiment"], "bullish")
         self.assertEqual(diag["scores_damped"], 1)
         self.assertEqual(e["headline"], "Microsoft raises Azure guidance")
@@ -619,10 +619,11 @@ class TestProcessBatch(unittest.TestCase):
         llm = fake_llm_factory({"overview": "calm day", "tickers":
             {"MSFT": {"score": 0.3, "guid": "m1", "rationale": "r"}}})
         artifact = ns.process_batch(p, self.cfg, time.time(), llm=llm)
-        self.assertEqual(artifact["schema_version"], 1)
+        self.assertEqual(artifact["schema_version"], 2)
         self.assertEqual(artifact["status"], "ok")
         self.assertEqual(artifact["source_items"], p.name)
         self.assertEqual(list(artifact["signals"]), ["MSFT"])
+        self.assertNotIn("score", artifact["signals"]["MSFT"])
         d = artifact["diagnostics"]
         self.assertEqual(d["stories_total"], 2)
         self.assertEqual(d["candidates_dropped_not_subject"], 2)
@@ -665,7 +666,7 @@ class TestProcessBatch(unittest.TestCase):
         entry = artifact["signals"]["NVDA"]
         self.assertEqual(entry["n_articles"], 1,
                           "3 near-dup copies must collapse to 1 distinct story")
-        self.assertEqual(entry["score"], 0.7,
+        self.assertEqual(entry["sentiment_score"], 0.7,
                           "under-corroborated despite 3 raw copies -> damped")
         self.assertEqual(artifact["diagnostics"]["scores_damped"], 1)
         self.assertEqual(artifact["diagnostics"]["near_dups_collapsed"], 2)
