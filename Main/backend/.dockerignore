@@ -69,6 +69,11 @@ htmlcov/
 # Documentation
 *.md
 !README.md
+# prompts/*.md are RUNTIME ASSETS, not documentation — core.md, _security.md,
+# sites/*.md and personas/*.md are loaded by PromptBuilder/datascraper at
+# runtime; without this exception the image silently falls back to stale
+# inline copies (or, for personas, to the generic INSTRUCTION).
+!prompts/**/*.md
 docs/
 Docs/
 

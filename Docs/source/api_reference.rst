@@ -495,8 +495,12 @@ Available Models
      - buffet
      - Custom (Hugging Face endpoint)
      - Fine-tuned financial model.
+   * - ``FinSearch-Trader``
+     - google
+     - ``gemini-3-flash-preview``
+     - Professional trader persona. Direct path only — never uses MCP tools or web search in any mode (deterministic, backtest-safe).
 
-All models support both ``thinking`` (MCP) and ``research`` (deep search) modes.
+Models support both ``thinking`` (MCP) and ``research`` (deep search) modes, except the *direct* models (``Buffet-Agent``, ``FinSearch-Trader``), which answer with a single model call in every mode — no tools are ever attached.
 
 ---
 
