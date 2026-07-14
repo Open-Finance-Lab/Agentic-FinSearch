@@ -24,7 +24,7 @@ import urllib.request
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-VERSION = "2026-07-11.2"
+VERSION = "2026-07-14.1"
 SCHEMA_VERSION = 1
 PROMPT_VERSION = 1
 
@@ -45,6 +45,10 @@ DEFAULT_WATCHLIST = " ".join(sorted(set(DOW_30) | set(WATCHLIST_EXTRAS)))
 REQUIRED_FIELDS = ("guid", "title", "link", "source", "published", "score")
 FIELD_CAPS = {"title": 500, "description": 5000, "link": 2000, "source": 200,
               "guid": 200}
+# Required fields that must be strings. A malformed type drops the story — same
+# stance as the numeric parse in validation_gate — so a corrupt field can never
+# reach clean_text as a non-str and can never poison the whole batch.
+TEXT_REQUIRED_FIELDS = ("guid", "title", "link", "source")
 # Caps for the LLM/exception-derived output fields, pinned by the signals-v1
 # schema's maxLength values (headline/source/url are covered by FIELD_CAPS:
 # they pass through from the validated input). Same single-source-of-truth
@@ -109,9 +113,13 @@ def load_env_file(path):
 
 
 def clean_text(s, cap):
+    # non-str (incl. None) collapses to "": the gate must never raise on a
+    # malformed field type. Required-field types are checked in validation_gate;
+    # this keeps optional and LLM-derived callers total on their own.
+    s = s if isinstance(s, str) else ""
     # line boundaries first — CONTROL_RE would strip \v/\f/\x1c-\x1e to
     # nothing and fuse the words they separated
-    s = _LINEBREAK_RE.sub(" ", unicodedata.normalize("NFC", s or ""))
+    s = _LINEBREAK_RE.sub(" ", unicodedata.normalize("NFC", s))
     s = CONTROL_RE.sub("", s)
     s = s.replace("NEWS_DATA", "")  # marker token can never come from the feed
     return s[:cap]
@@ -161,7 +169,8 @@ def load_config():
 
 def validation_gate(path, max_file_mb):
     """Input trust boundary (spec §7.1). Batch-level defects raise ValueError
-    (poison pill, §6.1); a bad `published` drops only that story."""
+    (poison pill, §6.1); a bad `published`, a malformed numeric, or a
+    non-str TEXT_REQUIRED_FIELDS value drops only that story."""
     st = path.stat()
     if st.st_size > max_file_mb * 1024 * 1024:
         raise ValueError(f"file exceeds {max_file_mb}MB")
@@ -181,14 +190,23 @@ def validation_gate(path, max_file_mb):
             continue  # malformed numeric types: drop the story, keep the batch
         if not (lo <= published <= hi):
             continue  # forged/insane epoch: drop the story, keep the batch
+        if not all(isinstance(story[f], str) for f in TEXT_REQUIRED_FIELDS):
+            continue  # malformed text types: drop the story, keep the batch
         story["published"] = published
         story["title"] = clean_text(story["title"], FIELD_CAPS["title"])
         story["description"] = clean_text(story.get("description", ""),
                                           FIELD_CAPS["description"])
         story["source"] = clean_text(story["source"], FIELD_CAPS["source"])
-        story["guid"] = clean_text(str(story["guid"]), FIELD_CAPS["guid"])
-        story["link"] = clean_text(str(story["link"]), FIELD_CAPS["link"])
-        story["tickers"] = [t.upper() for t in story.get("tickers", [])]
+        story["guid"] = clean_text(story["guid"], FIELD_CAPS["guid"])
+        story["link"] = clean_text(story["link"], FIELD_CAPS["link"])
+        # non-list/non-string tickers dropped, never crashed: a corrupt
+        # "tickers":[123] must not .upper() -> AttributeError, which the only
+        # caller (process_batch's ValueError-only except) would not catch and
+        # which would abort the whole sweep; a bare "tickers":"AAPL" must not
+        # char-iterate to ['A','A','P','L'].
+        raw_tickers = story.get("tickers", [])
+        story["tickers"] = ([t.upper() for t in raw_tickers if isinstance(t, str)]
+                            if isinstance(raw_tickers, list) else [])
         stories.append(story)
     return stories
 

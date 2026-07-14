@@ -38,7 +38,7 @@ Backend Structure
    ├── api/                          # REST API layer
    │   ├── views.py                  # Main API endpoints
    │   ├── openai_views.py           # OpenAI-compatible API endpoints
-   │   ├── signals_views.py          # News-signals endpoint (GET /api/signals/news/)
+   │   ├── signals_views.py          # News endpoints (GET /api/signals/news/, GET /api/news/items/)
    │   ├── middleware/               # CORS and custom middleware
    │   ├── utils/                    # API utility functions
    │   ├── apps.py                   # Django app configuration

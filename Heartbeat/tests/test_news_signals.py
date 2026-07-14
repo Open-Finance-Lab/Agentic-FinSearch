@@ -83,6 +83,27 @@ class TestFoundation(unittest.TestCase):
         self.assertEqual(ns.clean_text(None, 5), "")
         self.assertEqual(ns.clean_text("x" * 10, 5), "xxxxx")
 
+    def test_clean_text_is_total_non_str_types_collapse_to_empty(self):
+        # D1: clean_text's isinstance guard replaces the old "s or ''"
+        # fallback and must never raise on a non-str input.
+        import news_signals as ns
+        for bad in (True, 123, [], {}):
+            with self.subTest(bad=bad):
+                self.assertEqual(ns.clean_text(bad, 100), "")
+
+    def test_clean_text_no_regression_for_every_input_the_old_fallback_handled(self):
+        # D1 strict-superset proof: "s or ''" returned "" for every falsy
+        # input and passed through every truthy str unchanged (modulo the
+        # existing cleanup). Pin the exact old behavior for the falsy/edge
+        # inputs that worked before this change, so a future edit can't
+        # silently regress them.
+        import news_signals as ns
+        self.assertEqual(ns.clean_text("", 100), "")
+        self.assertEqual(ns.clean_text(None, 100), "")
+        self.assertEqual(ns.clean_text(0, 100), "")
+        self.assertEqual(ns.clean_text(False, 100), "")
+        self.assertEqual(ns.clean_text("0", 100), "0")
+
     def test_clean_text_collapses_embedded_newlines_and_tabs(self):
         # A multi-line feed title must not let forged-looking lines reach
         # logs or artifact consumers: headline/rationale/source/guid are
@@ -256,6 +277,58 @@ class TestValidationGate(unittest.TestCase):
         p = write_items(self.td, [s])
         stories = ns.validation_gate(p, 10)
         self.assertNotIn("\u202e", stories[0]["link"])
+
+    def test_non_string_ticker_elements_are_dropped_not_crashed(self):
+        # F2b regression: [t.upper() for t in tickers] would raise
+        # AttributeError on a non-str element ('int' object has no attribute
+        # 'upper'). run_sweep's ONLY except clause around process_batch is
+        # `except ValueError as exc:  # poison pill` (news_signals.py, the
+        # run_sweep loop) \u2014 an AttributeError is NOT a ValueError, so it
+        # would propagate uncaught and abort the whole sweep instead of just
+        # dropping this one story. Must never raise.
+        bad = make_story(guid="bad", tickers=[123, "msft", None, "nvda"])
+        ok = make_story(guid="ok")
+        p = write_items(self.td, [bad, ok])
+        stories = ns.validation_gate(p, 10)
+        self.assertEqual([s["guid"] for s in stories], ["bad", "ok"])
+        self.assertEqual(stories[0]["tickers"], ["MSFT", "NVDA"])
+
+    def test_bare_string_and_non_list_tickers_become_empty_list(self):
+        # A bare "tickers":"AAPL" must not char-iterate to ['A','A','P','L'].
+        cases = [
+            ("str", "AAPL"),
+            ("none", None),
+            ("dict", {"a": 1}),
+        ]
+        for name, val in cases:
+            with self.subTest(tickers=name):
+                p = write_items(self.td, [make_story(guid=name, tickers=val)],
+                                 name=f"items-{name}.jsonl")
+                stories = ns.validation_gate(p, 10)
+                self.assertEqual(stories[0]["tickers"], [])
+
+    def test_non_string_required_text_field_drops_story_not_batch(self):
+        # F2a's Heartbeat twin: title/source/guid/link must be str, else the
+        # story is dropped (D2) rather than reaching clean_text with a type
+        # that would raise inside unicodedata.normalize.
+        bad_title = make_story(guid="bad-title", title=True)      # JSON bool
+        bad_source = make_story(guid="bad-source", source=123)    # JSON number
+        bad_guid = make_story(guid=456, title="fine")
+        bad_link = make_story(guid="bad-link", link=789)
+        ok = make_story(guid="ok")
+        p = write_items(self.td, [bad_title, bad_source, bad_guid, bad_link, ok])
+        stories = ns.validation_gate(p, 10)
+        self.assertEqual([s["guid"] for s in stories], ["ok"])
+
+    def test_non_string_description_blanks_field_but_keeps_story(self):
+        # description is optional and only reaches clean_text's own isinstance
+        # guard (D1) \u2014 it must NOT be dropped like a TEXT_REQUIRED_FIELDS
+        # violation, just blanked.
+        s = make_story(guid="ok", description=True)
+        p = write_items(self.td, [s])
+        stories = ns.validation_gate(p, 10)
+        self.assertEqual([s["guid"] for s in stories], ["ok"])
+        self.assertEqual(stories[0]["description"], "")
 
 
 class TestSubjectGate(unittest.TestCase):

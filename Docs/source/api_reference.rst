@@ -571,6 +571,9 @@ the signed ``fingpt_sessionid`` cookie. Callers may pass an optional
    * - GET
      - ``/api/signals/news/``
      - Latest news→sentiment signals artifact
+   * - GET
+     - ``/api/news/items/``
+     - Raw news stories from the newest Heartbeat batch
 
 All share the ``API_RATE_LIMIT`` budget (``429 {"error": "rate_limited"}``
 when exceeded). The chat endpoints can also return ``503 {"error": "busy"}``
@@ -725,6 +728,44 @@ n_articles}`` with ``score`` in ``[-1, 1]``.
 an ``ETag`` validator and ``Cache-Control: public, max-age=300``.
 ``Last-Modified`` is sent only on unfiltered responses — ``tickers=``-filtered
 variants are ETag-only, so conditional requests for them must use
+``If-None-Match``.
+
+News Items
+~~~~~~~~~~
+
+``GET /api/news/items/`` serves the **raw news stories** of the newest
+Heartbeat batch — the corpus the signals above are derived from, before any
+LLM scoring. Like ``/api/signals/news/`` it is an integration surface for
+external consumers; the browser extension does not call it.
+
+**Query parameters:**
+
+- ``limit=N`` — how many stories to return, newest first. Clamped to
+  ``[1, 200]``; defaults to ``50`` when absent. A non-integer value returns
+  ``400 {"error": "bad_limit"}``.
+
+There is no ``as_of`` here: this endpoint always reads the single newest
+batch.
+
+**Response (200):** ``{schema_version, items, count, batch}``, where ``batch``
+names the source file and each entry of ``items`` is
+``{guid, headline, url, source, published, description, tickers, score}``.
+``published`` is epoch seconds.
+
+.. note::
+
+   ``score`` on this endpoint is the pipeline's **editorial** score — how
+   newsworthy the story is, the gate that decides which stories become
+   sentiment candidates (``SIGNALS_MIN_EDITORIAL_SCORE``). It is *not* the
+   ``[-1, 1]`` sentiment score of the same name under ``/api/signals/news/``.
+   The two fields share a name and nothing else.
+
+``404 {"error": "no_items"}`` when no batch exists, or when the newest one is
+unreadable or validates to zero stories — the endpoint never falls back to an
+older batch, and never returns a ``500``. Responses carry an ``ETag`` and
+``Cache-Control: public, max-age=300``. ``Last-Modified`` is sent only on the
+default-limit variant — an explicit ``?limit`` slices the batch differently,
+so those variants are ETag-only and conditional requests for them must use
 ``If-None-Match``.
 
 ---
