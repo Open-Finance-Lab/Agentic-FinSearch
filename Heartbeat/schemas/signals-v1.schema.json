@@ -2,6 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "signals-v1.schema.json",
   "title": "FinSearch news signals artifact v1 (spec 2026-07-06 §4.2, amended)",
+  "$comment": "Historical only; superseded by signals-v2.schema.json (2026-07-14 score-field disambiguation), which renames the per-entry 'score' to 'sentiment_score'. Retained because pre-rename artifacts stay on disk and are still served via ?as_of: the Django view normalizes them up to v2 at the wire, so this schema describes what is stored, never what is served. Nothing in this repo loads it — it rejects current output rather than validating it. ATL keeps its own copy until it drops its v1 fallback.",
   "type": "object",
   "additionalProperties": false,
   "required": [

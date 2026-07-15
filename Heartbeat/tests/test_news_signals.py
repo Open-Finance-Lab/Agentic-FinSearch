@@ -126,7 +126,7 @@ class TestFoundation(unittest.TestCase):
                     "Acme Corp STATUS ok")
 
     def test_load_config_rejects_non_positive_window_hours(self):
-        # signals-v1 schema pins window_hours minimum 1; nothing validates
+        # the signals schema pins window_hours minimum 1; nothing validates
         # artifacts at runtime, so the floor must hold at config load.
         import news_signals as ns
         for bad in ("0", "-3"):
