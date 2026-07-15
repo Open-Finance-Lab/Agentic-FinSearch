@@ -26,7 +26,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "2026-07-11.1"
+VERSION = "2026-07-14.1"
 
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
@@ -252,7 +252,7 @@ def title_tokens(title):
 def collapse_near_dups(stories, threshold=0.7):
     """Collapse near-identical headlines; the higher-scored story survives."""
     kept = []  # (story, tokens) pairs — tokenize each title exactly once
-    for s in sorted(stories, key=lambda x: x.get("score", 0.0), reverse=True):
+    for s in sorted(stories, key=lambda x: x.get("editorial_score", 0.0), reverse=True):
         toks = title_tokens(s["title"])
         for k, ktoks in kept:
             union = toks | ktoks
@@ -316,8 +316,9 @@ def score_story(story, watchlist, now):
 
 def rank_stories(stories, watchlist, now):
     for s in stories:
-        s["score"] = score_story(s, watchlist, now)
-    return sorted(stories, key=lambda s: (s["score"], s["published"]), reverse=True)
+        s["editorial_score"] = score_story(s, watchlist, now)
+    return sorted(stories, key=lambda s: (s["editorial_score"], s["published"]),
+                  reverse=True)
 
 
 # ------------------------------------------------------------- digesting ---
@@ -340,7 +341,7 @@ def _quoted_excerpt(description):
 
 def extractive_digest(stories, now, max_per_section=8):
     """Deterministic fallback digest when no LLM is available."""
-    ranked = sorted(stories, key=lambda s: s.get("score", 0.0), reverse=True)
+    ranked = sorted(stories, key=lambda s: s.get("editorial_score", 0.0), reverse=True)
     market = [s for s in ranked if not s["tickers"]][:max_per_section]
     company = [s for s in ranked if s["tickers"]][:max_per_section]
     sections = []

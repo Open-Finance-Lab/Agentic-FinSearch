@@ -24,8 +24,8 @@ import urllib.request
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-VERSION = "2026-07-14.1"
-SCHEMA_VERSION = 1
+VERSION = "2026-07-14.2"
+SCHEMA_VERSION = 2
 PROMPT_VERSION = 1
 
 # Dow Jones Industrial Average constituents.
@@ -42,20 +42,20 @@ DOW_30 = [
 # Non-Dow tickers FinSearch also tracks for its own community digests.
 WATCHLIST_EXTRAS = ["META", "TSLA", "BRK-B", "BTC-USD"]
 DEFAULT_WATCHLIST = " ".join(sorted(set(DOW_30) | set(WATCHLIST_EXTRAS)))
-REQUIRED_FIELDS = ("guid", "title", "link", "source", "published", "score")
+REQUIRED_FIELDS = ("guid", "title", "link", "source", "published", "editorial_score")
 FIELD_CAPS = {"title": 500, "description": 5000, "link": 2000, "source": 200,
               "guid": 200}
 # Required fields that must be strings. A malformed type drops the story — same
 # stance as the numeric parse in validation_gate — so a corrupt field can never
 # reach clean_text as a non-str and can never poison the whole batch.
 TEXT_REQUIRED_FIELDS = ("guid", "title", "link", "source")
-# Caps for the LLM/exception-derived output fields, pinned by the signals-v1
+# Caps for the LLM/exception-derived output fields, pinned by the signals-v2
 # schema's maxLength values (headline/source/url are covered by FIELD_CAPS:
 # they pass through from the validated input). Same single-source-of-truth
 # discipline as DIAGNOSTIC_FIELDS — the schema-parity test asserts the code
 # and the published contract never drift.
 OUTPUT_CAPS = {"news_overview": 300, "rationale": 280, "status_reason": 200}
-# signals-v1 pins window_hours >= 1; enforced at config load because nothing
+# signals-v2 pins window_hours >= 1; enforced at config load because nothing
 # validates artifacts at runtime.
 WINDOW_HOURS_MIN = 1
 LLM_TIMEOUT = 120
@@ -185,7 +185,7 @@ def validation_gate(path, max_file_mb):
                 raise ValueError(f"line {i}: missing required field {field}")
         try:
             published = float(story["published"])
-            story["score"] = float(story["score"])
+            story["editorial_score"] = float(story["editorial_score"])
         except (TypeError, ValueError):
             continue  # malformed numeric types: drop the story, keep the batch
         if not (lo <= published <= hi):
@@ -342,7 +342,7 @@ def select_candidates(stories, watchlist, cfg):
             "tickers_capped": 0}
     by_ticker = {}
     for story in stories:
-        if float(story["score"]) < cfg["min_editorial"]:
+        if float(story["editorial_score"]) < cfg["min_editorial"]:
             continue
         tagged = [t for t in dict.fromkeys(story["tickers"])  # deduped, order kept
                   if t in watchlist]
@@ -365,7 +365,7 @@ def select_candidates(stories, watchlist, cfg):
     capped, n_articles = {}, {}
     for ticker in sorted(by_ticker):
         lst = by_ticker[ticker]
-        lst.sort(key=lambda s: (-float(s["score"]), -float(s["published"])))
+        lst.sort(key=lambda s: (-float(s["editorial_score"]), -float(s["published"])))
         lst, collapsed = collapse_dup_titles(lst)
         diag["near_dups_collapsed"] += collapsed
         n_articles[ticker] = len(lst)
@@ -483,7 +483,7 @@ def validate_response(out, cands, n_articles, cfg, diag):
             diag["scores_damped"] += 1
         signals[ticker] = {
             "sentiment": derive_label(score, cfg["threshold"]),
-            "score": round(score, 2),
+            "sentiment_score": round(score, 2),
             "rationale": clean_text(str(entry.get("rationale") or ""),
                                     OUTPUT_CAPS["rationale"]),
             "headline": rep["title"],

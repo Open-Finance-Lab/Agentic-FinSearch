@@ -1,8 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "signals-v1.schema.json",
-  "title": "FinSearch news signals artifact v1 (spec 2026-07-06 §4.2, amended)",
-  "$comment": "Historical only; superseded by signals-v2.schema.json (2026-07-14 score-field disambiguation), which renames the per-entry 'score' to 'sentiment_score'. Retained because pre-rename artifacts stay on disk and are still served via ?as_of: the Django view normalizes them up to v2 at the wire, so this schema describes what is stored, never what is served. Nothing in this repo loads it — it rejects current output rather than validating it. ATL keeps its own copy until it drops its v1 fallback.",
+  "$id": "signals-v2.schema.json",
+  "title": "FinSearch news signals artifact v2 (2026-07-14 score-field disambiguation)",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,7 +10,7 @@
     "status", "status_reason", "news_overview", "diagnostics", "signals"
   ],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "const": 2 },
     "profile": { "type": "string" },
     "generated_at": { "type": "string", "format": "date-time" },
     "generator": { "type": "string" },
@@ -56,12 +55,12 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "sentiment", "score", "rationale", "headline", "source", "url",
+          "sentiment", "sentiment_score", "rationale", "headline", "source", "url",
           "published", "guid", "n_articles"
         ],
         "properties": {
           "sentiment": { "enum": ["bullish", "bearish", "neutral"] },
-          "score": { "type": "number", "minimum": -1, "maximum": 1 },
+          "sentiment_score": { "type": "number", "minimum": -1, "maximum": 1 },
           "rationale": { "type": "string", "maxLength": 280 },
           "headline": { "type": "string", "maxLength": 500 },
           "source": { "type": "string", "maxLength": 200 },

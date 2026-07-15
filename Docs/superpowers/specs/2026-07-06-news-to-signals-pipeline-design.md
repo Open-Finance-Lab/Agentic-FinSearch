@@ -1,5 +1,19 @@
 # News → Signals Pipeline — Design Spec
 
+> **Amended 2026-07-14:** field names superseded by
+> `2026-07-14-score-field-disambiguation-design.md`. The items input field
+> (§4.1) is now `editorial_score`; the artifact/wire sentiment field (§4.2,
+> §4.4) is now `sentiment_score` (schema v2). Other `score` mentions below
+> (§3 diagram, §5 config table, §8) predate the rename — read them as
+> `editorial_score` where they concern items and `sentiment_score` where they
+> concern the artifact. The internal LLM reply key (§4.3) is deliberately
+> unchanged and still `score`. The contract-schema pointers (§4.2, §9) are
+> updated in place to `signals-v2.schema.json`; `signals-v1.schema.json`
+> stays in-tree but describes pre-rename artifacts only. §4.4's `Headers`
+> bullet is updated in place too: both conditional-request validators changed
+> shape in this rename (ETag salted with the wire schema version;
+> `Last-Modified` withheld from artifacts the wire normalizer rewrites).
+
 **Date:** 2026-07-06
 **Status:** Formats pinned; producer-side prototype validated against real prod data. ATL-side adapter, Django endpoint, and droplet deployment are specified here but built in a future session. **Amended 2026-07-06** after the research benchmark (companion doc below): subject-relevance gate (D8) and near-dup collapse (D9) added, prompt datamarking pinned, label-deadband default widened to ±0.20. **Amended 2026-07-07** after an adversarial review of the implementation plan: `SIGNALS_STALENESS_ALERT_H` default corrected 30→20 (§5) — the 30 h default never actually caught a single missed day (see the corrected §5 note); the plan additionally hardens `TICKER_ALIASES` substring matching to word-bounded (Task 5) after confirming real collisions (`"intel"`⊂`"intelligence"`, `"cisco"`⊂`"francisco"`), and records novelty-preference/LDD/batch-mean-de-biasing as explicit (not silent) deferrals in the plan's new "Known seam debt" section.
 **Relates to:** `Docs/superpowers/specs/2026-06-10-news-heartbeat-design.md` (producer), `2026-07-06-news-to-signals-research-benchmark.md` (research benchmark driving the 2026-07-06 amendments), `/mnt/d/Documents/ATL Materials/FinSearch-to-ATL-Integration-Plan.html` (Plan 1), ATL repo `dashboard/backend/api/v2/models.py` (frozen consumer contract).
@@ -143,7 +157,7 @@ Field rules (normative):
 - **`source_items`** — basename only, never a path.
 - **`profile`** — reserved for future per-user/per-config variants; always `"default"` in v1.
 
-A machine-readable JSON Schema ships at `Heartbeat/schemas/signals-v1.schema.json`; both repos' test suites validate against it (the cross-repo contract test).
+A machine-readable JSON Schema ships at `Heartbeat/schemas/signals-v2.schema.json`; this repo's test suites validate against it (the cross-repo contract test — ATL still carries the v1 copy and moves to v2 when it drops its `score` fallback). `signals-v1.schema.json` is retained for pre-rename artifacts and pins the superseded `score` field, so it rejects current output rather than validating it.
 
 ### 4.3 Internal LLM contract — the swap point
 
@@ -180,7 +194,7 @@ A machine-readable JSON Schema ships at `Heartbeat/schemas/signals-v1.schema.jso
   requested date to the returned `generated_at`. `staleness_hours` is
   unchanged (relative to now). Composes with `?tickers=`.
 - **404** `{"error": "no_signals"}` — no artifact exists.
-- Headers: `ETag` (from `generated_at` + `source_items` + the normalized tickers filter, `+`-joined — Django's `parse_etags()` rejects commas inside an ETag), `Last-Modified` **on the unfiltered variant only** (it is identical across tickers variants, so an `If-Modified-Since`-only revalidation of a filtered request must get a full 200, never a 304 pointing at a differently-filtered cached body), `Cache-Control: public, max-age=300`; conditional GET returns 304. Rate-limited via the existing `django_ratelimit` + `api.identity.ratelimit_key` infra.
+- Headers: `ETag` (from the wire schema version + `generated_at` + `source_items` + the normalized tickers filter, `+`-joined — Django's `parse_etags()` rejects commas inside an ETag; the version salt is what makes a wire-shape change invalidate every cached ETag, including `?as_of` reads of artifacts that never change again), `Last-Modified` **on the unfiltered variant only, and only for artifacts already at the wire schema version** (it is identical across tickers variants, so an `If-Modified-Since`-only revalidation of a filtered request must get a full 200, never a 304 pointing at a differently-filtered cached body; and an artifact the wire normalizer rewrites gets no `Last-Modified` at all — its representation changes while `generated_at` does not, and Django never consults the ETag when `If-None-Match` is absent), `Cache-Control: public, max-age=300`; conditional GET returns 304. Rate-limited via the existing `django_ratelimit` + `api.identity.ratelimit_key` infra.
 - Serving path: container gets a **runtime-enforced `:ro` mount of `$HEARTBEAT_HOME/signals/` only** — never the whole digests tree (§7.2).
 
 ### 4.5 ATL adapter projection (future session; pinned now)
@@ -245,7 +259,7 @@ A fully-wedged pipeline must be distinguishable from a quiet news day. A separat
 ## 9. Testing strategy
 
 - **Unit (`Heartbeat/tests/test_news_signals.py`):** validation gate (size/field/published/bidi cases), candidate selection + caps, subject gate (ticker/alias-in-headline passes; roundup-blocklist title drops; a ticker whose candidates are all gated emits *absent*, not `0.00`), near-dup collapse (`n_articles` counts distinct stories; damper not satisfiable by duplicates), prompt assembly (datamarking delimiters present around every candidate), response validation (guid membership, clamping, damping, label derivation), poison-pill state handling, artifact-before-state ordering (crash injection between writes), degraded-artifact path, atomic write.
-- **Contract:** sample artifacts validate against `signals-v1.schema.json`; a fixture copy + the same schema go to the ATL repo next session (its adapter tests validate projection from the same fixture).
+- **Contract:** sample artifacts validate against `signals-v2.schema.json`; a fixture copy + the same schema go to the ATL repo next session (its adapter tests validate projection from the same fixture).
 - **Staging (deploy session):** drop two items files back-to-back, confirm sweep processes both exactly once; kill the process mid-LLM-call, confirm no state corruption and reprocessing next sweep.
 
 ## 10. Architecture review verdict (2026-07-06 panel: failure/observability, security, cost/reality lenses)

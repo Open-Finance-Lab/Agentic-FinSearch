@@ -11,6 +11,7 @@ from unittest import mock
 
 from django.core.cache import cache
 from django.test import SimpleTestCase, override_settings
+from django.utils.http import http_date
 
 from api import signals_views
 from tests.shared_settings import HERMETIC_REQUEST_SETTINGS as _HERMETIC
@@ -20,7 +21,7 @@ URL = "/api/signals/news/"
 # The single MSFT signal make_artifact() emits by default; tests composing
 # custom `signals` dicts copy it instead of round-tripping a throwaway
 # make_artifact() call just to reach one nested literal.
-DEFAULT_SIGNAL = {"sentiment": "bullish", "score": 0.5, "rationale": "r",
+DEFAULT_SIGNAL = {"sentiment": "bullish", "sentiment_score": 0.5, "rationale": "r",
                   "headline": "h", "source": "Reuters",
                   "url": "https://example.com/a", "published": 1783330000.0,
                   "guid": "g1", "n_articles": 2}
@@ -28,7 +29,7 @@ DEFAULT_SIGNAL = {"sentiment": "bullish", "score": 0.5, "rationale": "r",
 
 def make_artifact(generated_at, signals=None):
     return {
-        "schema_version": 1, "profile": "default",
+        "schema_version": 2, "profile": "default",
         "generated_at": generated_at,
         "generator": "news_signals.py/test", "model": "gpt-4o-mini",
         "prompt_version": 1, "source_items": "items-x.jsonl",
@@ -87,6 +88,8 @@ class SignalsEndpointTests(SimpleTestCase):
         self.assertEqual(resp["Cache-Control"], "public, max-age=300")
         self.assertTrue(resp.has_header("ETag"))
         self.assertTrue(resp.has_header("Last-Modified"))
+        self.assertEqual(body["schema_version"], 2)
+        self.assertNotIn("score", body["signals"]["MSFT"])
 
     def test_serves_newest_by_mtime_not_stem_for_same_day_supplemental(self):
         # Same-day supplemental stems (items-<date>-<HHMMSS>.jsonl ->
@@ -269,6 +272,25 @@ class SignalsEndpointTests(SimpleTestCase):
         self.assertEqual(filtered.status_code, 404)
         self.assertEqual(filtered.json(), {"error": "no_signals"})
 
+    def test_non_dict_signal_entry_passes_through_not_500(self):
+        # _load_artifact validates that `signals` is a dict but never each
+        # entry's type, so a corrupt entry does reach the wire normalizer.
+        # Its isinstance guard is load-bearing, and closes two separate raises
+        # — `"score" not in entry` means something different per type: on an
+        # int it is a TypeError, and on a str it is a *substring* test, so an
+        # entry that merely contains "score" slips past it into dict(entry)
+        # and raises ValueError. Either turns a corrupt artifact into a 500 on
+        # an endpoint whose every failure path is contracted to be a 404.
+        # ("garbled" pins the pass-through itself: no "score" substring, so it
+        # survives even without the guard.) Entries pass through untouched.
+        signals = {"MSFT": "garbled", "AAPL": 7, "NVDA": "high score today"}
+        art = make_artifact(self._recent_iso(), signals=signals)
+        self._write("2026-07-06", art)
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["signals"], signals)
+
     def test_as_of_serves_that_days_artifact(self):
         self._write("2026-07-05", make_artifact(self._recent_iso(50.0), signals={
             "MSFT": dict(DEFAULT_SIGNAL, guid="d05")}))
@@ -379,3 +401,122 @@ class SignalsEndpointTests(SimpleTestCase):
             resp = self.client.get(URL + "?as_of=")
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(resp.json(), {"error": "bad_as_of"})
+
+    def test_legacy_v1_artifact_normalized_to_wire_v2(self):
+        # Historical artifacts predate the rename; the wire must be uniformly
+        # v2 whether reached as latest or via ?as_of — score never escapes.
+        legacy_entry = dict(DEFAULT_SIGNAL)
+        legacy_entry["score"] = legacy_entry.pop("sentiment_score")
+        art = make_artifact(self._recent_iso(2.0), signals={"MSFT": legacy_entry})
+        art["schema_version"] = 1
+        self._write("2026-07-10", art)
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            for query in ({}, {"as_of": "2026-07-10"}):
+                with self.subTest(query=query):
+                    resp = self.client.get(URL, query)
+                    body = resp.json()
+                    self.assertEqual(body["schema_version"], 2)
+                    entry = body["signals"]["MSFT"]
+                    self.assertEqual(entry["sentiment_score"], 0.5)
+                    self.assertNotIn("score", entry)
+
+    def test_legacy_normalization_does_not_mutate_shared_artifact(self):
+        # _get_artifact's per-request memoization means the SAME artifact
+        # dict is read by _etag, _last_modified, and the view body within
+        # one request; _load_artifact itself re-reads from disk on every
+        # call today, so this can't be reached through the real loader —
+        # mock it to return one shared dict across two separate requests
+        # (as a future response cache would) and confirm the normalizer's
+        # entry-copy still holds: neither the original artifact nor the
+        # second response is corrupted by the first request's rename.
+        legacy_entry = dict(DEFAULT_SIGNAL)
+        legacy_entry["score"] = legacy_entry.pop("sentiment_score")
+        art = make_artifact(self._recent_iso(), signals={"MSFT": legacy_entry})
+        art["schema_version"] = 1
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC), \
+             mock.patch.object(signals_views, "_load_artifact", return_value=art):
+            first = self.client.get(URL).json()
+            second = self.client.get(URL).json()
+        self.assertIn("score", art["signals"]["MSFT"])
+        self.assertNotIn("sentiment_score", art["signals"]["MSFT"])
+        for body in (first, second):
+            self.assertEqual(body["signals"]["MSFT"]["sentiment_score"], 0.5)
+            self.assertNotIn("score", body["signals"]["MSFT"])
+
+    def test_entry_with_both_keys_keeps_v2_value_not_legacy(self):
+        # An entry somehow carrying both a v2 sentiment_score and a stray
+        # legacy score must not let the legacy value win — sentiment_score
+        # is authoritative. Distinct values so an overwrite would be caught.
+        entry = dict(DEFAULT_SIGNAL, sentiment_score=0.5, score=-0.9)
+        art = make_artifact(self._recent_iso(), signals={"MSFT": entry})
+        self._write("2026-07-06", art)
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        body = resp.json()
+        self.assertEqual(body["signals"]["MSFT"]["sentiment_score"], 0.5)
+        self.assertNotIn("score", body["signals"]["MSFT"])
+
+    def test_v2_labeled_artifact_with_stray_score_still_stripped(self):
+        # The per-entry normalizer must not be gated by the artifact-level
+        # schema_version check: a v2-labeled artifact with a stray score on
+        # one entry (e.g. a partially-migrated producer) must still have
+        # that score stripped, not just artifacts labeled schema_version 1.
+        legacy_entry = dict(DEFAULT_SIGNAL)
+        legacy_entry["score"] = legacy_entry.pop("sentiment_score")
+        art = make_artifact(self._recent_iso(), signals={"MSFT": legacy_entry})
+        art["schema_version"] = 2
+        self._write("2026-07-06", art)
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        body = resp.json()
+        self.assertEqual(body["schema_version"], 2)
+        self.assertEqual(body["signals"]["MSFT"]["sentiment_score"], 0.5)
+        self.assertNotIn("score", body["signals"]["MSFT"])
+
+    def test_pre_deploy_if_modified_since_does_not_304_into_stale_v1_body(self):
+        # IMS twin of the ETag regression below: with no If-None-Match,
+        # Django answers from If-Modified-Since alone and never consults the
+        # ETag (see test_if_modified_since_revalidates_unfiltered_but_never_
+        # filtered's comment) — so the ETag salt alone cannot stop a client
+        # that cached a pre-deploy IMS value from revalidating a 304 against
+        # a v1 artifact whose generated_at hasn't changed. A v1 artifact
+        # must not emit Last-Modified at all.
+        legacy_entry = dict(DEFAULT_SIGNAL)
+        legacy_entry["score"] = legacy_entry.pop("sentiment_score")
+        art = make_artifact(self._recent_iso(), signals={"MSFT": legacy_entry})
+        art["schema_version"] = 1
+        self._write("2026-07-06", art)
+        # A well-formed IMS value a client could have cached pre-deploy —
+        # formatted independently of the view (http_date on generated_at),
+        # not read back from a live response, since a v1 artifact no longer
+        # emits Last-Modified at all.
+        stale_ims = http_date(datetime.fromisoformat(art["generated_at"]).timestamp())
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL, HTTP_IF_MODIFIED_SINCE=stale_ims)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["signals"]["MSFT"]["sentiment_score"], 0.5)
+        self.assertNotIn("score", body["signals"]["MSFT"])
+
+    def test_pre_deploy_etag_does_not_304_into_stale_v1_body(self):
+        # Regression: a client holding an ETag computed by the pre-rename
+        # (unsalted) validator must not revalidate a 304 against an
+        # unchanged-on-disk legacy artifact — that would serve the client's
+        # cached v1 body (carrying `score`) forever, defeating the
+        # normalizer. The ETag must be salted with the wire schema version
+        # so any wire-shape change invalidates every old cache entry.
+        legacy_entry = dict(DEFAULT_SIGNAL)
+        legacy_entry["score"] = legacy_entry.pop("sentiment_score")
+        art = make_artifact(self._recent_iso(), signals={"MSFT": legacy_entry})
+        art["schema_version"] = 1
+        self._write("2026-07-06", art)
+        # What the OLD (unsalted) validator would have produced for this
+        # exact artifact, tickers-unfiltered — reconstructed independently
+        # of _etag() so this test doesn't just re-derive its own answer.
+        stale_etag = f'"{art["generated_at"]}|{art["source_items"]}|"'
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL, HTTP_IF_NONE_MATCH=stale_etag)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["signals"]["MSFT"]["sentiment_score"], 0.5)
+        self.assertNotIn("score", body["signals"]["MSFT"])

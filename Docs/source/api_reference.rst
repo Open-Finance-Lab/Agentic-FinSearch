@@ -716,19 +716,23 @@ the browser extension does not call it.
 - ``tickers=AAPL,MSFT`` — filter the ``signals`` map to those symbols.
 
 **Response (200):** the artifact JSON (schema:
-``Heartbeat/schemas/signals-v1.schema.json``) minus internal provenance
-fields, plus a computed ``staleness_hours``. Key fields: ``schema_version``,
-``profile``, ``generated_at``, ``window_hours``, ``watchlist``, ``status``
-(``ok`` | ``degraded``), ``status_reason``, ``news_overview``,
-``diagnostics``, and ``signals`` — a map of ticker →
-``{sentiment, score, rationale, headline, source, url, published, guid,
-n_articles}`` with ``score`` in ``[-1, 1]``.
+``Heartbeat/schemas/signals-v2.schema.json``) minus internal provenance
+fields, plus a computed ``staleness_hours``. Key fields: ``schema_version``
+(always ``2`` — artifacts predating the 2026-07-14 field rename are
+normalized at the boundary), ``profile``, ``generated_at``, ``window_hours``,
+``watchlist``, ``status`` (``ok`` | ``degraded``), ``status_reason``,
+``news_overview``, ``diagnostics``, and ``signals`` — a map of ticker →
+``{sentiment, sentiment_score, rationale, headline, source, url, published,
+guid, n_articles}`` with ``sentiment_score`` in ``[-1, 1]``.
 
 ``404 {"error": "no_signals"}`` when no artifact exists yet. Responses carry
 an ``ETag`` validator and ``Cache-Control: public, max-age=300``.
-``Last-Modified`` is sent only on unfiltered responses — ``tickers=``-filtered
-variants are ETag-only, so conditional requests for them must use
-``If-None-Match``.
+``Last-Modified`` is sent only on unfiltered responses whose artifact is
+already in the current wire format. ``tickers=``-filtered variants are
+ETag-only, and artifacts predating the 2026-07-14 field rename omit it as well
+— their served representation differs from the one their timestamp describes,
+which ``Last-Modified`` cannot express. Prefer ``If-None-Match`` for
+conditional requests: the ``ETag`` is always present and always correct.
 
 News Items
 ~~~~~~~~~~
@@ -749,16 +753,15 @@ batch.
 
 **Response (200):** ``{schema_version, items, count, batch}``, where ``batch``
 names the source file and each entry of ``items`` is
-``{guid, headline, url, source, published, description, tickers, score}``.
-``published`` is epoch seconds.
+``{guid, headline, url, source, published, description, tickers,
+editorial_score}``. ``published`` is epoch seconds.
 
 .. note::
 
-   ``score`` on this endpoint is the pipeline's **editorial** score — how
-   newsworthy the story is, the gate that decides which stories become
-   sentiment candidates (``SIGNALS_MIN_EDITORIAL_SCORE``). It is *not* the
-   ``[-1, 1]`` sentiment score of the same name under ``/api/signals/news/``.
-   The two fields share a name and nothing else.
+   ``editorial_score`` is the pipeline's newsworthiness score — the gate that
+   decides which stories become sentiment candidates
+   (``SIGNALS_MIN_EDITORIAL_SCORE``). It is unrelated to the ``[-1, 1]``
+   ``sentiment_score`` served by ``/api/signals/news/``.
 
 ``404 {"error": "no_items"}`` when no batch exists, or when the newest one is
 unreadable or validates to zero stories — the endpoint never falls back to an

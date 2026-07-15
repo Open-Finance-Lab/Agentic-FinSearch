@@ -9,13 +9,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import news_signals as ns
 from fake_http import FakeResponse, assert_no_resource_warnings, http_429
 
-SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "signals-v1.schema.json"
+SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "signals-v2.schema.json"
 
 # Derived from the generator's single source of truth; the schema-parity
 # test pins it against the published contract independently.
 DIAG_KEYS = list(ns.DIAGNOSTIC_FIELDS)
 SIGNAL_KEYS = [
-    "sentiment", "score", "rationale", "headline", "source", "url",
+    "sentiment", "sentiment_score", "rationale", "headline", "source", "url",
     "published", "guid", "n_articles",
 ]
 
@@ -27,7 +27,7 @@ class TestSchemaFile(unittest.TestCase):
 
     def test_schema_parses_and_pins_the_contract(self):
         schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-        self.assertEqual(schema["properties"]["schema_version"]["const"], 1)
+        self.assertEqual(schema["properties"]["schema_version"]["const"], 2)
         diag = schema["properties"]["diagnostics"]
         self.assertEqual(sorted(diag["required"]), sorted(DIAG_KEYS))
         self.assertFalse(diag.get("additionalProperties", True))
@@ -126,7 +126,7 @@ class TestFoundation(unittest.TestCase):
                     "Acme Corp STATUS ok")
 
     def test_load_config_rejects_non_positive_window_hours(self):
-        # signals-v1 schema pins window_hours minimum 1; nothing validates
+        # the signals schema pins window_hours minimum 1; nothing validates
         # artifacts at runtime, so the floor must hold at config load.
         import news_signals as ns
         for bad in ("0", "-3"):
@@ -193,7 +193,7 @@ def make_story(**over):
         "guid": "g1", "title": "Microsoft raises Azure guidance",
         "link": "https://example.com/a", "source": "Reuters",
         "published": time.time() - 3600, "description": "desc",
-        "tickers": ["MSFT"], "feeds": ["news"], "score": 5.0,
+        "tickers": ["MSFT"], "feeds": ["news"], "editorial_score": 5.0,
     }
     s.update(over)
     return s
@@ -258,8 +258,8 @@ class TestValidationGate(unittest.TestCase):
         stories = ns.validation_gate(p, 10)
         self.assertEqual([s["guid"] for s in stories], ["ok"])
 
-    def test_score_null_drops_story_not_batch(self):
-        bad = make_story(guid="bad", score=None)
+    def test_editorial_score_null_drops_story_not_batch(self):
+        bad = make_story(guid="bad", editorial_score=None)
         ok = make_story(guid="ok")
         p = write_items(self.td, [bad, ok])
         stories = ns.validation_gate(p, 10)
@@ -399,9 +399,12 @@ class TestSelection(unittest.TestCase):
 
     def test_near_dups_collapse_and_n_articles_counts_distinct(self):
         stories = [
-            make_story(guid="a", title="Microsoft raises Azure guidance", score=6.0),
-            make_story(guid="b", title="Microsoft raises Azure guidance!", score=3.0),
-            make_story(guid="c", title="Microsoft cloud momentum lifts outlook", score=4.0),
+            make_story(guid="a", title="Microsoft raises Azure guidance",
+                       editorial_score=6.0),
+            make_story(guid="b", title="Microsoft raises Azure guidance!",
+                       editorial_score=3.0),
+            make_story(guid="c", title="Microsoft cloud momentum lifts outlook",
+                       editorial_score=4.0),
         ]
         capped, n_articles, diag = ns.select_candidates(
             stories, ["MSFT"], self._cfg())
@@ -424,8 +427,8 @@ class TestSelection(unittest.TestCase):
 
     def test_editorial_gate_and_cap_order(self):
         cfg = self._cfg()
-        stories = [make_story(guid="low", score=1.0)] + [
-            make_story(guid=f"g{i}", score=3.0 + i,
+        stories = [make_story(guid="low", editorial_score=1.0)] + [
+            make_story(guid=f"g{i}", editorial_score=3.0 + i,
                        title=f"Microsoft ships product number {i} today",
                        published=time.time() - i * 60)
             for i in range(5)
@@ -582,7 +585,7 @@ class TestValidateResponse(unittest.TestCase):
                {"MSFT": {"score": 5.0, "guid": "m1", "rationale": "r"}}}
         _, signals = ns.validate_response(out, cands, n, cfg, diag)
         e = signals["MSFT"]
-        self.assertEqual(e["score"], 0.7)          # clamped to 1.0 then damped
+        self.assertEqual(e["sentiment_score"], 0.7)          # clamped to 1.0 then damped
         self.assertEqual(e["sentiment"], "bullish")
         self.assertEqual(diag["scores_damped"], 1)
         self.assertEqual(e["headline"], "Microsoft raises Azure guidance")
@@ -616,10 +619,11 @@ class TestProcessBatch(unittest.TestCase):
         llm = fake_llm_factory({"overview": "calm day", "tickers":
             {"MSFT": {"score": 0.3, "guid": "m1", "rationale": "r"}}})
         artifact = ns.process_batch(p, self.cfg, time.time(), llm=llm)
-        self.assertEqual(artifact["schema_version"], 1)
+        self.assertEqual(artifact["schema_version"], 2)
         self.assertEqual(artifact["status"], "ok")
         self.assertEqual(artifact["source_items"], p.name)
         self.assertEqual(list(artifact["signals"]), ["MSFT"])
+        self.assertNotIn("score", artifact["signals"]["MSFT"])
         d = artifact["diagnostics"]
         self.assertEqual(d["stories_total"], 2)
         self.assertEqual(d["candidates_dropped_not_subject"], 2)
@@ -650,11 +654,11 @@ class TestProcessBatch(unittest.TestCase):
         # copies of one story can never satisfy the corroboration damper.
         p = write_items(self.td, [
             make_story(guid="d1", title="Nvidia unveils next-gen GPU lineup",
-                       tickers=["NVDA"], score=6.0),
+                       tickers=["NVDA"], editorial_score=6.0),
             make_story(guid="d2", title="Nvidia unveils next-gen GPU lineup!",
-                       tickers=["NVDA"], score=5.0),
+                       tickers=["NVDA"], editorial_score=5.0),
             make_story(guid="d3", title="Nvidia unveils next-gen GPU lineup.",
-                       tickers=["NVDA"], score=4.0),
+                       tickers=["NVDA"], editorial_score=4.0),
         ])
         llm = fake_llm_factory({"overview": "o", "tickers":
             {"NVDA": {"score": 0.95, "guid": "d1", "rationale": "r"}}})
@@ -662,7 +666,7 @@ class TestProcessBatch(unittest.TestCase):
         entry = artifact["signals"]["NVDA"]
         self.assertEqual(entry["n_articles"], 1,
                           "3 near-dup copies must collapse to 1 distinct story")
-        self.assertEqual(entry["score"], 0.7,
+        self.assertEqual(entry["sentiment_score"], 0.7,
                           "under-corroborated despite 3 raw copies -> damped")
         self.assertEqual(artifact["diagnostics"]["scores_damped"], 1)
         self.assertEqual(artifact["diagnostics"]["near_dups_collapsed"], 2)

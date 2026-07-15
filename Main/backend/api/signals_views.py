@@ -33,6 +33,31 @@ logger = logging.getLogger(__name__)
 
 _PUBLIC_STRIP = ("generator", "model", "prompt_version")
 
+# The wire format the view serves. Artifacts on disk below this version are
+# normalized up to it; the wire is always this version.
+# BUMPING THIS: it now gates three things — the entry normalizer, the ETag salt,
+# and whether Last-Modified is offered at all. Raise it in lockstep with
+# news_signals.py's SCHEMA_VERSION, or artifacts written at the newer version
+# get relabelled to this one on the wire while carrying their own content.
+_SIGNALS_WIRE_SCHEMA_VERSION = 2
+
+
+def _normalize_legacy_signal_entry(entry):
+    """v1 artifacts predate the score->sentiment_score rename; rename at the
+    boundary so `score` never reaches the wire, whether the artifact is read
+    as latest or via ?as_of. `sentiment_score` wins if an entry somehow carries
+    both — the v2 name is authoritative, and the legacy key is dropped rather
+    than allowed to overwrite it. Copies — the top-level body is fresh, but
+    entry dicts are shared references into the loaded artifact and must not be
+    mutated. Non-dict entries pass through untouched (defensive)."""
+    if not isinstance(entry, dict) or "score" not in entry:
+        return entry
+    entry = dict(entry)
+    legacy = entry.pop("score")
+    entry.setdefault("sentiment_score", legacy)
+    return entry
+
+
 _AS_OF_RE = re.compile(r"\A\d{4}-\d{2}-\d{2}\Z")
 
 
@@ -136,7 +161,15 @@ def _etag(request: HttpRequest):
     # separator), and "+"-joined rather than ","-joined because Django's
     # parse_etags() rejects an ETag containing a comma (HTTP list separator).
     tickers = "+".join(quote(t, safe="") for t in _tickers_filter(request))
-    return f'"{artifact["generated_at"]}|{artifact.get("source_items", "")}|{tickers}"'
+    # Salted with the wire schema version: the artifact on disk can be
+    # byte-identical across a wire-shape change (e.g. this rename's legacy
+    # normalizer), which would otherwise leave the ETag unchanged while the
+    # served body changes — a conditional request could then 304 a client
+    # into a stale body. The salt guarantees a wire-shape bump invalidates
+    # every cached ETag, including ?as_of reads of artifacts that never
+    # change again.
+    return (f'"v{_SIGNALS_WIRE_SCHEMA_VERSION}|{artifact["generated_at"]}'
+            f'|{artifact.get("source_items", "")}|{tickers}"')
 
 
 def _last_modified(request: HttpRequest):
@@ -149,8 +182,17 @@ def _last_modified(request: HttpRequest):
     if _tickers_filter(request):
         return None
     artifact = _get_artifact(request)
-    return (datetime.fromisoformat(artifact["generated_at"])
-            if artifact else None)
+    if artifact is None:
+        return None
+    # A pre-v2 artifact's *representation* changes at the wire boundary while
+    # its generated_at does not, and Last-Modified cannot express that (Django
+    # skips the ETag entirely when If-None-Match is absent — get_conditional_
+    # response step 4), so an IMS-only revalidation would 304 a client into a
+    # stale v1 body. Artifacts the normalizer rewrites don't get the validator;
+    # native-v2 artifacts keep it. Self-retiring once every artifact is v2.
+    if artifact.get("schema_version") != _SIGNALS_WIRE_SCHEMA_VERSION:
+        return None
+    return datetime.fromisoformat(artifact["generated_at"])
 
 
 @csrf_exempt
@@ -168,6 +210,10 @@ def news_signals(request: HttpRequest) -> JsonResponse:
     if artifact is None:
         return JsonResponse({'error': 'no_signals'}, status=404)
     body = {k: v for k, v in artifact.items() if k not in _PUBLIC_STRIP}
+    body["signals"] = {t: _normalize_legacy_signal_entry(e)
+                       for t, e in (body.get("signals") or {}).items()}
+    if body.get("schema_version") != _SIGNALS_WIRE_SCHEMA_VERSION:
+        body["schema_version"] = _SIGNALS_WIRE_SCHEMA_VERSION
     generated = datetime.fromisoformat(artifact["generated_at"])
     now = datetime.now(timezone.utc)
     body["staleness_hours"] = round(
@@ -198,7 +244,7 @@ def news_signals(request: HttpRequest) -> JsonResponse:
 # SIGNALS_MAX_FILE_MB in load_config; here the same env var arrives via
 # settings.RAW_ITEMS_MAX_FILE_MB (one operator knob, two readers). The parity
 # test pins the two defaults together.
-REQUIRED_FIELDS = ("guid", "title", "link", "source", "published", "score")
+REQUIRED_FIELDS = ("guid", "title", "link", "source", "published", "editorial_score")
 FIELD_CAPS = {"title": 500, "description": 5000, "link": 2000, "source": 200, "guid": 200}
 # Required fields that must be strings. A malformed type drops the story — same
 # stance as the numeric parse in _validate_items — so a corrupt field can never
@@ -249,7 +295,7 @@ def _validate_items(path, max_file_mb=None):
                 raise ValueError(f"line {i}: missing required field {field}")
         try:
             published = float(story["published"])
-            story["score"] = float(story["score"])
+            story["editorial_score"] = float(story["editorial_score"])
         except (TypeError, ValueError):
             continue                                   # malformed numerics: drop story, keep batch
         if not (lo <= published <= hi):
@@ -278,13 +324,13 @@ def _validate_items(path, max_file_mb=None):
 # "feeds") are dropped at projection time in the view body.
 # _ITEMS_CONTRACT_FIELDS names the DISK keys (RSS-native title/link — the
 # scraper's format, validated above); _ITEMS_WIRE_RENAMES maps them to the
-# news-story v1 vocabulary the wire speaks (headline/url — the nouns the live
+# news-story vocabulary the wire speaks (headline/url — the nouns the live
 # signals endpoint already uses). Disk stays scraper-native; the API boundary
 # does the rename. Contract doc: ATL docs/integrations/finsearch-news-items.md.
 _ITEMS_CONTRACT_FIELDS = ("guid", "title", "link", "source", "published",
-                          "description", "tickers", "score")
+                          "description", "tickers", "editorial_score")
 _ITEMS_WIRE_RENAMES = {"title": "headline", "link": "url"}
-_ITEMS_SCHEMA_VERSION = 1  # news-story v1 — add fields additively; bump on breaking change
+_ITEMS_SCHEMA_VERSION = 2  # news-story v2: score -> editorial_score (2026-07-14 spec)
 
 
 def _load_items():
@@ -357,6 +403,15 @@ def _items_etag(request: HttpRequest):
     # this before the view body runs, and re-statting here would reopen the
     # TOCTOU window _load_items already closed (a batch pruned in between
     # would 500 instead of 404).
+    # Deliberately NOT salted with _ITEMS_SCHEMA_VERSION, unlike _etag above:
+    # the items rename is self-invalidating. A pre-rename batch carries the
+    # legacy `score` key and no `editorial_score` — which is in REQUIRED_FIELDS
+    # — so it trips _validate_items' batch-level poison pill and _load_items
+    # returns None, leaving both validators None: no ETag, no Last-Modified,
+    # so no 304 is reachable. No pre-rename batch is servable at all, so there
+    # is no stale-representation window for a salt to close. This holds only
+    # while items back-compat stays strict: normalize a legacy `score` at the
+    # boundary (as signals does) and old batches become servable — salt then.
     return f'"{path.name}|{mtime}|{limit or 50}"'
 
 
