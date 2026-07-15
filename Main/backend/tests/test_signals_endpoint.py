@@ -272,6 +272,25 @@ class SignalsEndpointTests(SimpleTestCase):
         self.assertEqual(filtered.status_code, 404)
         self.assertEqual(filtered.json(), {"error": "no_signals"})
 
+    def test_non_dict_signal_entry_passes_through_not_500(self):
+        # _load_artifact validates that `signals` is a dict but never each
+        # entry's type, so a corrupt entry does reach the wire normalizer.
+        # Its isinstance guard is load-bearing, and closes two separate raises
+        # — `"score" not in entry` means something different per type: on an
+        # int it is a TypeError, and on a str it is a *substring* test, so an
+        # entry that merely contains "score" slips past it into dict(entry)
+        # and raises ValueError. Either turns a corrupt artifact into a 500 on
+        # an endpoint whose every failure path is contracted to be a 404.
+        # ("garbled" pins the pass-through itself: no "score" substring, so it
+        # survives even without the guard.) Entries pass through untouched.
+        signals = {"MSFT": "garbled", "AAPL": 7, "NVDA": "high score today"}
+        art = make_artifact(self._recent_iso(), signals=signals)
+        self._write("2026-07-06", art)
+        with override_settings(SIGNALS_DIR=str(self.dir), **_HERMETIC):
+            resp = self.client.get(URL)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["signals"], signals)
+
     def test_as_of_serves_that_days_artifact(self):
         self._write("2026-07-05", make_artifact(self._recent_iso(50.0), signals={
             "MSFT": dict(DEFAULT_SIGNAL, guid="d05")}))

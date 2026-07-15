@@ -403,6 +403,15 @@ def _items_etag(request: HttpRequest):
     # this before the view body runs, and re-statting here would reopen the
     # TOCTOU window _load_items already closed (a batch pruned in between
     # would 500 instead of 404).
+    # Deliberately NOT salted with _ITEMS_SCHEMA_VERSION, unlike _etag above:
+    # the items rename is self-invalidating. A pre-rename batch carries the
+    # legacy `score` key and no `editorial_score` — which is in REQUIRED_FIELDS
+    # — so it trips _validate_items' batch-level poison pill and _load_items
+    # returns None, leaving both validators None: no ETag, no Last-Modified,
+    # so no 304 is reachable. No pre-rename batch is servable at all, so there
+    # is no stale-representation window for a salt to close. This holds only
+    # while items back-compat stays strict: normalize a legacy `score` at the
+    # boundary (as signals does) and old batches become servable — salt then.
     return f'"{path.name}|{mtime}|{limit or 50}"'
 
 
