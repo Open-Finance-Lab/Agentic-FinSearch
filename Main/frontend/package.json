@@ -22,7 +22,7 @@
     "marked": "^12.0.2"
   },
   "devDependencies": {
-    "@babel/core": "^7.25.2",
+    "@babel/core": "^8.0.1",
     "@babel/preset-env": "^7.25.3",
     "@happy-dom/global-registrator": "^20.9.0",
     "babel-loader": "^9.1.3",
