@@ -1,0 +1,124 @@
+# Scheduled dependency updates.
+#
+# Why this file exists: until it landed, the repo had NO dependabot config at all, so
+# Dependabot only ever opened *security* PRs -- the alert-driven kind. The practical
+# effect is that dependencies sat still until one became vulnerable and then jumped
+# (six such PRs between 2026-06 and 2026-07, e.g. #265 requests, #303 tornado, #363
+# dompurify). That is the worst of both worlds: no routine drift control, and every
+# actual bump arrives as an urgent one on a version gap nobody has been watching.
+# Scheduled version-updates keep each step small and individually reviewable, so the
+# security PRs that still fire land on top of a current tree instead of a stale one.
+#
+# All of these are now gated pre-merge: backend-deploy.yml gained a pull_request
+# trigger and runs `uv sync --locked` + Django checks + verify_deployment.py + the
+# image build + pytest, so a bump that breaks resolution or the image fails the PR
+# rather than the production deploy.
+#
+# Grouping policy: minor+patch collapse into one PR per ecosystem per run (that is the
+# bulk of the volume and it is rarely worth reviewing separately); majors stay
+# ungrouped so each lands on its own reviewable diff. Security updates ignore grouping
+# config and keep arriving individually, which is what we want.
+version: 2
+updates:
+  # ---- Python: backend (uv) --------------------------------------------------------
+  # The lockfile is authoritative: Main/backend/Dockerfile installs with `uv sync
+  # --frozen` and CI now asserts freshness with `uv sync --locked`, so Dependabot
+  # regenerating uv.lock here is exactly the input the image is built from.
+  - package-ecosystem: "uv"
+    directory: "/Main/backend"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      backend-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ---- JavaScript: frontend (npm) --------------------------------------------------
+  # NOTE: Main/frontend has package.json but NO committed lockfile, so Dependabot edits
+  # the manifest ranges only and installs stay non-reproducible. Committing a lockfile
+  # is a separate change (see the PR body's follow-ups) -- not folded in here, because
+  # generating one is a large diff that deserves its own review.
+  - package-ecosystem: "npm"
+    directory: "/Main/frontend"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      frontend-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ---- Python: concierge (pip / requirements.txt) ----------------------------------
+  - package-ecosystem: "pip"
+    directory: "/Concierge"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      concierge-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ---- Python: docs toolchain (requirements_sphinx.txt at repo root) ---------------
+  # Docs-only deps, but they are fully pinned (==) and pull in jinja2//urllib3-class
+  # transitives that do get advisories, so they should not be left to rot.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      docs-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ---- Container base images -------------------------------------------------------
+  # ⚠ COUPLING, read before merging any bump here: Main/backend/Dockerfile is
+  # `FROM mcr.microsoft.com/playwright/python:v1.58.0-jammy` and sets
+  # PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1, so the browsers baked into the BASE IMAGE are
+  # the only ones present -- their version must track the `playwright>=1.58.0,<2` pin
+  # in Main/backend/pyproject.toml. A base-image bump merged ALONE desyncs the two and
+  # breaks browser launch at runtime. Pair it with the pyproject/uv.lock bump in the
+  # same PR. The pre-cutover BOOT_CHECK_ONLY gate in backend-deploy.yml exercises a real
+  # browser launch and aborts before cutover if they disagree, so the failure mode is a
+  # blocked deploy rather than a broken prod -- but the fix is still to pair them.
+  - package-ecosystem: "docker"
+    directories:
+      - "/Main/backend"
+      - "/Main/frontend"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "build(deps)"
+
+  # ---- GitHub Actions --------------------------------------------------------------
+  # Every `uses:` in this repo is SHA-pinned with a trailing `# vX.Y.Z` comment
+  # (supply-chain hardening -- a tag can be re-pointed, a SHA cannot). Dependabot
+  # understands that convention: it bumps the SHA and rewrites the version comment,
+  # so the pinning survives its PRs.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"

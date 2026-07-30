@@ -12,6 +12,18 @@ on:
     paths:
       - "Main/backend/**"
       - ".github/workflows/backend-deploy.yml"
+  # Same allowlist on PRs, so backend changes are validated BEFORE merge instead of
+  # by the deploy pipeline after it. Without this the build/test jobs ran only on
+  # push-to-main: a bad lockfile or Dockerfile surfaced as a FAILED PRODUCTION
+  # DEPLOY, not a red PR (dependabot bumps merged on a lone neutral CodeQL check --
+  # #265 is the worked example). The deploy job is ref-gated to main and the
+  # GHCR-writing steps are event-gated below, so a PR run validates and pushes
+  # nothing. Matches the pull_request triggers the sibling heartbeat/concierge
+  # suites already carry.
+  pull_request:
+    paths:
+      - "Main/backend/**"
+      - ".github/workflows/backend-deploy.yml"
   workflow_dispatch:
 
 env:
@@ -47,9 +59,18 @@ jobs:
       - name: Install Python ${{ env.PYTHON_VERSION }}
         run: uv python install ${{ env.PYTHON_VERSION }}
 
+      # --locked, NOT --frozen. The two are not synonyms and the difference is a real
+      # gap that already bit this repo: --frozen installs from uv.lock without checking
+      # it still matches pyproject.toml, so a dependency edit committed without a relock
+      # builds an image from STALE resolutions and CI stays green. --locked asserts the
+      # lock is up to date and fails loudly if not. Evidence it was silent: uv.lock
+      # carried fingpt-backend 0.13.3 while pyproject.toml said 0.15.0 (two version
+      # bumps landed unrelocked) until a dependabot regeneration incidentally corrected
+      # it in #265. The Dockerfile deliberately keeps --frozen: by the time it runs, this
+      # step has already validated the very lock it copies in.
       - name: Sync backend dependencies
         working-directory: ${{ env.BACKEND_DIR }}
-        run: uv sync --frozen --python ${{ env.PYTHON_VERSION }}
+        run: uv sync --locked --python ${{ env.PYTHON_VERSION }}
 
       - name: Run Django system checks
         working-directory: ${{ env.BACKEND_DIR }}
@@ -69,7 +90,13 @@ jobs:
           echo "main_tag=${IMAGE_ID}:main" >> "$GITHUB_OUTPUT"
           echo "latest_tag=${IMAGE_ID}:latest" >> "$GITHUB_OUTPUT"
 
+      # Registry writes are push/dispatch-only. A PR run stops at "does it build?" --
+      # it must never publish a :main or :latest tag that the droplet could pull, and a
+      # fork PR's GITHUB_TOKEN is read-only anyway, so an unconditional login would just
+      # fail the job. The image build itself DOES run on PRs: catching a broken
+      # Dockerfile or an uninstallable lock is most of the value of gating pre-merge.
       - name: Log in to GHCR
+        if: ${{ github.event_name != 'pull_request' }}
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772  # v3.4.0
         with:
           registry: ${{ env.REGISTRY }}
@@ -87,13 +114,19 @@ jobs:
             ${{ env.BACKEND_DIR }}
 
       - name: Push backend image
+        if: ${{ github.event_name != 'pull_request' }}
         run: |
           docker push ${{ steps.meta.outputs.sha_tag }}
           docker push ${{ steps.meta.outputs.main_tag }}
           docker push ${{ steps.meta.outputs.latest_tag }}
 
+      # Skipped on PRs for a hard reason, not just symmetry: RepoDigests is populated by
+      # the PUSH, so this inspect returns an empty list and the index errors out when
+      # nothing was pushed. The empty `digest` output that results is harmless -- its
+      # only consumer is the deploy job, which is ref-gated to main.
       - name: Capture pushed image digest
         id: digest
+        if: ${{ github.event_name != 'pull_request' }}
         run: |
           DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ steps.meta.outputs.sha_tag }})
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
@@ -114,9 +147,11 @@ jobs:
       - name: Install Python ${{ env.PYTHON_VERSION }}
         run: uv python install ${{ env.PYTHON_VERSION }}
 
+      # --locked for the same reason as the build job: this suite must run against the
+      # dependency set pyproject.toml actually asks for, not a stale pin.
       - name: Sync backend dependencies
         working-directory: ${{ env.BACKEND_DIR }}
-        run: uv sync --frozen --python ${{ env.PYTHON_VERSION }}
+        run: uv sync --locked --python ${{ env.PYTHON_VERSION }}
 
       - name: Run backend tests
         working-directory: ${{ env.BACKEND_DIR }}
