@@ -1,4 +1,4 @@
-discord.py>=2.4,<3
+discord.py>=2.7.1,<3
 aiohttp>=3.9,<4               # direct dep: finsearch_client uses aiohttp.ClientSession itself,
                              # not only transitively via discord.py — declare it explicitly
 # dev/test
