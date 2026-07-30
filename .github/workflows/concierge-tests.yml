@@ -86,7 +86,7 @@ jobs:
         if: ${{ steps.deploy-gate.outputs.enabled == 'true' }}
         # SHA-pinned (supply-chain): this action receives the prod SSH deploy key, so a
         # moved/compromised tag must not be able to redirect it. 334f925 == v0.1.10.
-        uses: appleboy/ssh-action@334f9259f2f8eb3376d33fa4c684fff373f2c2a6
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         env:
           REPO: ${{ github.repository }}
           COMMIT_SHA: ${{ github.sha }}
