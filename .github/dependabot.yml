@@ -14,10 +14,28 @@
 # image build + pytest, so a bump that breaks resolution or the image fails the PR
 # rather than the production deploy.
 #
-# Grouping policy: minor+patch collapse into one PR per ecosystem per run (that is the
-# bulk of the volume and it is rarely worth reviewing separately); majors stay
-# ungrouped so each lands on its own reviewable diff. Security updates ignore grouping
-# config and keep arriving individually, which is what we want.
+# Update policy: minor+patch collapse into one PR per ecosystem per run (that is the
+# bulk of the volume and it is rarely worth reviewing separately). MAJORS ARE IGNORED
+# and must be raised deliberately, one at a time, by someone who has read the upstream
+# changelog.
+#
+# That last rule is not caution for its own sake. When this file first landed it opened
+# 21 PRs in a single run (#365-#385) -- the whole accumulated backlog of a repo that had
+# never had scheduled version updates -- and the majors in that batch included
+# actions/checkout 4->7, @babel/core 7->8, gunicorn 25->26 and appleboy/ssh-action
+# 0.1->1.2. Ten of them showed green checks, which is the dangerous part: green here
+# means "resolves and builds", not "safe to ship". The deploy job is skipped on PRs, so
+# a bump to the deploy action itself is never exercised pre-merge, and merging any
+# Main/backend/** change pushes to the droplet. The eight frontend/docs PRs had no CI at
+# all (no lockfile -- see #386 -- and no frontend suite), so they looked identical to a
+# validated one.
+#
+# This costs nothing on the security side. `ignore` and `open-pull-requests-limit` are
+# VERSION-update options only: security updates are exempt from both and keep arriving
+# individually, majors included. Grouping does not apply to them either.
+#
+# To take a major deliberately: `@dependabot reopen` on the closed PR, or drop the
+# ignore entry for that one dependency and let the next run raise it.
 version: 2
 updates:
   # ---- Python: backend (uv) --------------------------------------------------------
@@ -28,9 +46,13 @@ updates:
     directory: "/Main/backend"
     schedule:
       interval: "monthly"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     commit-message:
       prefix: "build(deps)"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
     groups:
       backend-minor-patch:
         update-types:
@@ -46,9 +68,16 @@ updates:
     directory: "/Main/frontend"
     schedule:
       interval: "monthly"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     commit-message:
       prefix: "build(deps)"
+    # Majors matter most here of all six: with no lockfile and no frontend CI, an npm
+    # bump is reviewed by reading the diff and nothing else. #379/#380 (@babel 7->8)
+    # would have merged on a bare NEUTRAL check.
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
     groups:
       frontend-minor-patch:
         update-types:
@@ -63,6 +92,10 @@ updates:
     open-pull-requests-limit: 3
     commit-message:
       prefix: "build(deps)"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
     groups:
       concierge-minor-patch:
         update-types:
@@ -79,6 +112,10 @@ updates:
     open-pull-requests-limit: 3
     commit-message:
       prefix: "build(deps)"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
     groups:
       docs-minor-patch:
         update-types:
@@ -104,6 +141,16 @@ updates:
     open-pull-requests-limit: 3
     commit-message:
       prefix: "build(deps)"
+    # The major-ignore below does NOT protect the coupling described above: the base
+    # image moves in the v1.MINOR.0-jammy line, so a playwright bump arrives as a MINOR
+    # and is raised normally. #365 (v1.58.0 -> v1.61.0) is the worked example -- it
+    # failed CI, correctly, because the pyproject pin had not moved with it. Expect that
+    # class of PR to keep coming and to need manual pairing; the red check is the
+    # reminder, not a bug.
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
 
   # ---- GitHub Actions --------------------------------------------------------------
   # Every `uses:` in this repo is SHA-pinned with a trailing `# vX.Y.Z` comment
@@ -117,6 +164,10 @@ updates:
     open-pull-requests-limit: 3
     commit-message:
       prefix: "build(deps)"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
     groups:
       actions-minor-patch:
         update-types:
