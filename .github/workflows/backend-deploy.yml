@@ -51,7 +51,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Set up uv
         uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
@@ -97,7 +97,7 @@ jobs:
       # Dockerfile or an uninstallable lock is most of the value of gating pre-merge.
       - name: Log in to GHCR
         if: ${{ github.event_name != 'pull_request' }}
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772  # v3.4.0
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -139,7 +139,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Set up uv
         uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
