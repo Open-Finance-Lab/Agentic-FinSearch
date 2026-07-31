@@ -1,14 +1,14 @@
 # Deployment Automation
 
-The `Backend CI and Deploy` workflow (`.github/workflows/backend-deploy.yml`) turns pushes to `main` into a tested container image plus an optional restart of the Fedora droplet (`fedora-agentic-finsearch-beta-1`). The flow:
+The `Backend CI and Deploy` workflow (`.github/workflows/backend-deploy.yml`) runs on pull requests and on pushes to `main`, both filtered to the same paths (`Main/backend/**` and the workflow file itself). A pull request run **validates only**; a push to `main` validates, publishes the image, and optionally restarts the Fedora droplet (`fedora-agentic-finsearch-beta-1`). The flow:
 
 1. Checks out this repo and installs Python `3.12` with `uv`.
-2. Runs `uv sync --frozen`, `uv run python manage.py check`, and `uv run python manage.py test` inside `Main/backend`.
-3. Builds the backend container with the Dockerfile in `Main/backend/` and pushes three tags to GHCR:
+2. Runs `uv sync --locked`, `uv run python manage.py check`, and `uv run python manage.py test` inside `Main/backend`. `--locked` rather than `--frozen`: it fails if `uv.lock` has drifted from `pyproject.toml`, instead of quietly building from stale resolutions. `Main/backend/Dockerfile` still uses `--frozen`, correctly — by the time it runs, this step has already validated the very lock it copies in.
+3. Builds the backend container with the Dockerfile in `Main/backend/`. On pushes to `main` and on `workflow_dispatch` it then pushes three tags to GHCR — **pull request runs stop after the build and publish nothing**:
    - `ghcr.io/<owner>/<repo>-backend:${GITHUB_SHA}`
    - `ghcr.io/<owner>/<repo>-backend:main`
    - `ghcr.io/<owner>/<repo>-backend:latest`
-4. Uses SSH to reach `deploy@agenticfinsearch.org`, pulls the `:main` tag with `podman`, and restarts the user-level systemd unit `fingpt-api`.
+4. Uses SSH to reach `deploy@agenticfinsearch.org`, pulls the `:main` tag with `podman`, and restarts the user-level systemd unit `fingpt-api`. This job is ref-gated to `main`, so it never runs for a pull request.
 
 ## Required GitHub secrets
 
