@@ -694,7 +694,7 @@ requires-dist = [
     { name = "gunicorn", specifier = ">=25.0.0,<26" },
     { name = "mammoth", marker = "sys_platform == 'darwin'", specifier = ">=1.9.0,<2" },
     { name = "markdown", specifier = ">=3.10.0,<4" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.26.0,<2" },
+    { name = "mcp", extras = ["cli"], specifier = ">=1.28.1,<2" },
     { name = "numpy", specifier = ">=2.2.0,<3" },
     { name = "openai", specifier = ">=2.20.0,<3" },
     { name = "openai-agents", specifier = ">=0.8.3,<1" },
