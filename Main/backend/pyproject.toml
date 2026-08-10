@@ -6,7 +6,7 @@ authors = [{ name = "FinGPT Team" }]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "beautifulsoup4>=4.14.0,<5",
-    "django>=6.0.7,<7",
+    "django>=6.1,<7",
     "google==3.0.0",
     "markdown>=3.10.0,<4",
     "numpy>=2.2.0,<3",
