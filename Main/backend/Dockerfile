@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright/python:v1.58.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.62.0-jammy
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     software-properties-common \
