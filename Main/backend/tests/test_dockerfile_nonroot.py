@@ -513,6 +513,30 @@ class DeployUserNamespaceTests(SimpleTestCase):
         # and the /app/runtime mount.
         self.assertIn("--read-only", self._execstart_line())
 
+    def test_execstart_healthcheck_matches_dockerfile(self):
+        # podman drops the Dockerfile HEALTHCHECK from OCI-format images (what
+        # `docker build` on ubuntu-26.04 emits), so the serving unit carries its own
+        # --health-* flags. They must mirror the Dockerfile directive exactly, or the
+        # two definitions drift. ExecStart-only: the gate (a throwaway foreground
+        # run) must not carry them -- the closed asymmetry list.
+        df = re.search(
+            r"HEALTHCHECK\s+--interval=(\S+)\s+--timeout=(\S+)\s+--start-period=(\S+)"
+            r"\s+--retries=(\d+)\s+\\\s*\n\s*CMD (.+?) \|\| exit 1",
+            _read(DOCKERFILE),
+        )
+        self.assertIsNotNone(df, "Dockerfile HEALTHCHECK not found / unparseable")
+        interval, timeout, start, retries, cmd = df.groups()
+        line = self._execstart_line()
+        # systemd unquotes \" in the heredoc output; undo that to compare.
+        m = re.search(r'--health-cmd "((?:[^"\\]|\\.)*)"', line)
+        self.assertIsNotNone(m, "ExecStart podman run has no --health-cmd")
+        self.assertEqual(m.group(1).replace('\\"', '"'), cmd)
+        self.assertIn(f"--health-interval={interval}", line)
+        self.assertIn(f"--health-timeout={timeout}", line)
+        self.assertIn(f"--health-start-period={start}", line)
+        self.assertIn(f"--health-retries={retries}", line)
+        self.assertNotIn("--health-", self._gate_line())
+
     def test_entrypoint_boot_check_branch_structure(self):
         # Structural sentinel for the BOOT_CHECK_ONLY branch in entrypoint.sh: it
         # must probe EVERY writable surface (the fail-SOFT MCP-child $HOME writes
