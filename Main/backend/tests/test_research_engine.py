@@ -102,7 +102,7 @@ async def test_executor_routes_numerical_to_mcp():
 
     with patch("datascraper.research_engine._try_mcp_search", new_callable=AsyncMock, return_value="$152.34") as mcp_mock, \
          patch("datascraper.research_engine._web_search", new_callable=AsyncMock) as web_mock:
-        executor = ResearchExecutor(model="gpt-5.2-chat-latest", message_list=[], preferred_urls=[])
+        executor = ResearchExecutor(model="gpt-5.4-mini", message_list=[], preferred_urls=[])
         results = await executor.execute(plan)
 
     assert len(results) == 1
@@ -125,7 +125,7 @@ async def test_executor_falls_back_to_web_on_mcp_failure():
 
     with patch("datascraper.research_engine._try_mcp_search", new_callable=AsyncMock, return_value=None), \
          patch("datascraper.research_engine._web_search", new_callable=AsyncMock, return_value=("Revenue was $94.9B", [{"url": "https://yahoo.com"}])):
-        executor = ResearchExecutor(model="gpt-5.2-chat-latest", message_list=[], preferred_urls=[])
+        executor = ResearchExecutor(model="gpt-5.4-mini", message_list=[], preferred_urls=[])
         results = await executor.execute(plan)
 
     assert results[0]["source"] == "web"
@@ -145,7 +145,7 @@ async def test_executor_routes_qualitative_to_web():
 
     with patch("datascraper.research_engine._try_mcp_search", new_callable=AsyncMock) as mcp_mock, \
          patch("datascraper.research_engine._web_search", new_callable=AsyncMock, return_value=("Analysts say...", [{"url": "https://cnbc.com"}])):
-        executor = ResearchExecutor(model="gpt-5.2-chat-latest", message_list=[], preferred_urls=[])
+        executor = ResearchExecutor(model="gpt-5.4-mini", message_list=[], preferred_urls=[])
         results = await executor.execute(plan)
 
     mcp_mock.assert_not_called()
@@ -165,7 +165,7 @@ async def test_executor_skips_analytical():
 
     with patch("datascraper.research_engine._try_mcp_search", new_callable=AsyncMock) as mcp_mock, \
          patch("datascraper.research_engine._web_search", new_callable=AsyncMock) as web_mock:
-        executor = ResearchExecutor(model="gpt-5.2-chat-latest", message_list=[], preferred_urls=[])
+        executor = ResearchExecutor(model="gpt-5.4-mini", message_list=[], preferred_urls=[])
         results = await executor.execute(plan)
 
     mcp_mock.assert_not_called()
@@ -239,7 +239,7 @@ async def test_synthesizer_combines_results():
     mock_response.choices[0].message.content = "AAPL revenue was $94.9B, MSFT was $64.7B. AAPL grew 8% vs MSFT 12%."
 
     with patch("datascraper.research_engine._call_synthesis", new_callable=AsyncMock, return_value=mock_response):
-        synth = Synthesizer(model="gpt-5.2-chat-latest")
+        synth = Synthesizer(model="gpt-5.4-mini")
         text = await synth.synthesize(
             original_query="Compare AAPL and MSFT revenue",
             results=[
@@ -269,7 +269,7 @@ async def test_run_iterative_simple_query_bypasses():
         result = await run_iterative_research(
             user_input="What is AAPL price?",
             message_list=[],
-            model="gpt-5.2-chat-latest",
+            model="gpt-5.4-mini",
         )
 
     # Should return None to signal "use existing single-search path"
@@ -318,7 +318,7 @@ async def test_run_iterative_full_loop():
         result = await run_iterative_research(
             user_input="Compare AAPL and MSFT prices",
             message_list=[],
-            model="gpt-5.2-chat-latest",
+            model="gpt-5.4-mini",
         )
 
     assert result is not None
@@ -362,7 +362,7 @@ async def test_streaming_simple_query_yields_nothing():
         items = await _collect_stream(run_iterative_research_streaming(
             user_input="What is AAPL price?",
             message_list=[],
-            model="gpt-5.2-chat-latest",
+            model="gpt-5.4-mini",
         ))
 
     # Only the initial "Analyzing query" status should be yielded before bypass
@@ -411,7 +411,7 @@ async def test_streaming_status_event_format():
         items = await _collect_stream(run_iterative_research_streaming(
             user_input="Complex multi-ticker query",
             message_list=[],
-            model="gpt-5.2-chat-latest",
+            model="gpt-5.4-mini",
         ))
 
     status_events = [(t, e) for t, e in items if t is None]
@@ -462,7 +462,7 @@ async def test_streaming_phases_in_order():
         items = await _collect_stream(run_iterative_research_streaming(
             user_input="Compare AAPL and MSFT revenue",
             message_list=[],
-            model="gpt-5.2-chat-latest",
+            model="gpt-5.4-mini",
         ))
 
     labels = [e["label"] for t, e in items if t is None]
@@ -515,7 +515,7 @@ async def test_streaming_sources_before_synthesis():
         items = await _collect_stream(run_iterative_research_streaming(
             user_input="Latest AAPL earnings news",
             message_list=[],
-            model="gpt-5.2-chat-latest",
+            model="gpt-5.4-mini",
         ))
 
     # Find indices of source delivery and first synthesis content

@@ -19,6 +19,7 @@ from .models_config import (
     PROVIDER_CONFIGS,
     get_model_config,
     get_provider_config,
+    get_research_config,
     validate_model_support
 )
 from .preferred_links_manager import get_manager
@@ -335,7 +336,7 @@ def _prepare_advanced_search_inputs(model: str, preferred_links: list[str] | Non
         logging.warning(f"No config found for model {model}, using as-is")
 
     if not is_responses_api_available(actual_model):
-        fallback_model = "gpt-5.2-chat-latest"
+        fallback_model = get_research_config()["research_model"]
         logging.warning(f"Model '{actual_model}' (resolved from '{model}') DOES NOT support Responses API")
         logging.info(f"FALLBACK: Using '{fallback_model}' for web search instead")
         actual_model = fallback_model

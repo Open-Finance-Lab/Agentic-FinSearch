@@ -54,7 +54,7 @@ def _envelope_tool_output(tool: FunctionTool) -> FunctionTool:
 
     return replace(tool, on_invoke_tool=wrapped)
 
-USER_ONLY_MODELS = {"o3-mini", "o1-mini", "o1-preview", "gpt-5-mini", "gpt-5.1-chat-latest"}
+USER_ONLY_MODELS = {"o3-mini", "o1-mini", "o1-preview", "gpt-5-mini", "gpt-5.4-nano"}
 
 
 async def _gemini_error_hook(response: httpx.Response):

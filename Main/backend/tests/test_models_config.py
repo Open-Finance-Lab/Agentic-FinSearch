@@ -32,6 +32,6 @@ def test_validate_model_support_fails_safe_on_ambiguous_model_name():
     assert validate_model_support("FinGPT", "mcp") is True
     assert validate_model_support("FinSearch-Trader", "mcp") is False
     # A unique model_name (no direct sibling) still resolves via reverse lookup.
-    assert validate_model_support("gpt-5.1-chat-latest", "mcp") is True
+    assert validate_model_support("gpt-5.4-nano", "mcp") is True
     # Unknown identifiers stay unsupported.
     assert validate_model_support("no-such-model", "mcp") is False

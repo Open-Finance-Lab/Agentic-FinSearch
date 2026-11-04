@@ -6,7 +6,7 @@ Central configuration for all supported LLM models.
 MODELS_CONFIG = {
     "FinGPT-Light": {
         "provider": "openai",
-        "model_name": "gpt-5.1-chat-latest",
+        "model_name": "gpt-5.4-nano",
         "supports_mcp": True,
         "supports_advanced": True,
         "max_tokens": 128000,
@@ -108,7 +108,7 @@ def validate_model_support(model_id: str, feature: str) -> bool:
     """Check if a model supports a specific feature (e.g., mcp, advanced).
 
     Accepts either a display name ('FinGPT') or a resolved model name
-    ('gpt-5.2-chat-latest', 'gemini-3-flash-preview'). When a model_name is
+    ('gpt-5.4-nano', 'gemini-3-flash-preview'). When a model_name is
     shared by several entries, resolution fails SAFE onto a `direct` (no-tools)
     entry — see the reverse-lookup note below.
     """
@@ -130,7 +130,11 @@ def validate_model_support(model_id: str, feature: str) -> bool:
 
 RESEARCH_CONFIG = {
     "planner_model": "gpt-5-mini",
-    "research_model": "gpt-5.2-chat-latest",
+    # Also the web-search fallback for models without Responses API support
+    # (datascraper._prepare_advanced_search_inputs). OpenAI retires *-chat-latest
+    # aliases without notice (5.1 and 5.2 both 404'd 2026-11) — re-verify with a
+    # real call, since models.list still shows retired names.
+    "research_model": "gpt-5.4-mini",
     "max_iterations": 3,
     "max_sub_questions": 5,
     "parallel_searches": True,
