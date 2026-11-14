@@ -49,8 +49,8 @@ updates:
     open-pull-requests-limit: 3
     commit-message:
       prefix: "build(deps)"
-    # Beyond the blanket major-ignore, three packages are held out of the grouped PR.
-    # #408 bundled all three into one 25-package PR that failed the image build and
+    # Beyond the blanket major-ignore, these packages are held out of the grouped PR.
+    # #408 bundled the first three into one 25-package PR that failed the image build and
     # could not be merged without hand surgery, so the other 22 bumps were stuck too:
     #   playwright    -- must equal the Dockerfile FROM tag (see the docker block's
     #                    COUPLING note). Bumped only by hand, together with the base
@@ -59,6 +59,9 @@ updates:
     #                    deprecated two releases back; held on 6.0.x, taken deliberately.
     #   sec-edgar-mcp -- 1.1.0 ships 9 tools with empty descriptions and stale-period
     #                    metrics; held on 1.0.x until upstream fixes it.
+    #   openai        -- >=2.45 breaks openai-agents 0.9.x (every agent run raises a
+    #                    ValidationError; unit tests mock it and stay green). #449 is
+    #                    the worked example. Lift together with an openai-agents bump.
     # pyproject.toml caps each of them as well, so a manual `uv lock --upgrade` cannot
     # drift them either. Security updates bypass `ignore`, as noted at the top.
     ignore:
@@ -72,6 +75,9 @@ updates:
       - dependency-name: "sec-edgar-mcp"
         update-types:
           - "version-update:semver-minor"
+      - dependency-name: "openai"
+        versions:
+          - ">=2.45.0"
     groups:
       backend-minor-patch:
         update-types:
