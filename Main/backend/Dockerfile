@@ -51,11 +51,16 @@ RUN mkdir -p /app/staticfiles /app/media /app/logs /tmp/fingpt_cache /app/runtim
 
 RUN ln -sf /ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell /usr/bin/chromium-bundled
 
-# Verify Playwright browsers are accessible
+# Verify the base image ships the EXACT browser revision the locked playwright package
+# expects. The package resolves its own revision-specific path (chromium-NNNN), so this
+# fails on a FROM-tag / `playwright==` pin mismatch. The old `test -d chromium_*` glob
+# matched whatever revision the image shipped and passed on exactly that mismatch (#408).
 RUN echo "Verifying Playwright browsers..." && \
     ls -la /ms-playwright/ && \
-    test -d /ms-playwright/chromium_headless_shell-* && \
-    echo "✓ Chromium browser found at /ms-playwright"
+    python -c "import os; from playwright.sync_api import sync_playwright; \
+p = sync_playwright().start(); path = p.chromium.executable_path; p.stop(); \
+assert os.path.exists(path), f'playwright expects {path}, absent from the base image: the FROM tag and the playwright== pin in pyproject.toml must match'; \
+print('✓ Chromium browser found at', path)"
 
 # Create the non-root runtime user and own ONLY the writable runtime dirs.
 # The application source under /app stays root-owned so a compromised process cannot

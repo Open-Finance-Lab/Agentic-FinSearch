@@ -6,14 +6,16 @@ authors = [{ name = "FinGPT Team" }]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "beautifulsoup4>=4.14.0,<5",
-    "django>=6.0.7,<7",
+    # Held on the 6.0.x line: a Django feature release removes APIs deprecated two
+    # releases back, so it is taken deliberately, not via the grouped minor/patch PR
+    # (.github/dependabot.yml ignores django minors). 6.0 security support ends April 2027.
+    "django>=6.0.8,<6.1",
     "google==3.0.0",
     "markdown>=3.10.0,<4",
     "numpy>=2.2.0,<3",
     "openai>=2.20.0,<3",
     "openai-agents>=0.8.3,<1",
     "anthropic>=0.79.0,<1",
-    "tiktoken>=0.12.0,<0.13",
     "requests>=2.32.5,<3",
     "redis>=5.0,<7",
     "pytz>=2025.1,<2027",
@@ -27,14 +29,16 @@ dependencies = [
     "fastmcp>=2.14.5,<4",
     "gunicorn>=25.0.0,<26",
     "whitenoise>=6.6.0,<7",
-    "sec-edgar-mcp>=0.1.0",
-    "Django>=6.0.5,<7 ; sys_platform == 'win32'",
-    "Django>=6.0.5,<7 ; sys_platform == 'darwin'",
-    "Django>=6.0.5,<7 ; sys_platform == 'linux'",
-    "Django>=6.0.5,<7 ; sys_platform != 'win32' and sys_platform != 'darwin' and sys_platform != 'linux'",
+    # <1.1: 1.1.0 swaps edgartools for sec-edgar-toolkit and registers 9 of its 21
+    # tools with EMPTY descriptions (f-string "docstrings" leave __doc__ None), and its
+    # get_key_metrics mixes stale XBRL periods (AAPL: 2018 revenue beside 2026 net income).
+    "sec-edgar-mcp>=1.0.8,<1.1",
     "mammoth>=1.9.0,<2 ; sys_platform == 'darwin'",
     "yfinance>=0.2.51",
-    "playwright>=1.64.1,<2",
+    # Exact pin, must equal the Dockerfile FROM tag (mcr.microsoft.com/playwright/python
+    # vX.Y.Z-jammy): the browsers come from the base image (PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD),
+    # so a package/image mismatch cannot launch Chromium. Bump both in the same PR.
+    "playwright==1.64.1",
     "tradingview-ta>=3.3.0",
     "tradingview-screener>=3.0.0",
     "psutil>=7.0.0,<8",

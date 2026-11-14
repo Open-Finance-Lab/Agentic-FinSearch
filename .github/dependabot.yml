@@ -49,10 +49,29 @@ updates:
     open-pull-requests-limit: 3
     commit-message:
       prefix: "build(deps)"
+    # Beyond the blanket major-ignore, three packages are held out of the grouped PR.
+    # #408 bundled all three into one 25-package PR that failed the image build and
+    # could not be merged without hand surgery, so the other 22 bumps were stuck too:
+    #   playwright    -- must equal the Dockerfile FROM tag (see the docker block's
+    #                    COUPLING note). Bumped only by hand, together with the base
+    #                    image, when the docker PR arrives (#443 is the worked example).
+    #   django        -- a minor here is a Django FEATURE release that removes APIs
+    #                    deprecated two releases back; held on 6.0.x, taken deliberately.
+    #   sec-edgar-mcp -- 1.1.0 ships 9 tools with empty descriptions and stale-period
+    #                    metrics; held on 1.0.x until upstream fixes it.
+    # pyproject.toml caps each of them as well, so a manual `uv lock --upgrade` cannot
+    # drift them either. Security updates bypass `ignore`, as noted at the top.
     ignore:
       - dependency-name: "*"
         update-types:
           - "version-update:semver-major"
+      - dependency-name: "playwright"
+      - dependency-name: "django"
+        update-types:
+          - "version-update:semver-minor"
+      - dependency-name: "sec-edgar-mcp"
+        update-types:
+          - "version-update:semver-minor"
     groups:
       backend-minor-patch:
         update-types:
@@ -124,14 +143,16 @@ updates:
 
   # ---- Container base images -------------------------------------------------------
   # ⚠ COUPLING, read before merging any bump here: Main/backend/Dockerfile is
-  # `FROM mcr.microsoft.com/playwright/python:v1.58.0-jammy` and sets
+  # `FROM mcr.microsoft.com/playwright/python:vX.Y.Z-jammy` and sets
   # PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1, so the browsers baked into the BASE IMAGE are
-  # the only ones present -- their version must track the `playwright>=1.58.0,<2` pin
-  # in Main/backend/pyproject.toml. A base-image bump merged ALONE desyncs the two and
-  # breaks browser launch at runtime. Pair it with the pyproject/uv.lock bump in the
-  # same PR. The pre-cutover BOOT_CHECK_ONLY gate in backend-deploy.yml exercises a real
-  # browser launch and aborts before cutover if they disagree, so the failure mode is a
-  # blocked deploy rather than a broken prod -- but the fix is still to pair them.
+  # the only ones present -- their version must equal the exact `playwright==X.Y.Z`
+  # pin in Main/backend/pyproject.toml. A base-image bump merged ALONE desyncs the two
+  # and breaks browser launch. Pair it with the pyproject/uv.lock bump in the same PR
+  # (`uv lock --upgrade-package playwright==X.Y.Z`; #443 did exactly this). The image
+  # build fails on a mismatch (its one-time Chromium launch names the required image),
+  # and the pre-cutover BOOT_CHECK_ONLY gate in backend-deploy.yml backs that up, so
+  # the failure mode is a red PR rather than a broken prod. The uv block above ignores
+  # playwright, so this docker PR is the only automatic signal for a new version.
   - package-ecosystem: "docker"
     directories:
       - "/Main/backend"
