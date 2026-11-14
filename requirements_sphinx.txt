@@ -1,7 +1,7 @@
 nbsphinx==0.9.8
 nbsphinx-link==1.4.1
 sphinx-autobuild==2024.10.3
-sphinx_design==0.7.0
+sphinx_design==0.8.0
 sphinx-rtd-theme==3.1.0
 sphinxcontrib-applehelp==2.0.0
 sphinxcontrib-devhelp==2.0.0
