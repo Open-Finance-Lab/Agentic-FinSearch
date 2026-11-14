@@ -42,7 +42,7 @@ dependencies = [
     # Exact pin, must equal the Dockerfile FROM tag (mcr.microsoft.com/playwright/python
     # vX.Y.Z-jammy): the browsers come from the base image (PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD),
     # so a package/image mismatch cannot launch Chromium. Bump both in the same PR.
-    "playwright==1.65.1",
+    "playwright==1.65.2",
     "tradingview-ta>=3.3.0",
     "tradingview-screener>=3.0.0",
     "psutil>=7.0.0,<8",
